@@ -1,0 +1,77 @@
+# ============================================================
+# AI 求职助手 —— 仓库忽略规则
+#
+# 原则：只提交「源码 + 构建脚本 + 文档」，
+#       依赖、构建产物、本地数据（含登录 cookie）一律不入库。
+# ============================================================
+
+# ---------- 依赖 ----------
+node_modules/
+.pnpm-store/
+.yarn/
+
+# ---------- 构建产物 ----------
+# 前端构建输出（vite build 生成；cargo tauri build 会重新生成）
+web/dist/
+# PyInstaller 输出（backend/dist/aja-backend.exe）
+dist/
+build/
+# 内嵌用后端副本（build.bat 从 backend/dist 复制，约 63 MB）
+backend-exe/
+# Tauri sidecar 目录（旧方案残留）
+backend-sidecar/
+# Rust 编译产物（含 64 MB 的 exe，整个目录 2 GB+）
+target/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage.xml
+htmlcov/
+
+# ---------- 本地运行数据（严禁入库）----------
+# data/ 里有 SQLite 数据库（含 Boss 登录 cookie）与 241 MB 的 Chrome profile
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+browser-profile/
+
+# ---------- 日志 ----------
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------- 编辑器 / 系统 ----------
+.idea/
+.vscode/
+!.vscode/extensions.json
+*.iml
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- 临时文件 ----------
+*.tmp
+*.bak
+*.orig
+*.rej
+tmp/
+temp/
