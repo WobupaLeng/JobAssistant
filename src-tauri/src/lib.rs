@@ -282,17 +282,27 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(BackendPort(Mutex::new(0)))
         .manage(BackendProcess(Mutex::new(None)))
+        .manage(InstanceLock(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![commands::get_backend_port, commands::get_data_dir])
         .setup(|app| {
             // 浏览器由后端拉起（Chrome 子进程挂在后端下面），
             // 任务管理器里对着 aja-backend.exe「结束任务」会把浏览器一起带走，
             // 两边状态对不上就只能重启程序——所以这里禁止多开。
+            // 注意：锁文件句柄必须活到进程结束。这里早先把它当作局部变量，
+            // setup 一返回句柄就 drop，锁被立即释放，多开其实根本没拦住；
+            // 现在存进 managed state，由应用生命周期持有。
             if let Ok(dir) = app.path().app_local_data_dir() {
                 let _ = std::fs::create_dir_all(&dir);
-                if let Err(e) = single_instance(&dir.join("app.lock")) {
-                    crash_log("tauri", &format!("禁止多开：{e}"));
-                    // 已经有实例在跑：直接退出，别再起第二个后端
-                    std::process::exit(0);
+                match single_instance(&dir.join("app.lock")) {
+                    Ok(lock) => {
+                        // 锁句柄交给 managed state，保证活到进程退出
+                        app.manage(InstanceLock(Mutex::new(Some(lock))));
+                    }
+                    Err(e) => {
+                        crash_log("tauri", &format!("禁止多开：{e}"));
+                        // 已经有实例在跑：直接退出，别再起第二个后端
+                        std::process::exit(0);
+                    }
                 }
             }
             match spawn_backend() {
@@ -324,6 +334,10 @@ pub fn run() {
             std::process::exit(1);
         });
 }
+
+/// 单实例锁的持有者：把 File 放进 Tauri 的 managed state，避免 setup 结束就释放。
+#[allow(dead_code)]
+struct InstanceLock(Mutex<Option<std::fs::File>>);
 
 /// 单实例锁：用独占方式打开 lock 文件，进程退出时系统自动释放。
 #[cfg(windows)]

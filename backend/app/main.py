@@ -269,46 +269,58 @@ class Runtime:
 
     # ---------- 采集线程（patchright 的唯一宿主）----------
     def _worker_loop(self) -> None:
-        while True:
-            task = self._task.get()
-            if task is None:
-                return
-            fn, args = task
+        # 采集线程只用一个常驻 greenlet 干活：patchright 的同步 API 会把状态
+        # 绑在「当前 greenlet / 事件循环」上，每个任务换一个新 greenlet 会让
+        # 已启动的浏览器变成「失效」。
+        from greenlet import greenlet as _greenlet
+
+        def _runner():
+            while True:
+                task = self._task.get()
+                if task is None:
+                    return
+                self._run_task(task)
+
+        _main_g = _greenlet(_runner)
+        _main_g.switch()
+
+    def _run_task(self, task) -> None:
+        fn, args = task
+        try:
+            self._worker_label = getattr(fn, "__wrapped_label__", None) or getattr(fn, "__name__", "任务")
+            self._worker_t0 = time.time()
+        except Exception:
+            pass
+        # run_in_worker 投递的是内部包装函数 _wrap，直接打名字只会得到
+        # 「采集线程开始执行：_wrap」，看不出在干什么。这里用 label 说清楚
+        # 具体在做什么，同时在后台记一条 DEBUG 级的来源，便于对照。
+        label = getattr(fn, "__wrapped_label__", None) or getattr(fn, "__name__", "任务")
+        if label != "_wrap":
             try:
-                self._worker_label = getattr(fn, "__wrapped_label__", None) or getattr(fn, "__name__", "任务")
-                self._worker_t0 = time.time()
+                self.log("info", f"开始：{label}")
             except Exception:
                 pass
-            # run_in_worker 投递的是内部包装函数 _wrap，直接打名字只会得到
-            # 「采集线程开始执行：_wrap」，看不出在干什么。这里用 label 说清楚
-            # 具体在做什么，同时在后台记一条 DEBUG 级的来源，便于对照。
-            label = getattr(fn, "__wrapped_label__", None) or getattr(fn, "__name__", "任务")
-            if label != "_wrap":
-                try:
-                    self.log("info", f"开始：{label}")
-                except Exception:
-                    pass
-            t0 = time.time()
+        t0 = time.time()
+        try:
+            fn(*args)
+        except BaseException as exc:  # 单条任务出任何问题都不能把采集线程打死
             try:
-                fn(*args)
-            except BaseException as exc:  # 单条任务出任何问题都不能把采集线程打死
+                self.log("error", f"失败：{label} —— {exc}")
+            except Exception:
+                pass
+        else:
+            cost = time.time() - t0
+            if cost >= 3 and label != "_wrap":
                 try:
-                    self.log("error", f"失败：{label} —— {exc}")
+                    self.log("info", f"完成：{label}（{cost:.1f}s）")
                 except Exception:
                     pass
-            else:
-                cost = time.time() - t0
-                if cost >= 3 and label != "_wrap":
-                    try:
-                        self.log("info", f"完成：{label}（{cost:.1f}s）")
-                    except Exception:
-                        pass
-            finally:
-                try:
-                    self._worker_label = ""
-                    self._worker_t0 = 0.0
-                except Exception:
-                    pass
+        finally:
+            try:
+                self._worker_label = ""
+                self._worker_t0 = 0.0
+            except Exception:
+                pass
 
     def worker_busy(self) -> tuple[str, float]:
         """采集线程当前在忙什么、忙了多久。空闲返回 ("", 0)。"""
@@ -324,7 +336,15 @@ class Runtime:
 
     # ---------- 常驻 patchright 浏览器 ----------
     def run_in_worker(self, fn, *args, timeout: float = 180.0):
-        """把 fn(*args) 投递到采集线程执行并等结果（浏览器只能在该线程里碰）。"""
+        """把 fn(*args) 投递到采集线程执行并等结果（浏览器只能在该线程里碰）。
+
+        ⚠️ 只能在 HTTP 请求线程里调用。采集线程的 greenlet 是长期活着的状态机，
+        从它内部再往自己队列塞任务并阻塞等待必然死锁/破坏状态。
+        """
+        if threading.current_thread() is getattr(self, "worker_thread", None):
+            raise RuntimeError(
+                "内部错误：run_in_worker 不能在采集线程里再投递任务（会把浏览器状态搞坏）"
+            )
         box = {}
         done = threading.Event()
 
@@ -348,6 +368,19 @@ class Runtime:
         """给登录线程用：在采集线程里拿到（必要时启动）浏览器上下文。"""
         return self.run_in_worker(self.ensure_browser)
 
+    def reset_browser(self, reason: str = "") -> None:
+        """浏览器/上下文已经废掉时调用：整个关掉，下次 ensure_browser 重新拉起。
+
+        patchright 的同步 API 绑在采集线程的 event loop 上。底层 Chrome 被外部杀掉
+        （手动关窗口、任务管理器结束、崩溃）之后，光把 _ctx 置空是不够的：
+        必须连 playwright 一起 stop，否则再 start() 会报
+        `Playwright Sync API inside the asyncio loop` / `Event loop is closed`。
+        """
+        if reason:
+            self.log("warn", f"浏览器不可用，重新拉起：{reason}")
+        with self._pw_lock:
+            self._shutdown_browser_locked()
+
     def ensure_browser(self):
         """返回常驻的 patchright 持久化上下文，必要时启动。
 
@@ -362,14 +395,30 @@ class Runtime:
             if self._ctx is not None:
                 from .browser import context_alive
 
-                if context_alive(self._ctx):
+                # 探活会真的往浏览器发一次请求。页面正在跳转 / 加载时它可能
+                # 偶尔超时，如果据此就把好好的连接拆掉重建，整个 driver 的
+                # event loop 会被搞坏（之后全是 "Event loop is closed"）。
+                # 所以：正常的跨任务复用完全不探活，只在浏览器「真的关过」
+                # （ctx.pages 抛错，即 CDP 连接已断）时才重建；其余情况信上一次。
+                try:
+                    _ = self._ctx.pages
+                except Exception:
+                    self.log("warn", "浏览器连接已断开（窗口被关掉或进程退出），重新启动")
+                    self._shutdown_browser_locked()
+                else:
                     return self._ctx
-                self.log("warn", "浏览器已失效（窗口被关闭或连接断开），重新启动")
-                self._shutdown_browser_locked()
             from patchright.sync_api import sync_playwright
 
             from .browser import launch_context
 
+            # 之前残留的 playwright 连接必须先停，否则重复 start() 会报
+            # "Playwright Sync API inside the asyncio loop"
+            if self._pw is not None:
+                try:
+                    self._pw.stop()
+                except Exception:
+                    pass
+                self._pw = None
             self._pw = sync_playwright().start()
             try:
                 self._ctx = launch_context(self._pw, app_data_dir(), self.log)
@@ -1202,11 +1251,15 @@ def login_start(req: LoginReq) -> dict[str, Any]:
     # 里 ensure_browser()，之后采集线程再用就会报
     # "RuntimeError: no running event loop"。
     # 所以这里只登记登录会话，真正的启动交给采集线程 rt.worker()。
+    # 登录会话本身就跑在采集线程里（rt.submit(sess.start)），所以这里的
+    # start_browser / step_runner 必须是**直连**的：再用 run_in_worker 投递
+    # 会变成「采集线程往自己的队列塞任务并死等」——永远等不到，还会把
+    # greenlet / 浏览器状态搞坏。直连即可，因为本来就在正确的线程上。
     sess = LoginSession(
         plat, app_data_dir(), rt.log,
-        get_context=None,
-        start_browser=rt.ensure_browser_on_worker,  # 已自带一次 run_in_worker 投递
-        step_runner=rt.run_in_worker,               # 其余每步都投递到采集线程
+        get_context=rt.ensure_browser,
+        start_browser=rt.ensure_browser,
+        step_runner=lambda fn, *a: fn(*a),
     )
     rt.logins[plat] = sess
     try:
@@ -1396,7 +1449,7 @@ def logs(since: float = 0.0) -> dict[str, Any]:
 _CHAT_STATE: dict[str, Any] = {"ok": None, "error": "", "ts": 0.0}
 
 
-def _run_chat(fn, timeout: float = 45.0):
+def _run_chat(fn, timeout: float = 120.0):
     """把聊天任务投递到采集线程，按「有没有进展」而不是「总耗时」判超时。
 
     patchright 的 sync API 只能在采集线程里用，而 BOSS 聊天页经常一卡就是几十秒
@@ -1422,10 +1475,20 @@ def _run_chat(fn, timeout: float = 45.0):
 
     _wrap.__wrapped_label__ = label
     rt.submit(_wrap)
+    # 注意：这里的 timeout 是「宽限总时长」，实际判死看的是有没有进展。
+    # 新建会话要经历「岗位详情页 → 立即沟通 → 跳回聊天页 → 刷新列表 → 再点开」
+    # 五个完整的页面加载，几十秒很正常，不能拿固定时长当死线。
     deadline = time.time() + timeout
+    started = time.time()
+    # 有过活动就说明任务在推进，把宽限再往后顺延（最多再给同样的时长）
+    progress_extended = False
     while not done.wait(0.4):
         last, budget = rt.chat.activity()
         limit = budget if budget > 0 else 30.0
+        if last and not progress_extended and time.time() > deadline:
+            progress_extended = True
+            deadline = time.time() + timeout
+            rt.log("info", f"{label} 仍在推进（已 {int(time.time() - started)} 秒），继续等待")
         # 浏览器在同一时刻只能给一个任务用。抓取/打分正在用时消息任务是在排队，
         # 这不是卡死，只能提示「等一下」，绝不能报「浏览器可能卡住了」。
         busy_label, busy_for = rt.worker_busy()
@@ -1442,13 +1505,24 @@ def _run_chat(fn, timeout: float = 45.0):
                 )
             continue
         if last and time.time() - last > limit + 15:
+            # 页面彻底没动静了，多半是浏览器句柄已经废了，丢给下面重开
             raise RuntimeError(
                 "Boss 消息页没有响应（浏览器可能卡住了），请稍后重试或重启程序"
             )
         if time.time() > deadline:
-            raise RuntimeError("Boss 消息页响应太慢（可能需要重新登录），请稍后重试")
+            spent = int(time.time() - started)
+            raise RuntimeError(
+                f"{label} 超过 {spent} 秒还没有结果（页面加载太慢或网络异常）。"
+                "可以在浏览器窗口里看看当前页面停在哪儿"
+            )
     if "err" in box:
-        raise box["err"]
+        err = box["err"]
+        msg = str(err)
+        # 浏览器句柄被外部杀掉后，patchright 会抛这类错误，且永远不会自己恢复
+        if "Event loop is closed" in msg or "Playwright already stopped" in msg or "Target page, context or browser has been closed" in msg:
+            rt.reset_browser(msg)
+            raise RuntimeError("浏览器窗口已关闭或崩溃，下次操作会自动重新打开，请稍后重试") from err
+        raise err
     return box.get("res")
 
 
@@ -1588,7 +1662,7 @@ def auto_greet_one(req: AutoGreetReq) -> dict[str, Any]:
                 return rt.chat.start_conversation(rt.ensure_browser(), {"encrypt_job_id": ejid}, ejid)
             _new.__chat_label__ = "自动打招呼：主动建立会话（岗位详情页「立即沟通」）"
             try:
-                res = _run_chat(_new, timeout=120.0)
+                res = _run_chat(_new, timeout=240.0)
                 target = res.get("friend") or None
             except Exception as exc:
                 return {"ok": False, "stage": "find",
@@ -1799,7 +1873,7 @@ def chat_open(req: ChatOpenReq) -> dict[str, Any]:
             ), rt.chat.friends(ctx, force=False)
 
         _do.__chat_label__ = f"查找 {req.brand or ''} 的 HR 会话".strip()
-        friend, friends = _run_chat(_do)
+        friend, friends = _run_chat(_do, timeout=120.0)
         if friend:
             return {"ok": True, "found": True, "friend": friend}
 
@@ -1816,7 +1890,7 @@ def chat_open(req: ChatOpenReq) -> dict[str, Any]:
                 return rt.chat.start_conversation(ctx2, seed, ejid)
 
             _start.__chat_label__ = f"主动联系 {req.brand or '该岗位'} 的 HR 并建立会话"
-            res = _run_chat(_start, timeout=120.0)
+            res = _run_chat(_start, timeout=240.0)
             return {
                 "ok": True,
                 "found": True,

@@ -350,7 +350,9 @@ export default function App() {
         force_new: forceNew,
       })
       if (r.ok && r.friend) {
+        // 新会话刚建好时 uid 是这次才拿到的，强制让聊天面板重新定位并刷新列表
         setChatFocusUid(String(r.friend.uid))
+        setRefreshTick((t) => t + 1)
         if (r.created) {
           setErr('')
           setAutoMsg(`已向 ${j.company || '该公司'} 的 HR 发起沟通，右侧可以直接发消息`)

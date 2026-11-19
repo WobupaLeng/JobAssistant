@@ -4,6 +4,28 @@
 
 ---
 
+## 2026-11-19（傍晚）Boss 主动发起会话 · 采集线程与事件循环大修 · 自动打招呼实跑
+
+### 本轮做了什么
+- **主动发起会话**：`BossChat.start_conversation()` 走「岗位详情页 → `a.btn-startchat`（立即沟通）→ 跳聊天页 → 读选中的 HR → 刷新列表 → 再点开」。返回 `{ok, uid, friend, created}`，前端「打招呼」按钮（`openJobChat(j, true)`）和 `POST /api/auto-greet/one` 都走这条路，用户不需要先在 Boss 上手点。
+- **uid 来源**：会话行 DOM 上**没有任何 uid 属性**，`data-v-*` 只是 Vue 作用域标记。改成从 Vue 实例链取：`__vueParentComponent` / `__vue__.$parent` 的 `props.friend/item/data/info` 里读 `{name, uid}`（`_selected_uid()`）。
+- **自动打招呼实跑通过**：真实账号上连发两条（明岩 8.3s、邝女士 9.0s/1095 token），随后自动建立下一个岗位的会话。顶栏开关 → 逐条取待投递 → 生成话术 → 发送 → 标记已投递 → 20s±5s 再来。
+- **token 三项**：右上角「累计 / 模型打分 / 打招呼」；模型配置小窗可编辑提示词与技能。
+
+### 踩过的坑（全部是真 bug，按严重程度排）
+1. **`page.on("response")` 回调里调 `resp.text()` 会把 driver 连接搞断**。报 `Connection closed while reading from the driver`，之后所有操作变成 `Event loop is closed` / `Playwright Sync API inside the asyncio loop`，「浏览器卡住」误报不断。改法：监听器只把 resp 塞进队列（`self._signals`），正文在主流程里 `_drain()` 读。
+2. **每个任务起一个新 greenlet 会让已启动的浏览器失效**。改成一个常驻 greenlet 循环取任务；`run_in_worker` 加自检，禁止在采集线程里再投递。
+3. **`_poll` / `_wait_items` 不打活动时间戳**，30 秒活动上限把「正常但慢」的流程判死 → 触发浏览器重建 → driver 断开。现在每次轮询都 `_touch()`。
+4. **`_chat_page` 缓存页停在岗位详情页**：`start_conversation` 点完「立即沟通」后页面已不是 `/web/geek/chat`，但仍被当缓存页复用 → 监听器挂不上 → 27 秒超时。现在发现路径不符就重新导航。
+5. **`friends(force=True)` 的 reload 会把刚选中的会话清掉**，导致「会话建好了但界面空白」。现在先读 uid 再刷新列表再点开。
+6. **单实例锁的 File 是局部变量**，`setup` 返回就 drop，锁实际没生效。改成放进 managed state。
+7. **`_run_chat` 的固定总超时**会把长流程误判成「可能需要重新登录」。改成默认 120 秒，只要还在推进就顺延一次。
+8. **进程被外部关掉浏览器后，后端会一直报「事件循环已关闭」**。新增 `Runtime.reset_browser()`，遇到 `Event loop is closed` / `Target closed` / `Playwright already stopped` 就丢掉上下文，下次操作自动重开。
+
+### 待办
+- 打包版启动约 20 秒后主进程会自行退出，暂未查明（已确认不是多开锁：`crash.log` 里没有「禁止多开」记录）。下一步在 `run()` 的 `run(...)` 返回值里加退出原因记录。
+- 自动打招呼的「每日投递上限」目前沿用抓取上限，是否单独配置待定。
+
 ## 2026-11-19（下午·七次）「打招呼」= 主动发起会话
 
 用户反馈：「我点击打招呼按钮，说明我正在主动发起请求，这时候应该新建一个与该 hr 的会话」，

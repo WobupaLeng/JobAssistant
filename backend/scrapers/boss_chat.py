@@ -259,6 +259,9 @@ class BossChat:
         self._filler: Callable[[str, dict[str, Any]], Any] | None = None
         # 可重入 + 只记「最后一次活动时间」：外部看门狗据此判断是否卡死
         self._lock = threading.RLock()
+        # 响应监听器攒下的信号：key -> [(resp, handler, on_fail)]
+        self._sig_lock = threading.Lock()
+        self._signals: dict[str, list] = {}
         self._act_lock = threading.Lock()
         self._last_act = 0.0
         self._budget = 0.0
@@ -291,6 +294,14 @@ class BossChat:
 
     def _chat_page(self, ctx):
         """返回聊天页；必要时从现有页面导航过去。"""
+        # 勾选了「立即沟通」之类的中途路径后，缓存的 _page 可能停在详情页上。
+        # 只要它已经不在聊天页，就重新走一遍导航（同时确保监听器都挂好了）。
+        if self._page is not None:
+            try:
+                if not self._page.is_closed() and "/web/geek/chat" not in (self._page.url or ""):
+                    self._page = None
+            except Exception:
+                self._page = None
         if self._page is not None:
             try:
                 if not self._page.is_closed():
@@ -392,34 +403,78 @@ class BossChat:
             return
         self._msgs[uid] = (time.time(), msgs)
 
-    @staticmethod
-    def _catch(page, key: str, handler: Callable[[str], None], tag: str,
-               on_fail: Callable[[str], None] | None = None) -> None:
-        """给 page 挂一个响应监听：URL 含 key 时把响应体交给 handler。
+    def _catch(self, page, key: str, handler: Callable[[str], None], tag: str,
+               on_fail: Callable[[str], None] | None = None) -> Any:
+        """给 page 挂一个响应监听：URL 含 key 时记下响应，正文由主流程再读。
 
-        handler 里只做解析和存内存，不做任何等待，避免阻塞 patchright 事件流。
+        ⚠️ 监听器是在 playwright 自己的调度栈里被回调的，**绝不能在里面调用
+        resp.text() 之类的阻塞 API**：从我们自己的 greenlet 状态机发起的调用
+        解析不了，会把 driver 连接整个搞断（`Response.text: Connection closed
+        while reading from the driver`），之后所有请求都变成
+        `Event loop is closed` / `Playwright Sync API inside the asyncio loop`。
+        所以这里只把响应对象记下来，正文留到调用方在主流程里读。
         """
-
         def _on_response(resp):
             try:
                 if key not in resp.url:
                     return
                 if resp.status != 200:
-                    if on_fail:
-                        on_fail(f"HTTP {resp.status} {resp.url}")
+                    try:
+                        if on_fail:
+                            on_fail(f"HTTP {resp.status} {resp.url}")
+                    except Exception:
+                        pass
                     return
-                handler(resp.text())
-            except Exception as exc:
-                if on_fail:
-                    on_fail(f"{type(exc).__name__}: {exc}")
-                self.log("warn", f"{tag} 响应解析失败：{type(exc).__name__}: {exc}") if hasattr(self, "log") else None
+                with self._sig_lock:
+                    self._signals.setdefault(key, []).append((resp, handler, on_fail))
+                self._sig_hits = getattr(self, "_sig_hits", 0) + 1
+            except Exception:
+                # 监听器里绝不能抛异常：抛出去会被 playwright 的调度器吞掉并连带
+                # 弄坏整个连接。
+                pass
 
+        listeners = getattr(self, "_listeners", None)
+        if listeners is None:
+            listeners = self._listeners = {}
+        # 同一个 key 在同一个 page 上只挂一次：重复挂会让 patchright 的回调栈越积越深
+        reg = (id(page), key)
+        if reg in listeners:
+            try:
+                page.remove_listener("response", listeners[reg])
+            except Exception:
+                pass
+        listeners[reg] = _on_response
         page.on("response", _on_response)
         return _on_response
+
+    def _drain(self, key: str | None = None, tag: str = "") -> int:
+        """在主流程里把监听器攒下的响应正文读出来交给 handler。返回处理条数。"""
+        with self._sig_lock:
+            if key is None:
+                keys = list(self._signals.keys())
+            else:
+                keys = [key] if key in self._signals else []
+            batches = [(k, self._signals.pop(k)) for k in keys]
+        n = 0
+        for _k, items in batches:
+            for resp, handler, on_fail in items:
+                try:
+                    handler(resp.text())
+                    n += 1
+                except Exception as exc:
+                    if on_fail:
+                        try:
+                            on_fail(f"{type(exc).__name__}: {exc}")
+                        except Exception:
+                            pass
+        return n
 
     def _wait_friends(self, page, ctx, timeout_s: float = 25.0) -> None:
         t0 = time.time()
         while time.time() - t0 < timeout_s:
+            # 监听器只负责攒信号，正文在这里（主流程）读
+            self._touch()
+            self._drain("getGeekFriendList", "列表")
             if self._friends:
                 return
             try:
@@ -452,10 +507,47 @@ class BossChat:
             return []
         return [(r["i"], (r.get("name") or "").strip(), r.get("text") or "") for r in rows]
 
+    @staticmethod
+    def _selected_uid(page) -> tuple[str, str]:
+        """从页面自己的 Vue 数据里读出「当前选中的会话」的 (HR 名字, uid)。
+
+        BOSS 的会话行 DOM 上不带 uid，而 HR 名字又常重复（列表里有 3 个「李女士」），
+        所以只能问页面自身：会话行是 Vue 组件，实例的 props 上挂着 uid / encryptJobId。
+        只读不写。
+        """
+        try:
+            out = page.evaluate(
+                r"""() => {
+                    const rows = [...document.querySelectorAll('.user-list-content ul li')];
+                    const sel = rows.find((el) => el.querySelector('.selected, .active')) || rows[0];
+                    if (!sel) return null;
+                    for (let depth = 0, node = sel; depth < 5 && node; depth++, node = node.parentElement) {
+                        const inst = node.__vueParentComponent || (node.__vue__ && node.__vue__.$parent);
+                        if (!inst) continue;
+                        for (let up = 0, cur = inst; up < 6 && cur; up++, cur = cur.parent) {
+                            const p = cur.props || {};
+                            for (const key of ['friend', 'item', 'data', 'info']) {
+                                const f = p[key];
+                                if (f && (f.uid || f.encryptUid)) {
+                                    return { name: String(f.name || ''), uid: String(f.uid || '') };
+                                }
+                            }
+                        }
+                    }
+                    return null;
+                }"""
+            )
+        except Exception:
+            return "", ""
+        if not out:
+            return "", ""
+        return str(out.get("name") or ""), str(out.get("uid") or "")
+
     def _wait_items(self, page, need: bool = True, timeout_s: float = 12.0) -> int:
         """等会话列表渲染出条目（点开会话后列表要重新出现才能继续点）。"""
         t0 = time.time()
         while True:
+            self._touch()
             n = 0
             try:
                 n = page.locator(SEL_ITEM).count()
@@ -475,6 +567,9 @@ class BossChat:
             if force or not self._friends or not fresh:
                 self._friends = []
                 self._friends_at = 0.0
+                # 先清掉上一轮攒下的旧信号，否则会把旧列表当新数据
+                with self._sig_lock:
+                    self._signals.pop("getGeekFriendList", None)
                 self._catch(page, "getGeekFriendList", self._on_friends, "friends")
                 try:
                     page.evaluate("() => { const l = document.querySelector('.label-list li'); if (l) l.click(); }")
@@ -529,6 +624,7 @@ class BossChat:
             dom: list[dict[str, Any]] = []
             dom_at = 0.0
             while time.time() - t0 < 10:
+                self._drain("historyMsg", "消息")
                 cur = self._msgs.get(key)
                 if cur and cur[0] > before:
                     out = [normalize_message(m, self._my_id) for m in cur[1]]
@@ -613,19 +709,21 @@ class BossChat:
                 return f
         return None
 
-    @staticmethod
-    def _poll(page, cond, timeout_ms: int = 1500, step_ms: int = 60) -> bool:
+    def _poll(self, page, cond, timeout_ms: int = 1500, step_ms: int = 60) -> bool:
         """条件一成立就立刻返回（不再无脑固定等待）。
 
         条件可以是 JS 表达式字符串，也可以是无参可调用对象。
+        每轮都 touch 一次，让看门狗知道页面在推进，不会误判成卡死。
         """
         deadline = time.time() + timeout_ms / 1000.0
         while time.time() < deadline:
+            self._touch()
             try:
                 ok = page.evaluate(cond) if isinstance(cond, str) else cond()
             except Exception:
                 ok = False
             if ok:
+                self._touch()
                 return True
             page.wait_for_timeout(step_ms)
         return False
@@ -715,106 +813,148 @@ class BossChat:
         """还没和这位 HR 聊过时，用岗位详情页的「立即沟通」主动建会话。
 
         Boss 的规则：只有对方在会话列表里出现过，才能点开聊天框。没打过招呼的新岗位
-        没有会话，必须先在详情页点「立即沟通」——点完会跳进聊天页并把他加进列表。
-        **只建会话，不发送任何内容**（打招呼由调用方决定发不发）。
+        没有会话，必须先在详情页点「立即沟通」——点完 BOSS 会自己跳到聊天页并选中他。
+
+        **关键：只建会话，不发任何内容。** 也**不刷新会话列表**：刚建好的会话在
+        BOSS 自己的页面上已经选中了，这边再去 reload 反而会把它清空（以前就是这么
+        丢的）。列表缓存里补一条，让后续 send/发简历能直接按 uid 找到。
         返回：{"ok": True, "uid": ..., "friend": {...}, "created": True}
         """
         title = (friend or {}).get("name") or (friend or {}).get("brand") or "该 HR"
-        with self._lock, self._activity(60.0):
+        with self._lock, self._activity(90.0):
             page = self._chat_page(ctx)
             ejid = (encrypt_job_id or (friend or {}).get("encrypt_job_id") or "").strip()
             if not ejid:
                 raise ChatError(f"拿不到岗位 ID，没法主动联系「{title}」")
-            # 已经在会话列表里就不用再建
-            key = str((friend or {}).get("uid") or "")
-            live = self._raw_friend(key) if key else None
+            # 会话列表里已经有 → 直接打开就行
+            key0 = str((friend or {}).get("uid") or "")
+            live = self._raw_friend(key0) if key0 else None
             if live is not None:
                 self._open_conversation(page, live)
-                return {"ok": True, "uid": key, "friend": live, "created": False}
+                return {"ok": True, "uid": key0, "friend": live, "created": False}
 
-            on_resp = self._catch(page, "friendsList", self._on_friends, "start")
+            self.log("info", f"主动发起会话：打开岗位详情页 {ejid}")
+            page.goto(self._job_detail_url(ejid), wait_until="domcontentloaded", timeout=40000)
+            self._touch()
+            if not self._poll(page, "!!document.querySelector('.job-op .btn-startchat, a.btn-startchat')",
+                              timeout_ms=20000, step_ms=150):
+                raise ChatError("岗位详情页上没有出现「立即沟通」按钮（页面没加载完或岗位已下线）")
+            btn = page.locator(".job-op .btn-startchat, a.btn-startchat").first
             try:
-                page.goto(self._job_detail_url(ejid), wait_until="domcontentloaded", timeout=40000)
-                # 等详情页把「立即沟通」渲染出来
-                self._poll(page, "!!document.querySelector('.job-op .btn-startchat, a.btn-startchat')",
-                           timeout_ms=15000, step_ms=150)
-                btn = page.locator(".job-op .btn-startchat, a.btn-startchat").first
-                try:
-                    btn.wait_for(state="visible", timeout=8000)
-                    btn.click(timeout=15000)
-                except Exception as exc:
-                    raise ChatError(f"岗位详情页上没点到「立即沟通」（{exc}）") from exc
-                # 点完会跳到聊天页，并自动选中这位 HR
-                self._poll(page, "location.pathname.indexOf('/web/geek/chat') >= 0 && !!document.querySelector('#chat-input, ' + "
-                                 "JSON.stringify('.chat-conversation'))", timeout_ms=20000, step_ms=200)
-                if "/web/geek/chat" not in (page.url or ""):
-                    raise ChatError("点了「立即沟通」但没有进入聊天页，可能是账号被限制或页面加载失败")
-                # 等会话区出现这位 HR 的标题
-                self._poll(page, "!!document.querySelector('.chat-conversation .name-text, .chat-conversation')",
-                           timeout_ms=15000, step_ms=200)
-                self._page = page
-            finally:
-                try:
-                    page.remove_listener("response", on_resp)
-                except Exception:
-                    pass
+                btn.click(timeout=15000)
+            except Exception as exc:
+                raise ChatError(f"没点到「立即沟通」（{exc}）") from exc
+            self._touch()
+            self.log("info", "点了「立即沟通」，等待进入聊天页")
 
-            # 点完「立即沟通」后，先从 DOM 里把刚选中会话的 HR 名字读出来
-            # （此时聊天区还开着，刷新列表就会把它清掉）
-            opened_name = ""
+            # 点完 BOSS 会自己跳 /web/geek/chat 并选中这位 HR
+            ok = self._poll(
+                page,
+                "(function(){var p=location.pathname||'';var t=document.querySelector('.chat-conversation .name-text');"
+                "return p.indexOf('/web/geek/chat')>=0 && !!t && !!t.innerText.trim();})()",
+                timeout_ms=30000,
+                step_ms=200,
+            )
+            self._page = page
+            name = ""
             try:
-                opened_name = page.locator(".chat-conversation .name-text").first.inner_text(timeout=2000).strip()
+                name = page.locator(".chat-conversation .name-text").first.inner_text(timeout=3000).strip()
             except Exception:
-                opened_name = ""
-            self._opened_name = opened_name
+                name = ""
+            if not ok and not name:
+                raise ChatError("点了「立即沟通」但没进到聊天页（可能被风控拦截，或岗位已不存在）")
+            self.log("info", f"会话已建立：{name or title}")
 
-            # 列表刷新后把这位 HR 的真实条目找回来（uid 这里最可靠）
+            # 先趁会话还选中着，从页面数据里读出 uid（刷新列表会把它清掉）
+            sel_name, sel_uid = self._selected_uid(page)
+            if sel_uid:
+                self.log("info", f"会话已建立：{sel_name or name}（uid={sel_uid}）")
+                if not key0:
+                    key0 = sel_uid
+                if not name:
+                    name = sel_name
+
+            # 会话行的 DOM 上没有 uid，只能从 friendList 接口拿。
+            # 刚建的会话 BOSS 会把它放到列表最前面，所以刷新一次列表 + 按名字匹配即可：
+            # 刷新会清空右侧选中的会话，所以拿到 uid 之后必须再点开一次。
+            uid = key0
+            saved_friend = None
+            matching = []
             self._friends_at = 0.0
             try:
                 self.friends(ctx, force=True)
-            except Exception:
-                pass
-            found = self._raw_friend(key) if key else None
-            if found is None:
-                want = (friend or {}).get("name") or ""
-                brand = (friend or {}).get("brand") or ""
-                for f in self._friends:
-                    if want and f.get("name") == want and (not brand or f.get("brand") == brand):
-                        found = f
-                        break
-            if found is None:
+            except Exception as exc:
+                self.log("warn", f"建会话后刷新列表失败（不影响会话本身）：{exc}")
+            # 先按岗位 ID 精确找（同名 HR 很多，比如列表里有 3 个「李女士」）
+            if not uid:
+                by_job = [f for f in self._friends if (f.get("encrypt_job_id") or "") == ejid]
+                if by_job:
+                    uid = str(by_job[0].get("uid") or "")
+                    saved_friend = by_job[0]
+            if name:
+                matching = [f for f in self._friends if (f.get("name") or "") == name]
+            if not saved_friend and len(matching) == 1:
+                uid = str(matching[0].get("uid") or "")
+                saved_friend = matching[0]
+            elif not uid:
+                # 名字重名 / 刷新没回来：按 ejid 找，再退化到 DOM 推断
                 for f in self._friends:
                     if (f.get("encrypt_job_id") or "") == ejid:
-                        found = f
+                        uid = str(f.get("uid") or "")
+                        saved_friend = f
                         break
-            if found is None and opened_name:
-                # 按 uid / ejid 都没对上时，用刚读到的名字在列表里找
-                for f in self._friends:
-                    if str(f.get("name") or "") == opened_name:
-                        found = f
-                        break
-            if found is None and opened_name:
-                # 接口里没有这位 HR（Boss 刚建的会话还没进 friendList），
-                # 但会话列表 DOM 里已经有了：按名字构造一个条目，直接点开
-                rows = self._item_rows(page)
-                hit = [r for r in rows if r[1] == opened_name]
-                if hit:
-                    found = {"name": opened_name, "brand": (friend or {}).get("brand") or "",
-                             "encrypt_job_id": ejid}
-            if found is not None:
-                # friends(force=True) 会 reload 聊天页，把刚选中的会话清掉；
-                # 这里必须再点开一次，界面上才能真正看到和这位 HR 的聊天框
-                target = dict(found)
-                if not target.get("name"):
-                    target["name"] = opened_name
+            if not uid:
+                try:
+                    uid = self._uid_of_row(page, name)
+                except Exception:
+                    uid = ""
+            # 重开刚建好的会话（无论刚才有没有刷新过）
+            if saved_friend or uid or name:
+                target = dict(saved_friend or {})
+                target.setdefault("name", name or (friend or {}).get("name") or "")
+                target.setdefault("brand", (friend or {}).get("brand") or "")
+                target.setdefault("encrypt_job_id", ejid)
+                target.setdefault("uid", uid)
                 try:
                     self._open_conversation(page, target)
                 except Exception as exc:
                     self.log("warn", f"会话已建立，但没能自动点开：{exc}")
-                self._open_uid = str(found.get("uid") or "")
-                self._msgs.pop(self._open_uid, None)
-            return {"ok": True, "uid": (found or {}).get("uid") or key,
-                    "friend": found or friend, "created": True}
+            if uid and not any(str(f.get("uid")) == str(uid) for f in self._friends):
+                self._friends.insert(0, {
+                    "uid": uid, "name": name or (friend or {}).get("name") or "",
+                    "brand": (friend or {}).get("brand") or "",
+                    "encrypt_job_id": ejid,
+                })
+            self._open_uid = str(uid or "")
+            self._msgs.pop(self._open_uid, None)
+            found = self._raw_friend(str(uid)) if uid else None
+            return {"ok": True, "uid": uid,
+                    "friend": found or dict(friend or {}, name=name or title, encrypt_job_id=ejid, uid=uid),
+                    "created": True}
+
+    def _uid_of_row(self, page, name: str) -> str:
+        """在当前会话列表 DOM 里按名字找到对应条目的 uid（BOSS 页面上挂在 data 属性里）。"""
+        if not name:
+            return ""
+        try:
+            return str(page.evaluate(
+                """(nm) => {
+                    for (const el of document.querySelectorAll('.user-list-content ul li')) {
+                        const n = (el.querySelector('.name-text') || {}).innerText || '';
+                        if (n.trim() !== nm.trim()) continue;
+                        for (const attr of ['data-uid', 'data-bossid', 'data-id']) {
+                            const v = el.getAttribute(attr);
+                            if (v) return String(v);
+                        }
+                        const inner = el.querySelector('[data-uid]');
+                        if (inner) return String(inner.getAttribute('data-uid'));
+                    }
+                    return '';
+                }""",
+                name,
+            ) or "")
+        except Exception:
+            return ""
 
     def send(self, ctx, uid: Any, text: str) -> dict[str, Any]:
         """给某个 HR 发一条消息（DOM 输入 + 点发送，和真人操作一致）。"""
@@ -906,6 +1046,7 @@ class BossChat:
         btn.click(timeout=15000)
         deadline = time.time() + 12
         while time.time() < deadline and not self._resumes_at:
+            self._drain("resume", "简历")
             page.wait_for_timeout(200)
         # 关掉 Boss 的「确定发送简历吗」浮层，避免误点确认
         try:
