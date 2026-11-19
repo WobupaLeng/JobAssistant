@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiClient, CITIES, DEGREE_OPTIONS, EXPERIENCE_OPTIONS, JOB_TYPE_OPTIONS, PLATFORMS, SALARY_OPTIONS, SCALE_OPTIONS, STAGE_OPTIONS, WEEKEND_OPTIONS, SensitiveRow, type JobRow, type StatusResp, type LogRow, type Config } from './api'
 import { DEGREE_VETO_OPTIONS, HR_ACTIVE_OPTIONS, INDUSTRY_OPTIONS } from './api'
 import type { ExcludeRules } from './api'
+import ChatPanel from './ChatPanel'
 
 /** 关键字分隔符：空格、中英文逗号、顿号、分号、竖线、斜杠、换行等 */
 const SPLIT_KEYWORDS = (text: string): string[] =>
@@ -252,6 +253,8 @@ export default function App() {
   const [sortKey, setSortKey] = useState<SortKey>('score')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
   const [selected, setSelected] = useState<JobRow | null>(null)
+  // 点开未投递岗位时，右栏要切到的 HR 会话 uid
+  const [chatFocusUid, setChatFocusUid] = useState<string | null>(null)
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [listLoading, setListLoading] = useState(false)
   // 列表状态页签：pending=未投递（默认） / delivered=已投递 / rejected=不投递
@@ -283,6 +286,29 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)
   }, [dark])
+
+  // 点开未投递岗位：右栏切到该岗位 HR 的会话。
+  // 后端 /api/chat/open 会按 job_id(=boss:<encryptJobId>)/公司名在 Boss 会话列表里找；
+  // 还没聊过就保持现状并提示，不会发出任何消息。
+  const openJobChat = useCallback(async (j: JobRow) => {
+    const ejid = (j.job_id || '').startsWith('boss:') ? j.job_id.slice(5) : undefined
+    try {
+      const r = await apiClient.chatOpen({
+        uid: j.hr_name || undefined,
+        encrypt_job_id: ejid,
+        brand: j.company || undefined,
+      })
+      if (r.ok && r.friend) {
+        setChatFocusUid(String(r.friend.uid))
+        return
+      }
+      setErr(r.error || '这个岗位还没有和 HR 聊过')
+      window.setTimeout(() => setErr(''), 3000)
+    } catch (e: any) {
+      setErr(String(e?.message || e))
+      window.setTimeout(() => setErr(''), 3000)
+    }
+  }, [])
 
   // ---------- 拉取岗位（分页 + 排序） ----------
   // offset>0 表示「追加加载」（无限滚动），=0 表示刷新重来
@@ -986,7 +1012,7 @@ export default function App() {
       {/* 主体：左右双栏 */}
       <div className="flex min-h-0 flex-1 gap-3 p-3">
         {/* ================= 左栏 ================= */}
-        <section className="flex min-w-0 flex-[1.15] flex-col gap-3">
+        <section className="flex min-w-0 flex-[0.77] flex-col gap-3">
           {/* 顶部：筛选与抓取 */}
           <div className="card flex shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap px-3 py-2">
             <button
@@ -1598,7 +1624,9 @@ export default function App() {
                   onClick={(e) => {
                     const el = e.target as HTMLElement
                     if (el.closest('button, a, input, label, select, textarea')) return
-                    setSelected(selected?.job_id === j.job_id ? null : j)
+                    const next = selected?.job_id === j.job_id ? null : j
+                    setSelected(next)
+                    if (next && next.status !== 'delivered') openJobChat(next)
                   }}
                   className={`mb-1.5 break-inside-avoid overflow-hidden rounded-lg border px-2 py-1.5 dark:border-dark-border transition-all duration-500 ease-out ${
                     seenIds.current.has(j.job_id) ? '' : 'row-in'
@@ -1644,7 +1672,11 @@ export default function App() {
                         'min-w-0 flex-1 cursor-pointer truncate font-medium ' +
                         (j.status === 'delivered' ? 'text-slate-500 line-through' : '')
                       }
-                      onClick={() => setSelected(selected?.job_id === j.job_id ? null : j)}
+                      onClick={() => {
+                        const next = selected?.job_id === j.job_id ? null : j
+                        setSelected(next)
+                        if (next && next.status !== 'delivered') openJobChat(next)
+                      }}
                       title={j.title ?? ''}
                     >
                       {j.title}
@@ -2005,17 +2037,7 @@ export default function App() {
               </div>
             </div>
           ) : (
-          <div className="card flex min-h-0 flex-1 flex-col items-center justify-center p-6 text-center">
-            <div className="mb-2 h-10 w-10 rounded-full bg-primary/15" />
-            <h2 className="text-sm font-semibold text-slate-600 dark:text-slate-300">
-              JD 智能对话
-            </h2>
-            <p className="mt-1 max-w-xs text-[11px] leading-5 text-slate-400">
-              这里是后续「JD 智能对话」的区域占位。
-              <br />
-              左侧列表点选任意岗位后，可在这里针对该 JD 与大模型对话、打磨打招呼话术。
-            </p>
-          </div>
+          <ChatPanel focusUid={chatFocusUid} onSent={() => { loadJobs(0); setRefreshTick((t) => t + 1) }} />
           )}
         </section>
       </div>

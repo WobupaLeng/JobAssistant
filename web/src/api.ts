@@ -173,6 +173,37 @@ export interface StartPayload {
   max_jd?: number
 }
 
+// ---------- Boss 消息 ----------
+export interface ChatFriend {
+  uid: string
+  security_id?: string
+  encrypt_boss_id?: string
+  encrypt_uid?: string
+  name: string
+  title?: string
+  brand?: string
+  avatar?: string
+  last_msg?: string
+  last_time?: string
+  last_ts?: number
+  unread?: number
+  encrypt_job_id?: string
+  job_id?: string
+  from_id?: number
+  to_id?: number
+}
+
+export interface ChatMessage {
+  id: string
+  mid: string
+  from_me: boolean
+  text: string
+  time: number
+  time_text: string
+  kind?: string
+  system?: boolean
+}
+
 // ---------- API ----------
 export const apiClient = {
   status: () => api<StatusResp>('/api/status'),
@@ -270,6 +301,31 @@ export const apiClient = {
     api<{ ok: boolean; cleared: boolean }>('/api/login/logout', {
       method: 'POST',
       body: JSON.stringify({ platform }),
+    }),
+
+  // ---- Boss 消息 ----
+  chatFriends: (force = false) =>
+    api<{ ok: boolean; items: ChatFriend[]; error?: string }>(
+      `/api/chat/friends?force=${force ? 'true' : 'false'}`,
+    ),
+  chatMessages: (uid: string, force = false) =>
+    api<{ ok: boolean; items: ChatMessage[]; error?: string }>(
+      `/api/chat/messages?uid=${encodeURIComponent(uid)}&force=${force ? 'true' : 'false'}`,
+    ),
+  chatSend: (uid: string, text: string, jobId?: string | null) =>
+    api<{ ok: boolean; uid?: string; text?: string; error?: string }>('/api/chat/send', {
+      method: 'POST',
+      body: JSON.stringify({ uid, text, job_id: jobId ?? null }),
+    }),
+  chatRecall: (uid: string) =>
+    api<{ ok: boolean; error?: string }>('/api/chat/recall', {
+      method: 'POST',
+      body: JSON.stringify({ uid }),
+    }),
+  chatOpen: (p: { uid?: string; encrypt_job_id?: string; brand?: string }) =>
+    api<{ ok: boolean; found?: boolean; friend?: ChatFriend; error?: string }>('/api/chat/open', {
+      method: 'POST',
+      body: JSON.stringify(p),
     }),
 }
 

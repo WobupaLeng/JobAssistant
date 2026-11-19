@@ -186,6 +186,11 @@ class Runtime:
         except Exception:
             pass
         self.logins: dict[str, Any] = {}
+        # Boss 消息模块：进程内唯一，由采集线程独占驱动
+        from scrapers.boss_chat import BossChat
+
+        self.chat = BossChat(self.log)
+        self.chat.set_filler(self._chat_filler)
         # 常驻 patchright 浏览器（登录态 + 抓取共用同一个持久化 profile）
         self._pw = None
         self._ctx = None
@@ -434,6 +439,37 @@ class Runtime:
     def recent_logs(self, since: float = 0.0) -> list[dict[str, Any]]:
         with self.log_lock:
             return [e for e in self.logs if e["ts"] > since]
+
+    # ---- 消息模块的数据库侧动作（由 BossChat 注入回调，避免 scrapers 反向依赖 app）----
+    def _chat_filler(self, action: str, friend: dict[str, Any]) -> None:
+        """action=mark_delivered：发过消息的岗位进「已投递」页签。
+
+        Boss 的会话里能拿到 encryptJobId；岗位库的 job_id 就是 `boss:{encryptJobId}`。
+        发消息的岗位如果还没入库（抓取时被过滤掉了），顺手补一条，这样「已投递」列表里
+        不会出现空记录。
+        """
+        if action != "mark_delivered":
+            return
+        ejid = str(friend.get("encrypt_job_id") or "").strip()
+        if not ejid:
+            self.log("warn", "这条会话拿不到岗位 ID，无法自动标记为已投递")
+            return
+        job_id = f"boss:{ejid}"
+        if not self.store.exists(job_id):
+            try:
+                self.store.enqueue_job({
+                    "job_id": job_id,
+                    "platform": "boss",
+                    "title": friend.get("job_title") or None,
+                    "company": friend.get("brand") or None,
+                    "salary": None,
+                    "job_url": f"https://www.zhipin.com/job_detail/{ejid}.html",
+                    "hr_name": friend.get("name") or None,
+                    "hr_position": friend.get("title") or None,
+                })
+            except Exception as exc:
+                self.log("warn", f"补录岗位失败：{exc}")
+        self.store.set_delivered([job_id], True)
 
 
 RT: Runtime | None = None
@@ -1239,6 +1275,160 @@ def delete_sensitive(req: SensitiveDeleteReq) -> dict[str, Any]:
 def logs(since: float = 0.0) -> dict[str, Any]:
     rt = get_rt()
     return {"items": rt.recent_logs(since), "now": time.time()}
+
+
+# ----------------------------------------------------------------------
+# Boss 消息：会话列表 / 历史消息 / 发送 / 撤回
+# ----------------------------------------------------------------------
+#
+# 这些接口都要驱动真实 Chrome，只能投递到采集线程执行（patchright sync API
+# 绑定线程）；前端每 3 秒轮询一次列表，所以接口内部做了 10 秒缓存，避免
+# 轮询把浏览器拖住。
+
+_CHAT_STATE: dict[str, Any] = {"ok": None, "error": "", "ts": 0.0}
+
+
+def _run_chat(fn, timeout: float = 45.0):
+    """把聊天任务投递到采集线程，按「有没有进展」而不是「总耗时」判超时。
+
+    patchright 的 sync API 只能在采集线程里用，而 BOSS 聊天页经常一卡就是几十秒
+    （点开会话后列表重渲染、切会话时接口回包慢）。固定 timeout 会把正常但要等
+    的操作误杀成「执行超时」，所以改成看门狗：
+      - 聊天任务在等锁（另一个请求正占着浏览器）→ 继续等；
+      - 已经在浏览器里操作，但最后活动时间超过它自己的预算 → 判定卡死；
+      - 正常推进时每完成一步都会刷新时间戳。
+    """
+    rt = get_rt()
+    box: dict[str, Any] = {}
+    done = threading.Event()
+
+    def _wrap():
+        try:
+            box["res"] = fn()
+        except Exception as exc:  # noqa: BLE001 - 原样带回调用方
+            box["err"] = exc
+        finally:
+            done.set()
+
+    rt.submit(_wrap)
+    deadline = time.time() + timeout
+    while not done.wait(0.4):
+        last, budget = rt.chat.activity()
+        limit = budget if budget > 0 else 30.0
+        if last and time.time() - last > limit + 15:
+            raise RuntimeError(
+                "Boss 消息页没有响应（浏览器可能卡住了），请稍后重试或重启程序"
+            )
+        if time.time() > deadline:
+            raise RuntimeError("Boss 消息页响应太慢（可能需要重新登录），请稍后重试")
+    if "err" in box:
+        raise box["err"]
+    return box.get("res")
+
+
+@app.get("/api/chat/friends")
+def chat_friends(force: bool = False) -> dict[str, Any]:
+    """Boss 会话列表（= 所有聊过的 HR）。界面左 1/4 的消息列表用它。"""
+    rt = get_rt()
+    try:
+        items = _run_chat(lambda: rt.chat.friends(rt.ensure_browser(), force=force))
+        _CHAT_STATE.update({"ok": True, "error": "", "ts": time.time()})
+        return {"ok": True, "items": items}
+    except Exception as exc:
+        msg = str(exc) or exc.__class__.__name__
+        _CHAT_STATE.update({"ok": False, "error": msg, "ts": time.time()})
+        rt.log("warn", f"拉取 Boss 会话失败：{msg}")
+        return {"ok": False, "items": [], "error": msg}
+
+
+@app.get("/api/chat/messages")
+def chat_messages(uid: str, force: bool = False) -> dict[str, Any]:
+    """某个会话的历史消息（点开会话时才拉，带缓存）。"""
+    rt = get_rt()
+    try:
+        items = _run_chat(lambda: rt.chat.messages(rt.ensure_browser(), uid, force=force))
+        return {"ok": True, "uid": uid, "items": items}
+    except Exception as exc:
+        msg = str(exc) or exc.__class__.__name__
+        rt.log("warn", f"拉取会话消息失败：{msg}")
+        return {"ok": False, "uid": uid, "items": [], "error": msg}
+
+
+class ChatSendReq(BaseModel):
+    uid: str
+    text: str
+    # 前端已知的岗位 ID（可选）：发成功但会话里没 encryptJobId 时用它兜底标记已投递
+    job_id: str | None = None
+
+
+@app.post("/api/chat/send")
+def chat_send(req: ChatSendReq) -> dict[str, Any]:
+    """给 HR 发消息；发出即把对应岗位标记为「已投递」。"""
+    rt = get_rt()
+
+    def _do():
+        ctx = rt.ensure_browser()
+        res = rt.chat.send(ctx, req.uid, req.text)
+        if req.job_id and rt.store.exists(req.job_id):
+            rt.store.set_delivered([req.job_id], True)
+        return res
+
+    try:
+        res = _run_chat(_do, timeout=90.0)
+        return {"ok": True, **res}
+    except Exception as exc:
+        msg = str(exc) or exc.__class__.__name__
+        rt.log("warn", f"发送 Boss 消息失败：{msg}")
+        return {"ok": False, "error": msg}
+
+
+class ChatRecallReq(BaseModel):
+    uid: str
+
+
+@app.post("/api/chat/recall")
+def chat_recall(req: ChatRecallReq) -> dict[str, Any]:
+    """撤回自己最后发的消息。
+
+    注意：Boss 求职端网页版没有撤回入口（见 scrapers/boss_chat.py 的 recall），
+    这里会把明确原因返回给前端，不再假装成功。
+    """
+    rt = get_rt()
+    try:
+        res = _run_chat(lambda: rt.chat.recall(rt.ensure_browser(), req.uid), timeout=90.0)
+        return {"ok": True, **res}
+    except Exception as exc:
+        msg = str(exc) or exc.__class__.__name__
+        rt.log("warn", f"撤回失败：{msg}")
+        return {"ok": False, "error": msg}
+
+
+class ChatOpenReq(BaseModel):
+    uid: str | None = None
+    encrypt_job_id: str | None = None
+    brand: str | None = None
+
+
+@app.post("/api/chat/open")
+def chat_open(req: ChatOpenReq) -> dict[str, Any]:
+    """按岗位找 HR 会话（未投递卡片点开时用）。找不到就返回 ok=False，界面提示先打招呼。"""
+    rt = get_rt()
+    try:
+        friend = _run_chat(
+            lambda: rt.chat.find_friend(
+                rt.ensure_browser(),
+                uid=req.uid,
+                encrypt_job_id=req.encrypt_job_id or "",
+                brand=req.brand or "",
+            )
+        )
+        if not friend:
+            return {"ok": False, "found": False, "error": "还没有和这个岗位的 HR 聊过"}
+        return {"ok": True, "found": True, "friend": friend}
+    except Exception as exc:
+        msg = str(exc) or exc.__class__.__name__
+        rt.log("warn", f"查找 HR 会话失败：{msg}")
+        return {"ok": False, "found": False, "error": msg}
 
 
 @app.get("/api/config")
