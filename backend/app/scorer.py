@@ -538,6 +538,8 @@ class Scorer:
         self.use_llm = bool(use_llm)
         self.profile: dict[str, Any] = PROFILE
         self.filters = ""
+        # 大模型打分前的规则初筛线：规则分低于它的直接判掉，不浪费 token（0=不设）
+        self.llm_prefilter = 5
 
     def reject(self, job: dict[str, Any]) -> str | None:
         return self.rule.reject(
@@ -547,20 +549,7 @@ class Scorer:
             hr_active_status=job.get("hr_active_status"),
         )
 
-    def score(self, job: dict[str, Any]) -> ScoreResult:
-        if self.llm is not None and self.use_llm:
-            try:
-                return self.llm.score(job, self.profile, self.filters)
-            except Exception as exc:  # 网络/额度/解析失败都回退，保证流程不断
-                fallback = self.rule.score(
-                    job.get("company"),
-                    job.get("title"),
-                    job.get("salary"),
-                    job.get("experience"),
-                    job.get("jd_text"),
-                )
-                fallback.reason = f"[大模型失败:{type(exc).__name__}] {fallback.reason}"
-                return fallback
+    def _rule_score(self, job: dict[str, Any]) -> ScoreResult:
         return self.rule.score(
             job.get("company"),
             job.get("title"),
@@ -568,3 +557,45 @@ class Scorer:
             job.get("experience"),
             job.get("jd_text"),
         )
+
+    def score(self, job: dict[str, Any]) -> ScoreResult:
+        """两种打分方式二选一，只有一方的分生效。
+
+        - 规则模式：直接用规则分。
+        - 大模型模式：先用规则分做初筛，低于初筛线的直接判掉（不花 token），
+          过了初筛就**只采用大模型的分**，最终分数以模型为准。
+        """
+        rule_res = self._rule_score(job)
+        if self.llm is None or not self.use_llm:
+            return rule_res
+        # 两种模式共用的第一关：规则初筛（抓 JD 之前已经过了敏感库/关键词/硬性排除）
+        if self.llm_prefilter > 0 and rule_res.score < self.llm_prefilter:
+            rule_res.reason = f"[规则初筛 {rule_res.score} 分 < {self.llm_prefilter}，未调用大模型] {rule_res.reason}"
+            return rule_res
+        try:
+            return self.llm.score(job, self.profile, self.filters)
+        except Exception as exc:  # 大模型不可用时退回规则分，保证流程不断
+            rule_res.reason = f"[大模型失败:{type(exc).__name__}] {rule_res.reason}"
+            return rule_res
+
+    def score(self, job: dict[str, Any]) -> ScoreResult:
+        """规则打分做初筛，过了初筛再交给大模型细打分。
+
+        初筛不过（明显不匹配）就不花 token 调大模型，直接按规则分入库/排除；
+        初筛过了才用「简历 + 配置技能 + 筛选条件 + JD 全文」让大模型打分。
+        大模型失败时回退到规则分，流程不断。
+        """
+        rule_res = self._rule_score(job)
+        if self.llm is None or not self.use_llm:
+            return rule_res
+        if self.llm_prefilter > 0 and rule_res.score < self.llm_prefilter:
+            rule_res.reason = f"[规则初筛 {rule_res.score} 分 < {self.llm_prefilter}，未调用大模型] {rule_res.reason}"
+            return rule_res
+        try:
+            llm_res = self.llm.score(job, self.profile, self.filters)
+            if rule_res.score != llm_res.score:
+                llm_res.reason = f"{llm_res.reason}（规则初筛 {rule_res.score} 分）"
+            return llm_res
+        except Exception as exc:  # 网络/额度/解析失败都回退，保证流程不断
+            rule_res.reason = f"[大模型失败:{type(exc).__name__}] {rule_res.reason}"
+            return rule_res

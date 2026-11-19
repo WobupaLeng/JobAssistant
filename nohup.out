@@ -1,0 +1,7 @@
+[tauri] 主进程启动 pid=2320
+[tauri] 已释放后端到 C:\Users\Administrator\AppData\Local\ai-job-assistant\backend\f61293855998343a\aja-backend.exe
+[tauri] 启动后端: "C:\\Users\\Administrator\\AppData\\Local\\ai-job-assistant\\backend\\f61293855998343a\\aja-backend.exe" in "C:\\Users\\Administrator\\AppData\\Local\\ai-job-assistant\\backend\\f61293855998343a"
+[tauri] 后端已启动 pid=19060 "C:\\Users\\Administrator\\AppData\\Local\\ai-job-assistant\\backend\\f61293855998343a\\aja-backend.exe"
+[backend] AJA_BACKEND_PORT=5216
+[backend-exit-monitor] 后端 pid=19060 已交给主线程看护
+[tauri] 后端已就绪，端口 5216

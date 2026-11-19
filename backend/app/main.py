@@ -490,6 +490,10 @@ class Runtime:
         if profile:
             sc.profile = profile
         sc.filters = filters
+        try:
+            sc.llm_prefilter = int(self.store.get_config("llm_prefilter", "5") or 5)
+        except (TypeError, ValueError):
+            sc.llm_prefilter = 5
         return sc
 
     def rebuild_scorer(self) -> None:
@@ -1811,6 +1815,7 @@ def get_config() -> dict[str, Any]:
         "greet_prompt_default": DEFAULT_PROMPT,
         "skills": rt.store.get_config("skills") or "",
         "score_mode": (rt.store.get_config("score_mode") or "rule"),
+        "llm_prefilter": getattr(rt.scorer, "llm_prefilter", 5),
         "tokens_total": rt.tokens_total,
         "tokens_greet": rt.tokens_greet,
         "theme": rt.store.get_config("theme") or "light",
@@ -1831,6 +1836,7 @@ class ConfigReq(BaseModel):
     greet_prompt: str | None = None
     skills: str | None = None
     score_mode: str | None = None
+    llm_prefilter: int | None = None
     theme: str | None = None
     exclude_keywords: list[str] | None = None
     exclude_rules: dict[str, Any] | None = None
@@ -1854,6 +1860,8 @@ def set_config(req: ConfigReq) -> dict[str, Any]:
     if req.score_mode is not None:
         mode = "llm" if req.score_mode.strip() == "llm" else "rule"
         rt.store.set_config("score_mode", mode)
+    if req.llm_prefilter is not None:
+        rt.store.set_config("llm_prefilter", str(max(0, min(10, int(req.llm_prefilter)))))
     if req.theme is not None:
         rt.store.set_config("theme", req.theme)
     if req.exclude_keywords is not None:

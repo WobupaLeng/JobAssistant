@@ -254,6 +254,9 @@ export default function App() {
   // 打分方式：默认规则打分（快、不花钱）；切到大模型后抓取时直接用 JD+简历+技能+筛选条件打分
   const [scoreMode, setScoreMode] = useState<'rule' | 'llm'>('rule')
   const scoreModeRef = useRef<'rule' | 'llm'>('rule')
+  // 大模型打分前的规则初筛线（规则分低于它的直接判掉，不花 token）
+  const [prefilter, setPrefilter] = useState(5)
+  const prefilterRef = useRef(5)
   // 累计 token：total=打分+生成，greet=生成打招呼部分
   const [tokens, setTokens] = useState({ total: 0, greet: 0 })
   // ---------- 自动打招呼 ----------
@@ -617,6 +620,10 @@ export default function App() {
           setScoreMode(c.score_mode)
           scoreModeRef.current = c.score_mode
         }
+        if (typeof c.llm_prefilter === 'number') {
+          setPrefilter(c.llm_prefilter)
+          prefilterRef.current = c.llm_prefilter
+        }
         setTokens({ total: c.tokens_total ?? 0, greet: c.tokens_greet ?? 0 })
       })
       .catch(() => {})
@@ -804,6 +811,7 @@ export default function App() {
         greet_prompt: greetPrompt,
         skills,
         score_mode: scoreModeRef.current,
+        llm_prefilter: prefilterRef.current,
       }
       if (apiKey.trim()) patch.api_key = apiKey.trim()
       const r = await apiClient.setConfig(patch)
@@ -822,7 +830,7 @@ export default function App() {
     scoreModeRef.current = mode
     setScoreMode(mode)
     try {
-      await apiClient.setConfig({ score_mode: mode })
+      await apiClient.setConfig({ score_mode: mode, llm_prefilter: prefilterRef.current })
       setLlmEnabled((await apiClient.getConfig()).has_key)
     } catch (e: any) {
       setErr(e?.message || String(e))
@@ -2100,6 +2108,28 @@ export default function App() {
                       规则打分
                     </button>
                   </div>
+                  {scoreMode === 'llm' && (
+                    <label
+                      className="flex shrink-0 items-center gap-1 text-[11px] text-slate-500"
+                      title="规则打分低于这条线的不调用大模型（省 token），高于它的才让大模型结合 JD 与技能细打分"
+                    >
+                      初筛≥
+                      <input
+                        type="number"
+                        min={0}
+                        max={10}
+                        className="input h-6 w-12 !px-1 !py-0 text-center text-[11px]"
+                        value={prefilter}
+                        onChange={(e) => {
+                          const v = Math.max(0, Math.min(10, Number(e.target.value) || 0))
+                          setPrefilter(v)
+                          prefilterRef.current = v
+                        }}
+                        onBlur={() => void switchScoreMode('llm')}
+                      />
+                      分
+                    </label>
+                  )}
                   <h2 className="text-xs font-semibold">敏感库 {sensitiveTotal} 条</h2>
                   <span className="text-[10px] text-slate-400">
                     已抓过的岗位（已入库 + 被排除）都会记在这里，下一轮抓取直接跳过；可手动移出

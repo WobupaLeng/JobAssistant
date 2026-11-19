@@ -130,6 +130,7 @@ export interface Config {
   greet_prompt_default?: string
   skills?: string
   score_mode?: 'rule' | 'llm'
+  llm_prefilter?: number
   tokens_total?: number
   tokens_greet?: number
   profile: Record<string, any>
