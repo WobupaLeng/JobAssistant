@@ -126,6 +126,10 @@ export interface Config {
   exclude_rules?: ExcludeRules
   max_jd?: number
   exclude_rule_defaults?: ExcludeRules
+  greet_prompt?: string
+  greet_prompt_default?: string
+  tokens_total?: number
+  tokens_greet?: number
   profile: Record<string, any>
 }
 
@@ -202,9 +206,29 @@ export interface ChatMessage {
   time_text: string
   kind?: string
   system?: boolean
+  /** 自己发的才有：read=已读 delivered=送达 unread=未读 */
+  status?: string
 }
 
 // ---------- API ----------
+export interface ResumeItem {
+  id: string
+  name: string
+  size: string
+  upload_time: string
+  suffix: string
+}
+
+export interface GreetResp {
+  ok: boolean
+  text: string
+  tokens: number
+  source: 'llm' | 'rule'
+  note?: string
+  tokens_total: number
+  tokens_greet: number
+}
+
 export const apiClient = {
   status: () => api<StatusResp>('/api/status'),
   start: (p: StartPayload) =>
@@ -317,6 +341,15 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify({ uid, text, job_id: jobId ?? null }),
     }),
+  chatResumes: (force = false) =>
+    api<{ ok: boolean; items: ResumeItem[]; error?: string }>(`/api/chat/resumes?force=${force}`),
+  chatSendResume: (uid: string, resumeId?: string) =>
+    api<{ ok: boolean; error?: string }>('/api/chat/resume', {
+      method: 'POST',
+      body: JSON.stringify({ uid, resume_id: resumeId ?? null }),
+    }),
+  greet: (body: { job_id?: string; uid?: string; encrypt_job_id?: string }) =>
+    api<GreetResp>('/api/greet', { method: 'POST', body: JSON.stringify(body) }),
   chatRecall: (uid: string) =>
     api<{ ok: boolean; error?: string }>('/api/chat/recall', {
       method: 'POST',

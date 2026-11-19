@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .scorer import ExcludeRules, LLMScorer, PROFILE, Scorer
+from .greeting import DEFAULT_PROMPT, GreetingWriter
 from .store import DB_NAME, Store
 from scrapers.base import ScrapeConfig, StopFlag, split_keywords
 from scrapers.boss import BossScraper
@@ -174,6 +175,14 @@ class Runtime:
         self.logs: list[dict[str, Any]] = []
         self.log_lock = threading.Lock()
         self.progress = {"collected": 0, "scored": 0, "filtered": 0, "total": 0, "tokens": 0}
+        # 全局累计 token（打分 + 生成打招呼），持久化在 app_config，重启不清零
+        self.tokens_total = 0
+        self.tokens_greet = 0
+        try:
+            self.tokens_total = int(self.store.get_config("tokens_total", "0") or 0)
+            self.tokens_greet = int(self.store.get_config("tokens_greet", "0") or 0)
+        except Exception:
+            pass
         # 有效 JD 上限（0 = 不限制），抓取中改动即时生效
         self.max_jd = 0        # 有效 JD 上限（0=不限制，界面可改）
         # 本次抓取勾选的 Boss 薪资编码（用于入库前二次校验）
@@ -397,6 +406,23 @@ class Runtime:
         except Exception:
             pass
         return rules
+
+    def add_tokens(self, n: int, kind: str = "score") -> None:
+        """累计 token 消耗：kind=score 打分 / greet 生成打招呼。"""
+        n = int(n or 0)
+        if n <= 0:
+            return
+        self.tokens_total += n
+        if kind == "greet":
+            self.tokens_greet += n
+            try:
+                self.store.set_config("tokens_greet", str(self.tokens_greet))
+            except Exception:
+                pass
+        try:
+            self.store.set_config("tokens_total", str(self.tokens_total))
+        except Exception:
+            pass
 
     def _build_scorer(self) -> Scorer:
         rules = self.exclude_rules()
@@ -639,6 +665,7 @@ def process_job(rt: Runtime, job: dict[str, Any]) -> bool:
     if result.tokens:
         # 累计本次运行的大模型 token 消耗
         rt.progress["tokens"] = rt.progress.get("tokens", 0) + result.tokens
+        rt.add_tokens(result.tokens, "score")
 
     # 3.5) 分值门槛：低于设定分值的 JD 不入库
     gate = int(getattr(rt, "min_score", 0) or 0)
@@ -1057,6 +1084,8 @@ def status() -> dict[str, Any]:
             + (f" / 上限 {rt.max_jd}" if rt.max_jd else "")
         ),
         "stats": rt.store.stats(),
+        "tokens_total": rt.tokens_total,
+        "tokens_greet": rt.tokens_greet,
         "logged_in": _logged_in(rt),
         "login_sessions": sessions,
     }
@@ -1409,6 +1438,97 @@ class ChatRecallReq(BaseModel):
     uid: str
 
 
+class GreetReq(BaseModel):
+    job_id: str | None = None
+    uid: str | None = None  # 也可以只按会话 uid 生成（会话里能拿到岗位）
+    encrypt_job_id: str | None = None
+
+
+@app.post("/api/greet")
+def greet(req: GreetReq) -> dict[str, Any]:
+    """根据（提示词 + 岗位 JD + 我的技能）生成一句打招呼，返回正文与本次 token。
+
+    只生成文本，不发送；前端填进输入框由用户确认后再走 /api/chat/send。
+    """
+    rt = get_rt()
+    job: dict[str, Any] | None = None
+    ejid = req.encrypt_job_id or ""
+    if req.job_id:
+        job = rt.store.get_job(req.job_id)
+        if not ejid and req.job_id.startswith("boss:"):
+            ejid = req.job_id[5:]
+    if job is None and ejid:
+        job = rt.store.get_job(f"boss:{ejid}")
+    if job is None:
+        # 会话里没匹配到已入库岗位时，至少用会话信息拼一个最简岗位
+        title = company = None
+        if req.uid:
+            try:
+                cache = getattr(rt.chat, "_friends", None) or []
+                for f in cache:
+                    if str(f.get("uid")) == str(req.uid):
+                        title = f.get("job_title") or f.get("source_title")
+                        company = f.get("brand")
+                        break
+            except Exception:
+                pass
+        job = {"title": title or "", "company": company or "", "jd_text": None, "salary": None}
+    writer = GreetingWriter(rt.scorer.llm if rt.scorer else None)
+    g = writer.write(rt.store.get_config("greet_prompt"), job, PROFILE)
+    if g.tokens:
+        rt.add_tokens(g.tokens, "greet")
+        rt.log("info", f"生成打招呼（{g.tokens} token）：{g.text[:40]}…")
+    else:
+        rt.log("warn", f"生成打招呼（未消耗 token，来源={g.source}）：{g.text[:40]}…")
+    return {
+        "ok": True,
+        "text": g.text,
+        "tokens": g.tokens,
+        "source": g.source,
+        "note": g.note,
+        "tokens_total": rt.tokens_total,
+        "tokens_greet": rt.tokens_greet,
+    }
+
+
+@app.get("/api/chat/resumes")
+def chat_resumes(force: bool = False) -> dict[str, Any]:
+    """Boss 上已上传的附件简历列表（点「发简历」时给用户选一份）。"""
+    rt = get_rt()
+
+    def _run():
+        ctx = rt.ensure_browser()
+        return rt.chat.resumes(ctx, force=force)
+
+    _run.__chat_label__ = "读取 Boss 附件简历列表"
+    try:
+        items = _run_chat(_run, timeout=90.0)
+        return {"ok": True, "items": items}
+    except Exception as exc:
+        return {"ok": False, "items": [], "error": str(exc)}
+
+
+class ChatResumeReq(BaseModel):
+    uid: str
+    resume_id: str | None = None
+
+
+@app.post("/api/chat/resume")
+def chat_send_resume(req: ChatResumeReq) -> dict[str, Any]:
+    """给某位 HR 发送附件简历（Boss 会弹确认框，这里自动确认）。"""
+    rt = get_rt()
+
+    def _run():
+        ctx = rt.ensure_browser()
+        return rt.chat.send_resume(ctx, req.uid, req.resume_id or "")
+
+    _run.__chat_label__ = f"给 HR {req.uid} 发送附件简历"
+    try:
+        return _run_chat(_run, timeout=90.0)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 @app.post("/api/chat/recall")
 def chat_recall(req: ChatRecallReq) -> dict[str, Any]:
     """撤回自己最后发的消息。
@@ -1472,6 +1592,10 @@ def get_config() -> dict[str, Any]:
         "api_key_masked": (key[:4] + "****" + key[-4:]) if len(key) > 8 else ("****" if key else ""),
         "has_key": bool(key),
         "resume_path": rt.store.get_config("resume_path") or "",
+        "greet_prompt": rt.store.get_config("greet_prompt") or DEFAULT_PROMPT,
+        "greet_prompt_default": DEFAULT_PROMPT,
+        "tokens_total": rt.tokens_total,
+        "tokens_greet": rt.tokens_greet,
         "theme": rt.store.get_config("theme") or "light",
         "exclude_keywords": rt.store.get_config_json("exclude_keywords", DEFAULT_EXCLUDE_KEYWORDS),
         "exclude_rules": rt.exclude_rules().as_dict(),
@@ -1487,6 +1611,7 @@ class ConfigReq(BaseModel):
     base_url: str | None = None
     model: str | None = None
     resume_path: str | None = None
+    greet_prompt: str | None = None
     theme: str | None = None
     exclude_keywords: list[str] | None = None
     exclude_rules: dict[str, Any] | None = None
@@ -1503,6 +1628,8 @@ def set_config(req: ConfigReq) -> dict[str, Any]:
         rt.store.set_config("model", req.model.strip())
     if req.resume_path is not None:
         rt.store.set_config("resume_path", req.resume_path)
+    if req.greet_prompt is not None:
+        rt.store.set_config("greet_prompt", req.greet_prompt)
     if req.theme is not None:
         rt.store.set_config("theme", req.theme)
     if req.exclude_keywords is not None:
@@ -1529,6 +1656,7 @@ def rescore() -> dict[str, Any]:
             )
             if res.tokens:
                 rt.progress["tokens"] = rt.progress.get("tokens", 0) + res.tokens
+                rt.add_tokens(res.tokens, "score")
             n += 1
         except Exception:
             pass

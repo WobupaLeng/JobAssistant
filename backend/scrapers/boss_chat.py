@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import html
 import json
 import threading
 import time
@@ -88,6 +89,40 @@ def _fmt_time(ts: Any) -> str:
     return time.strftime("%Y-%m-%d %H:%M", lt)
 
 
+def _merge_status(msgs: list[dict[str, Any]], dom: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """把 DOM 上读到的回执（已读/送达）按 mid 合并进接口消息。"""
+    if not dom or not msgs:
+        return msgs
+    by_mid = {str(d.get("mid") or d.get("id") or ""): d.get("status") or "" for d in dom}
+    for m in msgs:
+        if m.get("status"):
+            continue
+        k = str(m.get("mid") or m.get("id") or "")
+        st = by_mid.get(k)
+        if st:
+            m["status"] = st
+    return msgs
+
+
+def _status_from_text(txt: str, cls: str = "") -> str:
+    """把 Boss 气泡上的回执读成 read / delivered / unread。
+
+    实测 2026-11：自己发的气泡里有
+        <i class="message-status status-read">已读</i>
+        <i class="message-status status-delivery"> 送达 </i>
+    historyMsg 接口里没有可靠已读位（flag 恒为 0），所以回执只能从 DOM 取。
+    """
+    t = (txt or "").strip()
+    c = cls or ""
+    if "status-read" in c or t == "已读":
+        return "read"
+    if "status-delivery" in c or "送达" in t:
+        return "delivered"
+    if "未读" in t:
+        return "unread"
+    return ""
+
+
 def normalize_message(raw: dict[str, Any], my_id: int | None) -> dict[str, Any]:
     """把 historyMsg 的一条整理成 {id, from_me, text, time, time_text, kind}。"""
     body = raw.get("body") or {}
@@ -100,9 +135,11 @@ def normalize_message(raw: dict[str, Any], my_id: int | None) -> dict[str, Any]:
     for key in ("text", "content", "showText", "desc"):
         v = body.get(key)
         if isinstance(v, str) and v.strip():
-            text = v.strip()
+            # 卡片消息的 text 里常带换行，压成一行更好读
+            text = " ".join(html.unescape(v).split())
             break
-    btype = body.get("type") or raw.get("type")
+    # 注意：body.type 是模板类型（如正文里的 16 只是模板 id），外层 raw.type 才是消息类型
+    btype = raw.get("type") or body.get("type")
     if not text:
         # 结构化消息（职位卡片、系统提示等）退化成一句类型说明
         if btype == 8:
@@ -112,6 +149,10 @@ def normalize_message(raw: dict[str, Any], my_id: int | None) -> dict[str, Any]:
             text = "[系统消息]"
         elif btype == 5:
             text = "[图片]"
+        elif btype == 3:
+            text = "[附件简历]"
+        elif btype == 4:
+            text = "[系统提示]"
         elif btype:
             text = f"[消息类型{btype}]"
     ts = raw.get("msgTime") or raw.get("time") or body.get("msgTime") or 0
@@ -125,6 +166,8 @@ def normalize_message(raw: dict[str, Any], my_id: int | None) -> dict[str, Any]:
         "time_text": _fmt_time(ts_int),
         "kind": btype,
         "system": btype in (16, 8),
+        # 回执只能从 DOM 补，接口里没有
+        "status": "",
     }
 
 
@@ -162,11 +205,17 @@ class BossChat:
         self._friends: list[dict[str, Any]] = []
         self._friends_at = 0.0
         self._msgs: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        # Boss 上已上传的附件简历（点「发简历」才会拉一次）
+        self._resumes: list[dict[str, Any]] = []
+        self._resumes_at = 0.0
         self._my_id: int | None = None
         self._page = None
         # 会话列表先按 reload 前的页面读 —— reload 之后列表可能要好几秒才渲染，
         # 所以把「列表什么时候是空的」也记下来。
         self._items_seen_at = 0.0
+        # 当前打开的会话 uid：historyMsg 响应不一定带 bossId，缺了就回填它，
+        # 但不能凭空写进空键（以前会串到别的会话上，表现为点 A 显示 B 的记录）。
+        self._open_uid = ""
         self._filler: Callable[[str, dict[str, Any]], Any] | None = None
         # 可重入 + 只记「最后一次活动时间」：外部看门狗据此判断是否卡死
         self._lock = threading.RLock()
@@ -296,14 +345,16 @@ class BossChat:
         msgs = zp.get("messages") or zp.get("list") or []
         if not isinstance(msgs, list):
             return
-        uid = str(zp.get("bossId") or zp.get("uid") or "")
+        uid = str(zp.get("bossId") or zp.get("encryptBossId") or zp.get("uid") or "")
         if not uid:
-            # 响应里不一定带 bossId，按当前打开的会话回填
+            uid = self._open_uid
+        if not uid:
             return
         self._msgs[uid] = (time.time(), msgs)
 
     @staticmethod
-    def _catch(page, key: str, handler: Callable[[str], None], tag: str) -> None:
+    def _catch(page, key: str, handler: Callable[[str], None], tag: str,
+               on_fail: Callable[[str], None] | None = None) -> None:
         """给 page 挂一个响应监听：URL 含 key 时把响应体交给 handler。
 
         handler 里只做解析和存内存，不做任何等待，避免阻塞 patchright 事件流。
@@ -314,12 +365,17 @@ class BossChat:
                 if key not in resp.url:
                     return
                 if resp.status != 200:
+                    if on_fail:
+                        on_fail(f"HTTP {resp.status} {resp.url}")
                     return
                 handler(resp.text())
-            except Exception:
-                pass
+            except Exception as exc:
+                if on_fail:
+                    on_fail(f"{type(exc).__name__}: {exc}")
+                self.log("warn", f"{tag} 响应解析失败：{type(exc).__name__}: {exc}") if hasattr(self, "log") else None
 
         page.on("response", _on_response)
+        return _on_response
 
     def _wait_friends(self, page, ctx, timeout_s: float = 25.0) -> None:
         t0 = time.time()
@@ -431,19 +487,22 @@ class BossChat:
             # 接口数据到手就换成接口的（带毫秒时间戳和消息类型），两边都拿不到才返回空。
             t0 = time.time()
             dom: list[dict[str, Any]] = []
+            dom_at = 0.0
             while time.time() - t0 < 10:
                 cur = self._msgs.get(key)
                 if cur and cur[0] > before:
-                    return [normalize_message(m, self._my_id) for m in cur[1]]
+                    out = [normalize_message(m, self._my_id) for m in cur[1]]
+                    # 回执在 DOM 上：拿到就把已读/送达补进去
+                    if not dom_at or time.time() - dom_at > 2:
+                        dom = self._messages_from_dom(page) or dom
+                        dom_at = time.time()
+                    return _merge_status(out, dom)
                 if not dom:
                     dom = self._messages_from_dom(page)
                     if dom:
-                        self._msgs[key] = (time.time(), [])
+                        dom_at = time.time()
                         return dom
-                else:
-                    # DOM 已经在渲染了，接口数据晚到也退不到这里（接口优先在循环顶部）
-                    pass
-                page.wait_for_timeout(250)
+                page.wait_for_timeout(80)
             return dom
 
     def _messages_from_dom(self, page) -> list[dict[str, Any]]:
@@ -465,8 +524,11 @@ class BossChat:
                         const body = el.querySelector('.text-content');
                         const card = el.querySelector('[class*="message-card"]');
                         const tm = el.querySelector('.item-time .time');
+                        const st = el.querySelector('.message-status');
                         return {
                             i,
+                            status_text: st ? (st.innerText || '').trim() : '',
+                            status_cls: st ? (st.className || '') : '',
                             cls: el.className || '',
                             mid: el.getAttribute('data-mid') || '',
                             time: tm ? (tm.innerText || '').trim() : '',
@@ -497,7 +559,9 @@ class BossChat:
                 "time": 0,
                 "time_text": last_time,
                 "kind": None,
-                "system": bool(r.get("is_card")) or "item-system" in cls,
+                "status": _status_from_text(r.get("status_text") or "", r.get("status_cls") or ""),
+                # 兜底路径只在接口没数据时用；只有真正的系统行才标 system
+                "system": "item-system" in cls,
             })
         return out
 
@@ -506,6 +570,23 @@ class BossChat:
             if str(f.get("uid")) == uid:
                 return f
         return None
+
+    @staticmethod
+    def _poll(page, cond, timeout_ms: int = 1500, step_ms: int = 60) -> bool:
+        """条件一成立就立刻返回（不再无脑固定等待）。
+
+        条件可以是 JS 表达式字符串，也可以是无参可调用对象。
+        """
+        deadline = time.time() + timeout_ms / 1000.0
+        while time.time() < deadline:
+            try:
+                ok = page.evaluate(cond) if isinstance(cond, str) else cond()
+            except Exception:
+                ok = False
+            if ok:
+                return True
+            page.wait_for_timeout(step_ms)
+        return False
 
     def _open_conversation(self, page, friend: dict[str, Any] | None) -> None:
         """点开会话。会话项文本在深层子节点里，locator.filter(has_text=) 会超时，
@@ -538,14 +619,34 @@ class BossChat:
                     break
         if idx is None:
             raise ChatError(f"在 Boss 会话列表里找不到「{name or brand or '该 HR'}」，可能还没打过招呼")
+        target_uid = str((friend or {}).get("uid") or "")
         items = page.locator(SEL_ITEM)
         items.nth(idx).click(timeout=15_000)
         try:
             page.wait_for_selector(SEL_CONV, timeout=15_000)
         except Exception:
             pass
-        # 点完等对话区淡入（列表也会重新渲染）
-        page.wait_for_timeout(1200)
+        # 点完等对话区真正渲染出来（标题对得上且有消息气泡），命中就立刻返回
+        name_js = json.dumps(name or '', ensure_ascii=False)
+        self._poll(
+            page,
+            "(function(){"
+            "  var t=document.querySelector('.chat-conversation .name-text');"
+            "  var n=" + name_js + ";"
+            "  var okTitle=!n||!t||t.innerText.trim()===n;"
+            "  var hasItem=!!document.querySelector('.chat-conversation .message-item');"
+            "  return okTitle&&hasItem;"
+            "})()",
+            timeout_ms=4000,
+        )
+        self._open_uid = target_uid
+        # 点开后核对标题，点偏了（同名/列表重排）就重试一次
+        try:
+            title = page.locator(f"{SEL_CONV} .name-text").first.inner_text(timeout=3000).strip()
+        except Exception:
+            title = ""
+        if title and name and title != name:
+            raise ChatError(f"Boss 会话列表点偏了：想打开「{name}」，实际打开的是「{title}」，请重试")
 
     @staticmethod
     def _input_text(page) -> str:
@@ -596,7 +697,8 @@ class BossChat:
             except Exception:
                 # 兜底：回车发送
                 page.keyboard.press("Enter")
-            page.wait_for_timeout(1500)
+            # 等输入框被清空（= 前端已接单），最多 1.5s，清空就立刻继续
+            self._poll(page, "!document.querySelector('#chat-input') || !document.querySelector('#chat-input').innerText.trim()", timeout_ms=1500)
             if self._input_text(page).strip():
                 raise ChatError("消息没有发出去（输入框内容还在），可能是账号被限制或网络异常")
         self._msgs.pop(key, None)
@@ -610,6 +712,129 @@ class BossChat:
             except Exception as exc:
                 self.log("warn", f"标记已投递失败：{exc}")
         return {"ok": True, "uid": uid, "text": text}
+
+    # ---------------- 附件简历 ----------------
+    def resumes(self, ctx, force: bool = False) -> list[dict[str, Any]]:
+        """Boss 上已上传的附件简历列表。
+
+        数据来自 `/wapi/zpgeek/resume/attachment/checkbox.json?from=2`，
+        它只在点「发简历」时才会被前端请求，所以这里打开任一会话点一次按钮、
+        拦下响应解析（不点确认，不会真的发出去）。
+        """
+        if not force and self._resumes and time.time() - self._resumes_at < 120:
+            return self._resumes
+        page = self._chat_page(ctx)
+        self._resumes = []
+        self._resumes_at = 0.0
+        errs: list[str] = []
+        # 临时监听：抓完立刻摘掉，否则常驻监听会参与后续所有会话导航
+        on_resp = self._catch(page, "resume", self._on_resumes, "简历列表",
+                              on_fail=lambda e: errs.append(e))
+        try:
+            return self._read_resumes(page, errs)
+        finally:
+            try:
+                page.remove_listener("response", on_resp)
+            except Exception:
+                pass
+
+    def _read_resumes(self, page, errs: list[str]) -> list[dict[str, Any]]:
+        items = page.locator(SEL_ITEM)
+        if items.count() == 0:
+            self._wait_items(page)
+        if page.locator(SEL_ITEM).count() == 0:
+            raise ChatError("还没有任何 Boss 会话，无法读取简历列表")
+        page.locator(SEL_ITEM).first.click(timeout=15000)
+        self._poll(page, "!!document.querySelector('.chat-controls')", timeout_ms=2500)
+        btn = self._resume_btn(page)
+        if btn is None:
+            raise ChatError("Boss 聊天页没有「发简历」按钮（可能账号未上传附件简历）")
+        btn.click(timeout=15000)
+        deadline = time.time() + 12
+        while time.time() < deadline and not self._resumes_at:
+            page.wait_for_timeout(200)
+        # 关掉 Boss 的「确定发送简历吗」浮层，避免误点确认
+        try:
+            page.get_by_text("取消", exact=True).first.click(timeout=1500)
+        except Exception:
+            pass
+        if not self._resumes_at and errs:
+            raise ChatError(f"读取 Boss 附件简历失败：{errs[-1]}")
+        if not self._resumes_at:
+            raise ChatError("没有取到 Boss 的附件简历列表（可能还没上传过简历）")
+        return self._resumes
+
+    @staticmethod
+    def _resume_btn(page):
+        """「发简历」按钮：优先 .chat-controls 里的 toolbar-btn，避免命中别处的同名文本。"""
+        for sel in (".chat-controls .toolbar-btn:has-text('发简历')",
+                    ".chat-controls >> text=发简历"):
+            loc = page.locator(sel)
+            if loc.count():
+                return loc.first
+        loc = page.get_by_text("发简历", exact=True)
+        return loc.first if loc.count() else None
+
+    def _on_resumes(self, raw: str) -> None:
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return
+        obj = data.get("zpData") or {}
+        lst = obj.get("resumeList") if isinstance(obj, dict) else None
+        if not isinstance(lst, list):
+            return
+        out: list[dict[str, Any]] = []
+        for r in lst:
+            if not isinstance(r, dict):
+                continue
+            out.append({
+                "id": str(r.get("resumeId") or ""),
+                "name": str(r.get("showName") or ""),
+                "size": str(r.get("resumeSizeDesc") or ""),
+                "upload_time": str(r.get("uploadTime") or ""),
+                "suffix": str(r.get("suffixName") or ""),
+                "preview": r.get("previewType"),
+            })
+        self._resumes = out
+        self._resumes_at = time.time()
+        self.log("info", f"读取到 {len(out)} 份附件简历")
+
+    def send_resume(self, ctx, uid: Any, resume_id: str = "") -> dict[str, Any]:
+        """给某位 HR 发附件简历。
+
+        Boss 的流程是「点发简历 → 选一份 → 确认框 → 确定」；若账号只有一份简历，
+        点按钮后直接弹确认框。这里按 resume_id 选（列表里只有一份时不用选）。
+        """
+        with self._lock, self._activity(60):
+            page = self._chat_page(ctx)
+            friend = self._raw_friend(str(uid))
+            if friend is None:
+                self.friends(ctx, force=False)
+                friend = self._raw_friend(str(uid))
+            if friend is None:
+                raise ChatError("在 Boss 会话列表里找不到该 HR，可能还没打过招呼")
+            self._open_conversation(page, friend)
+            self._poll(page, "!!document.querySelector('.chat-controls')", timeout_ms=1500)
+            btn = page.get_by_text("发简历", exact=True)
+            if btn.count() == 0:
+                raise ChatError("Boss 聊天页没有「发简历」按钮（可能账号未上传附件简历）")
+            btn.first.click(timeout=15000)
+            self._poll(page, "!!document.querySelector('.panel-resume, .sentence-popover')", timeout_ms=2500)
+            # 如果有简历选择面板，按 resume_id 或名字点选；只有一份则直接进入确认框
+            if resume_id:
+                try:
+                    page.get_by_text(resume_id, exact=True).first.click(timeout=1500)
+                except Exception:
+                    pass
+            sure = page.get_by_text("确定", exact=True)
+            if sure.count() == 0:
+                raise ChatError("没有出现「确定向 Boss 发送简历吗」确认框，可能已发送或简历已失效")
+            sure.last.click(timeout=15000)
+            self._poll(page, "(function(){var b=[...document.querySelectorAll('button')].filter(e=>e.offsetParent!==null&&e.innerText.trim()==='确定');return b.length===0;})()", timeout_ms=2000)
+            self.log("info", f"已给 HR {friend.get('name') or uid} 发送附件简历")
+            self._msgs.pop(str(uid), None)
+            return {"ok": True, "uid": uid}
 
     def recall(self, ctx, uid: Any) -> dict[str, Any]:
         """撤回：Boss 求职端网页版没有撤回入口。

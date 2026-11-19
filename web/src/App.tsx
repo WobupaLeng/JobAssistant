@@ -246,6 +246,11 @@ export default function App() {
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [model, setModel] = useState('deepseek-chat')
+  // 生成打招呼用的提示词（AI 按它 + 岗位 JD + 我的技能 写话术）
+  const [greetPrompt, setGreetPrompt] = useState('')
+  const [greetPromptDefault, setGreetPromptDefault] = useState('')
+  // 累计 token：total=打分+生成，greet=生成打招呼部分
+  const [tokens, setTokens] = useState({ total: 0, greet: 0 })
 
   // ---------- 投递列表 ----------
   const [items, setItems] = useState<JobRow[]>([])
@@ -255,6 +260,16 @@ export default function App() {
   const [selected, setSelected] = useState<JobRow | null>(null)
   // 点开未投递岗位时，右栏要切到的 HR 会话 uid
   const [chatFocusUid, setChatFocusUid] = useState<string | null>(null)
+  // Boss 消息抽屉是否展开：收起时列表可以排 3 列，展开时让位给聊天
+  const [chatOpen, setChatOpen] = useState(false)
+  // 用 ref 包一层，保证 ChatPanel 拿到的回调引用恒定
+  const chatOpenCb = useRef((v: boolean) => setChatOpen(v))
+  const onChatOpenChange = useCallback((v: boolean) => chatOpenCb.current(v), [])
+  const onChatTokens = useCallback((t: { total: number; greet: number }) => setTokens(t), [])
+  const onChatSent = useCallback(() => {
+    loadJobs(0)
+    setRefreshTick((t) => t + 1)
+  }, [])
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [listLoading, setListLoading] = useState(false)
   // 列表状态页签：pending=未投递（默认） / delivered=已投递 / rejected=不投递
@@ -459,6 +474,9 @@ export default function App() {
           setWeekendRule(c.exclude_rules.weekend === 'double' ? 'double' : 'any')
         }
         if (typeof c.max_jd === 'number') setMaxJd(c.max_jd)
+        if (typeof c.greet_prompt === 'string') setGreetPrompt(c.greet_prompt)
+        if (typeof c.greet_prompt_default === 'string') setGreetPromptDefault(c.greet_prompt_default)
+        setTokens({ total: c.tokens_total ?? 0, greet: c.tokens_greet ?? 0 })
       })
       .catch(() => {})
     const t = setInterval(refresh, 3000)
@@ -638,7 +656,12 @@ export default function App() {
 
   const saveConfig = async () => {
     try {
-      const patch: Record<string, any> = { base_url: baseUrl, model, theme: dark ? 'dark' : 'light' }
+      const patch: Record<string, any> = {
+        base_url: baseUrl,
+        model,
+        theme: dark ? 'dark' : 'light',
+        greet_prompt: greetPrompt,
+      }
       if (apiKey.trim()) patch.api_key = apiKey.trim()
       const r = await apiClient.setConfig(patch)
       setLlmEnabled(r.llm_enabled)
@@ -867,6 +890,13 @@ export default function App() {
           </button>
         </div>
         <div className="flex items-center gap-2">
+          <span
+            className="text-[11px] text-slate-500 dark:text-slate-400"
+            title="累计消耗 token：打分 + 生成打招呼，跨启动累加"
+          >
+            累计 {fmtTokens(tokens.total)} token
+            {tokens.greet > 0 && `（其中生成 ${fmtTokens(tokens.greet)}）`}
+          </span>
           <button className="btn-ghost" onClick={() => setDrawer((v) => !v)}>
             {drawer ? '收起配置' : '模型配置'}
           </button>
@@ -894,7 +924,7 @@ export default function App() {
           >
             <div className="mb-3 flex items-center">
               <h2 className="text-sm font-semibold">模型配置</h2>
-              <span className="ml-2 text-[11px] text-slate-400">仅影响 JD 打分，不配置则用规则打分</span>
+              <span className="ml-2 text-[11px] text-slate-400">JD 打分与生成招呼共用这个模型</span>
               <button className="ml-auto chip" onClick={() => setDrawer(false)}>
                 关闭
               </button>
@@ -923,23 +953,35 @@ export default function App() {
                 <label className="label">模型</label>
                 <input className="input" value={model} onChange={(e) => setModel(e.target.value)} />
               </div>
-              <div className="col-span-2 flex justify-end gap-2">
-                <button className="btn-primary" onClick={saveConfig}>
+              <div className="col-span-2">
+                <label className="label flex items-center">
+                  提示词
+                  <span className="ml-2 font-normal text-slate-400">
+                    「生成回复」按它 + 岗位 JD + 我的技能 写打招呼
+                  </span>
+                  {greetPromptDefault && (
+                    <button
+                      className="ml-auto text-[10px] text-primary hover:underline"
+                      onClick={() => setGreetPrompt(greetPromptDefault)}
+                    >
+                      恢复默认
+                    </button>
+                  )}
+                </label>
+                <textarea
+                  className="input min-h-[132px] resize-y !text-[11px] leading-5"
+                  placeholder={greetPromptDefault || '在这里写提示词…'}
+                  value={greetPrompt}
+                  onChange={(e) => setGreetPrompt(e.target.value)}
+                />
+              </div>
+              <div className="col-span-2 flex items-center gap-2">
+                <span className="text-[11px] text-slate-400">
+                  累计 {fmtTokens(tokens.total)} token
+                  {tokens.greet > 0 && ` · 生成 ${fmtTokens(tokens.greet)}`}
+                </span>
+                <button className="ml-auto btn-primary" onClick={saveConfig}>
                   保存配置
-                </button>
-                <button
-                  className="btn-ghost"
-                  onClick={() =>
-                    apiClient
-                      .rescore()
-                      .then(() => {
-                        loadJobs(0)
-                        refresh()
-                      })
-                      .catch((e) => setErr(e.message))
-                  }
-                >
-                  重新打分
                 </button>
               </div>
             </div>
@@ -947,10 +989,10 @@ export default function App() {
         </div>
       )}
 
-      {/* 主体：左右双栏 */}
+      {/* 主体：左栏吃满，右侧是收起的竖栏 / 展开的一半宽抽屉 */}
       <div className="flex min-h-0 flex-1 gap-3 p-3">
         {/* ================= 左栏 ================= */}
-        <section className="flex min-w-0 flex-[0.77] flex-col gap-3">
+        <section className="flex min-w-0 flex-[1] flex-col gap-3">
           {/* 顶部：筛选与抓取 */}
           <div className="card flex shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap px-3 py-2">
             <button
@@ -1549,7 +1591,7 @@ export default function App() {
               className={`min-h-0 flex-1 overflow-y-auto ${listFadeKey > 0 ? 'list-fade' : ''}`}
               key={`list-${listFadeKey}`}
             >
-              <div style={{ columnCount: 2, columnGap: '6px' }}>
+              <div style={{ columnCount: chatOpen ? 2 : 3, columnGap: '6px' }}>
 
               {items.length === 0 && !listLoading && (
                 <div className="py-8 text-center text-[11px] text-slate-400" style={{ columnSpan: 'all' }}>
@@ -1686,10 +1728,21 @@ export default function App() {
                   {selected?.job_id !== j.job_id && (
                     <div className="mt-[3px] flex items-center gap-1 text-[10px] text-slate-400">
                       <span className="truncate">
-                        {j.rejected
-                          ? '已标记不投递 · 单击卡片展开详情 / JD'
-                          : '单击卡片展开详情 / JD'}
+                        {j.rejected ? '已标记不投递 · 单击展开详情 / JD' : '单击展开详情 / JD'}
                       </span>
+                      {j.status !== 'delivered' && (
+                        <button
+                          className="shrink-0 rounded border border-primary/40 px-1 text-[10px] text-primary hover:bg-primary/10"
+                          title="向这位 HR 打招呼：展开 Boss 消息并切到该岗位的会话"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelected(j)
+                            openJobChat(j)
+                          }}
+                        >
+                          打招呼
+                        </button>
+                      )}
                       {j.company_address && (
                         <span
                           className="ml-auto max-w-[45%] shrink truncate text-slate-400"
@@ -1795,10 +1848,20 @@ export default function App() {
           </div>
         </section>
 
-        {/* ================= 右栏：Boss 消息（常驻，敏感库用浮层不挤掉它） ================= */}
-        <section className="flex min-w-0 flex-[1] flex-col gap-3">
-          <ChatPanel focusUid={chatFocusUid} onSent={() => { loadJobs(0); setRefreshTick((t) => t + 1) }} />
-        </section>
+        {/* ========== 右栏：Boss 消息列表常显；对话框收起时只留列表，
+             展开时对话框占掉剩下的宽度 ========== */}
+        <div
+          className={`flex min-h-0 shrink-0 flex-col rounded-lg transition-[width] duration-200 ${
+            chatOpen ? 'w-[52%]' : 'w-[34%]'
+          }`}
+        >
+          <ChatPanel
+            focusUid={chatFocusUid}
+            onSent={onChatSent}
+            onTokens={onChatTokens}
+            onOpenChange={onChatOpenChange}
+          />
+        </div>
       </div>
 
       {/* 敏感库浮层：盖在页面之上，关闭后下面的 Boss 消息面板还在，不用重新加载 */}
