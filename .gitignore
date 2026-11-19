@@ -80,3 +80,4 @@ temp/
 .dsh-acl-recovery/
 .diag-page.png
 *.tsbuildinfo
+nohup.out
