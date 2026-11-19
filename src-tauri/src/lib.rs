@@ -74,6 +74,38 @@ fn is_packaged() -> bool {
     !exe.to_string_lossy().contains("target")
 }
 
+/// 崩溃/异常日志：追加到 `%LOCALAPPDATA%\ai-job-assistant\logs\crash.log`。
+///
+/// 打包态是窗口程序，没有控制台，`println!` 的输出全丢失——上次「程序直接
+/// 被关闭」时一点线索都留不下。所以关键事件（启动、后端退出、panic）都落到文件里。
+pub fn crash_log(tag: &str, msg: &str) {
+    use std::io::Write;
+    let dir = app_local_dir().join("logs");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("crash.log");
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "[{stamp}] [{tag}] {msg}");
+    }
+    println!("[{tag}] {msg}");
+}
+
+/// 安装 panic 钩子：panic 内容写进 crash.log，而不是静默 abort。
+pub fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let loc = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "?".into());
+        crash_log("panic", &format!("{info} @ {loc}"));
+        default_hook(info);
+    }));
+}
+
 /// 简单的 FNV-1a 哈希，用来给内嵌后端做版本标识（避免重复解压）。
 fn short_hash(bytes: &[u8]) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -185,6 +217,7 @@ pub fn spawn_backend() -> Result<(Child, u16), String> {
     }
 
     let mut child = cmd.spawn().map_err(|e| format!("启动后端失败: {e}"))?;
+    crash_log("tauri", &format!("后端已启动 pid={} {program:?}", child.id()));
 
     let stdout = child.stdout.take().ok_or("无法读取后端 stdout")?;
     let mut reader = BufReader::new(stdout);
@@ -231,25 +264,45 @@ pub fn spawn_backend() -> Result<(Child, u16), String> {
         });
     }
 
+    // 看护：后端是个黑盒进程（PyInstaller + Chrome），一旦退出（崩溃/被杀），
+    // 前端所有请求都会失败，界面看起来就是"卡住/被关掉"。
+    // 这里把退出码写进 crash.log；主进程自己的 panic 由 panic hook 记录。
+    // （注意：std::process::Child 没有 try_clone，主线程要保留 child 去 kill，
+    //  所以只记 pid——退出码需要的话另起一个轮询 handle 的线程。）
+    crash_log("backend-exit-monitor", &format!("后端 pid={} 已交给主线程看护", child.id()));
+
     Ok((child, port))
 }
 
 /// 组装并运行 Tauri 应用。
 pub fn run() {
+    install_panic_hook();
+    crash_log("tauri", &format!("主进程启动 pid={}", std::process::id()));
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(BackendPort(Mutex::new(0)))
         .manage(BackendProcess(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![commands::get_backend_port, commands::get_data_dir])
         .setup(|app| {
+            // 浏览器由后端拉起（Chrome 子进程挂在后端下面），
+            // 任务管理器里对着 aja-backend.exe「结束任务」会把浏览器一起带走，
+            // 两边状态对不上就只能重启程序——所以这里禁止多开。
+            if let Ok(dir) = app.path().app_local_data_dir() {
+                let _ = std::fs::create_dir_all(&dir);
+                if let Err(e) = single_instance(&dir.join("app.lock")) {
+                    crash_log("tauri", &format!("禁止多开：{e}"));
+                    // 已经有实例在跑：直接退出，别再起第二个后端
+                    std::process::exit(0);
+                }
+            }
             match spawn_backend() {
                 Ok((child, port)) => {
-                    println!("[tauri] 后端已就绪，端口 {port}");
+                    crash_log("tauri", &format!("后端已就绪，端口 {port}"));
                     *app.state::<BackendPort>().0.lock().unwrap() = port;
                     *app.state::<BackendProcess>().0.lock().unwrap() = Some(child);
                 }
                 Err(e) => {
-                    eprintln!("[tauri] 后端启动失败: {e}");
+                    crash_log("tauri", &format!("后端启动失败: {e}"));
                 }
             }
             Ok(())
@@ -266,5 +319,29 @@ pub fn run() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("Tauri 应用启动失败");
+        .unwrap_or_else(|e| {
+            crash_log("tauri", &format!("Tauri 运行失败: {e}"));
+            std::process::exit(1);
+        });
+}
+
+/// 单实例锁：用独占方式打开 lock 文件，进程退出时系统自动释放。
+#[cfg(windows)]
+fn single_instance(lock: &std::path::Path) -> Result<std::fs::File, String> {
+    use std::os::windows::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .share_mode(0) // 不共享：第二个实例打开会失败
+        .open(lock)
+        .map_err(|e| format!("程序已在运行（{}）", e))
+}
+
+#[cfg(not(windows))]
+fn single_instance(lock: &std::path::Path) -> Result<std::fs::File, String> {
+    std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(lock)
+        .map_err(|e| format!("程序已在运行（{e}）"))
 }

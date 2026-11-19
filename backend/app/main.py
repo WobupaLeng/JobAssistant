@@ -27,15 +27,47 @@ from scrapers.boss import BossScraper
 SCRAPERS = {"boss": BossScraper}
 
 
-def app_data_dir() -> Path:
-    """数据目录：打包后放在 exe 同级的 data/，开发时放项目根的 data/。"""
+def dev_data_dir() -> Path:
+    """开发态数据目录：项目根的 data/（AJA_DATA_DIR 不参与，始终算项目根）。"""
+    return Path(__file__).resolve().parents[2] / "data"
+
+
+def packaged_data_dir() -> Path:
+    """打包态数据目录：Tauri 释放后端的 `%LOCALAPPDATA%\\ai-job-assistant\\data`。
+
+    PyInstaller onefile 里 sys.executable 是释放到临时目录的 exe，
+    所以优先用 Tauri 注入的 AJA_DATA_DIR。
+    """
     env = os.environ.get("AJA_DATA_DIR")
     if env:
-        p = Path(env)
+        return Path(env)
+    base = os.environ.get("LOCALAPPDATA")
+    if base:
+        return Path(base) / "ai-job-assistant" / "data"
+    return Path(sys.executable).parent / "data"
+
+
+def prepared_data_dir() -> Path:
+    """确认过的打包态数据目录（Tauri 下不一定建过这个目录，这里不报错）。"""
+    try:
+        return packaged_data_dir()
+    except Exception:
+        return dev_data_dir()
+
+
+def app_data_dir() -> Path:
+    """数据目录：打包后放在 AppData，开发时放项目根的 data/。
+
+    优先用配置里记住的目录（见 Runtime.__init__ 的「自动识别已有登录态」），
+    这样开发态跑也会沿用打包版登录过的浏览器 profile。
+    """
+    rt = RT
+    if rt is not None and getattr(rt, "data_dir", None):
+        p = Path(rt.data_dir)
     elif getattr(sys, "frozen", False):
-        p = Path(sys.executable).parent / "data"
+        p = packaged_data_dir()
     else:
-        p = Path(__file__).resolve().parents[2] / "data"
+        p = dev_data_dir()
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -44,9 +76,96 @@ def app_data_dir() -> Path:
 # 全局运行时
 # ----------------------------------------------------------------------
 
+# ----------------------------------------------------------------------
+# 运行日志落盘：%LOCALAPPDATA%\ai-job-assistant\logs\backend.log
+# ----------------------------------------------------------------------
+
+_LOG_LOCK = threading.Lock()
+_LOG_STATE = {"path": None, "fh": None}
+
+
+def log_file_path() -> Path:
+    try:
+        return Path(app_data_dir()) / "logs" / "backend.log"
+    except Exception:
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+        return Path(base) / "ai-job-assistant" / "logs" / "backend.log"
+
+
+def log_to_file(level: str, tag: str, message: str) -> None:
+    """把日志同时写进文件。
+
+    打包态后端是窗口子进程，没地方看 print 输出；「程序直接关掉」这类问题
+    没有日志就完全无迹可寻。日志超过 4MB 时滚动一份 .1。
+    """
+    path = log_file_path()
+    with _LOG_LOCK:
+        try:
+            fh = _LOG_STATE.get("fh")
+            if fh is None or _LOG_STATE.get("path") != str(path):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if path.is_file() and path.stat().st_size > 4 * 1024 * 1024:
+                    try:
+                        os.replace(path, path.with_suffix(".log.1"))
+                    except OSError:
+                        pass
+                fh = open(path, "a", encoding="utf-8", errors="replace")
+                _LOG_STATE["fh"] = fh
+                _LOG_STATE["path"] = str(path)
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            fh.write(f"{ts} [{level}] [{tag}] {message}\n")
+            fh.flush()
+        except Exception:
+            # 写日志失败绝不能影响业务
+            pass
+
+
+_EXCEPT_HOOK_READY = False
+
+
+def install_excepthooks() -> None:
+    """把主线程/任意线程里漏出来的异常写进 backend.log 和界面日志。
+
+    之前这些异常被 threading.excepthook 默认打印到早已失效的 stderr，
+    直接从界面上消失，用户只看到「没反应 / 程序被关掉」。
+    """
+    global _EXCEPT_HOOK_READY
+    if _EXCEPT_HOOK_READY:
+        return
+    _EXCEPT_HOOK_READY = True
+
+    def _fmt(exc_type, exc, tb) -> str:
+        return "".join(traceback.format_exception(exc_type, exc, tb)).strip()
+
+    def _sys_hook(exc_type, exc, tb) -> None:
+        log_to_file("error", "uncaught", _fmt(exc_type, exc, tb))
+
+    def _thread_hook(args) -> None:
+        if args.exc_type is SystemExit:
+            return
+        name = getattr(getattr(args, "thread", None), "name", "?")
+        log_to_file("error", f"thread {name}", _fmt(args.exc_type, args.exc_value, args.exc_traceback))
+        rt = RT
+        if rt is not None:
+            try:
+                rt.log("error", f"后台线程 {name} 出错：{args.exc_value}")
+            except Exception:
+                pass
+
+    sys.excepthook = _sys_hook
+    try:
+        threading.excepthook = _thread_hook
+    except Exception:
+        pass
+
+
+install_excepthooks()
+
+
 class Runtime:
     def __init__(self) -> None:
-        self.store = Store(app_data_dir() / DB_NAME)
+        self.data_dir = self._resolve_data_dir()
+        self.store = Store(Path(self.data_dir) / DB_NAME)
         self.scorer = self._build_scorer()
         self.stop = StopFlag()
         self.thread: threading.Thread | None = None
@@ -79,6 +198,55 @@ class Runtime:
             target=self._worker_loop, name="aja-worker", daemon=True
         )
         self.worker_thread.start()
+        try:
+            self.log(
+                "info",
+                f"运行时已就绪：数据目录={self.data_dir} 库={self.store.path if hasattr(self.store, 'path') else ''}",
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _resolve_data_dir() -> Path:
+        """决定用哪个 data 目录，并把结果记进配置。
+
+        踩过的坑：淘宝/打包版刚跑过时，数据在 `%LOCALAPPDATA%\\ai-job-assistant\\data`；
+        开发态（`python -m app.main`）默认用项目根 `data/`，于是提示「没有可用的登录
+         cookie，请先登录 Boss直聘」——登录窗口其实打不开（程序没在运行），
+        而真正的浏览器 profile 在另一个目录。现在：配置里记住上次用的目录，
+        它的浏览器 profile 有数据就继续用它。
+        """
+        if getattr(sys, "frozen", False):
+            default = packaged_data_dir()
+        else:
+            default = dev_data_dir()
+        try:
+            remembered = ""
+            try:
+                remembered = (Store(default / DB_NAME).get_config(DATA_DIR_KEY, "") or "").strip()
+            except Exception:
+                pass
+            from .browser import latest_profile_cookie_db, profile_dir
+
+            def _has_profile(p: Path) -> bool:
+                try:
+                    return latest_profile_cookie_db(profile_dir(p)) is not None
+                except Exception:
+                    return False
+
+            chosen = default
+            if remembered and _has_profile(Path(remembered)):
+                chosen = Path(remembered)
+            chosen.mkdir(parents=True, exist_ok=True)
+            # 记住选中的目录（写进被选中的库，下次照样命中）
+            try:
+                Store(chosen / DB_NAME).set_config(DATA_DIR_KEY, str(chosen))
+            except Exception:
+                pass
+            return chosen
+        except Exception:
+            default.mkdir(parents=True, exist_ok=True)
+            return default
 
     # ---------- 采集线程（patchright 的唯一宿主）----------
     def _worker_loop(self) -> None:
@@ -87,7 +255,9 @@ class Runtime:
             if task is None:
                 return
             fn, args = task
-            name = getattr(fn, "__name__", "task")
+            # run_in_worker 投递的是内部包装函数 _wrap，直接打名字会变成
+            # 「采集线程开始执行：_wrap」，看不出在干什么；优先打被包装函数的真名。
+            name = getattr(fn, "__wrapped_name__", None) or getattr(fn, "__name__", "task")
             try:
                 self.log("info", f"采集线程开始执行：{name}")
             except Exception:
@@ -118,6 +288,7 @@ class Runtime:
             finally:
                 done.set()
 
+        _wrap.__wrapped_name__ = getattr(fn, "__name__", "task")
         self.submit(_wrap)
         if not done.wait(timeout):
             raise RuntimeError("采集线程执行超时（浏览器任务可能被阻塞，请重试或重启程序）")
@@ -239,20 +410,26 @@ class Runtime:
             self.logs.append(entry)
             if len(self.logs) > 2000:
                 del self.logs[:500]
-        if level in ("info", "warn", "error"):
-            # 打包成窗口程序（PyInstaller console=False / Tauri 释放的后端）时
-            # sys.stdout 为 None，print() 会抛
-            #   OSError: [Errno 22] Invalid argument
-            # 而这里是从抓取/登录线程里调用的，异常会把整条登录流程带崩，
-            # 表面症状就是"窗口已弹出然后没了"。所以 stdout 不可用时直接跳过。
-            stream = sys.stdout
-            if stream is None:
-                return
-            try:
-                print(f"[{level}] {message}", file=stream, flush=True)
-            except Exception:
-                # 控制台编码/句柄异常同样不能影响业务线程
-                pass
+        if level not in ("info", "warn", "error"):
+            return
+        # 落盘：打包态没有控制台，出了问题只能靠这份 backend.log
+        try:
+            log_to_file(level, "app", str(message))
+        except Exception:
+            pass
+        # 打包成窗口程序（PyInstaller console=False / Tauri 释放的后端）时
+        # sys.stdout 为 None，print() 会抛
+        #   OSError: [Errno 22] Invalid argument
+        # 而这里是从抓取/登录线程里调用的，异常会把整条登录流程带崩，
+        # 表面症状就是"窗口已弹出然后没了"。所以 stdout 不可用时直接跳过。
+        stream = sys.stdout
+        if stream is None:
+            return
+        try:
+            print(f"[{level}] {message}", file=stream, flush=True)
+        except Exception:
+            # 控制台编码/句柄异常同样不能影响业务线程
+            pass
 
     def recent_logs(self, since: float = 0.0) -> list[dict[str, Any]]:
         with self.log_lock:
@@ -260,6 +437,10 @@ class Runtime:
 
 
 RT: Runtime | None = None
+
+# 记住数据目录的配置键：开发态/打包态谁是真正的 profile 由它决定，
+# 见 Runtime.__init__ 里的「自动识别已有登录态」。
+DATA_DIR_KEY = "data_dir"
 
 
 def _to_int(v: Any) -> int | None:
@@ -670,30 +851,84 @@ def expectations(platform: str = "boss") -> dict[str, Any]:
     实现要点（踩过的坑）：
     - **不经过采集线程/浏览器**：从 last_auth 里的 cookie 直接发 HTTP 请求，
       不进采集队列（否则会被前一个卡住的任务阻塞，界面一直"读取中"）
-    - 失败时回退到浏览器 profile 的 Cookies 库（Chrome 关着才读得到）
+    - 失败时回退到浏览器 profile 的 Cookies 库：先当前数据目录，
+      再开发态/打包态另一个目录，最后本机 Chrome、Edge 的 profile
+      （只在没登录过时才报「请先登录」）
     """
     import urllib.request
 
     rt = get_rt()
 
+    def _collect_cookies(domain: str) -> tuple[dict[str, str], list[str]]:
+        """按优先级收集该平台 cookie；返回 (cookie 字典, 试过的来源)。"""
+        from .browser import latest_profile_cookie_db, profile_dir
+        from .cookie_import import find_cookie_dbs, read_cookies_from_profile
+
+        cookies: dict[str, str] = {}
+
+        def _merge(items: list[dict[str, Any]] | None) -> None:
+            for c in items or []:
+                try:
+                    if domain in (c.get("domain") or ""):
+                        cookies.setdefault(c.get("name", ""), c.get("value", ""))
+                except Exception:
+                    continue
+
+        # ① last_auth：登录成功时前端调 /api/login/save 存下来的
+        raw = rt.store.get_config_json("last_auth") or {}
+        _merge(raw.get("cookies"))
+        if cookies:
+            return cookies, ["last_auth"]
+
+        # ② 浏览器 profile 的 Cookies 库（按修改时间由新到旧）
+        tried: list[str] = []
+        try:
+            from .browser import PROFILE_DIR_NAME
+
+            candidates = [app_data_dir(), dev_data_dir(), prepared_data_dir()]
+            seen: set[str] = set()
+            found: list[tuple[float, Path]] = []
+            for d in candidates:
+                p = profile_dir(d)
+                try:
+                    key = str(p.resolve()).lower()
+                except Exception:
+                    key = str(p).lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                db = latest_profile_cookie_db(p)
+                if db is not None:
+                    found.append((db.stat().st_mtime, p))
+            for _, p in sorted(found, reverse=True):
+                _merge(read_cookies_from_profile(p, domain))
+                tried.append(f"{PROFILE_DIR_NAME}（{p.parent}）")
+                if cookies:
+                    return cookies, tried
+        except Exception:
+            pass
+
+        # ③ 本机用户自己日常用的 Chrome / Edge（先在程序里登录过就不会走到这）
+        try:
+            for db in find_cookie_dbs():
+                if cookies:
+                    break
+                _merge(read_cookies_from_profile(db.parent, domain))
+                tried.append(str(db.parent))
+        except Exception:
+            pass
+        return cookies, tried
+
     def _fetch() -> list[dict[str, Any]]:
-        from .browser import LOGIN_COOKIES, profile_dir
-        from .cookie_import import read_cookies_from_profile
+        from .browser import LOGIN_COOKIES
 
         domain, names = LOGIN_COOKIES.get("boss", ("zhipin.com", ()))
-        cookies: dict[str, str] = {}
-        raw = rt.store.get_config_json("last_auth") or {}
-        for c in (raw.get("cookies") or []):
-            try:
-                if domain in (c.get("domain") or ""):
-                    cookies[c.get("name", "")] = c.get("value", "")
-            except Exception:
-                continue
+        cookies, tried = _collect_cookies(domain)
         if not cookies:
-            for c in read_cookies_from_profile(profile_dir(app_data_dir()), domain) or []:
-                cookies[c.get("name", "")] = c.get("value", "")
-        if not cookies:
-            raise RuntimeError("没有可用的登录 cookie，请先登录 Boss直聘")
+            where = "、".join(tried) if tried else "任何浏览器 profile"
+            raise RuntimeError(
+                f"没有可用的登录 cookie，请先登录 Boss直聘（已查找 {where}，都没有 Boss 登录态）"
+            )
 
         url = "https://www.zhipin.com/wapi/zpgeek/pc/recommend/expect/list.json"
         req = urllib.request.Request(url, headers={
@@ -1089,6 +1324,20 @@ def pick_port(preferred: int = 0) -> int:
 def main() -> None:
     import uvicorn
 
+    # 启动横幅先落盘：打包态后端没有控制台，「用户点了开始然后程序没了」
+    # 这类问题只能靠这份日志倒推死在哪一步。
+    try:
+        log_to_file(
+            "info",
+            "boot",
+            f"后端启动 pid={os.getpid()} frozen={getattr(sys, 'frozen', False)} "
+            f"AJA_DATA_DIR={os.environ.get('AJA_DATA_DIR', '')}",
+        )
+        log_to_file("info", "boot", f"数据目录={app_data_dir()} 日志={log_file_path()}")
+    except Exception:
+        pass
+    # 注意：这里**不**实例化 Runtime。打包态下它可能在做浏览器/profile 探测，
+    # 启动阶段任何毛病都不该拖慢或拖挂 uvicorn 起来，按需再建。
     port = int(os.environ.get("AJA_PORT", "0")) or pick_port()
     # Tauri 侧从 stdout 读这一行拿到端口
     print(f"AJA_BACKEND_PORT={port}", flush=True)

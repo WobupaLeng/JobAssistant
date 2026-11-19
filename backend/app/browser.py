@@ -62,8 +62,40 @@ DEFAULT_TIMEOUT_MS = 60_000
 
 
 def profile_dir(data_dir: str | Path) -> Path:
-    """持久化 profile 目录（登录态 + 所有 cookie 都在这里）。"""
-    p = Path(data_dir) / PROFILE_DIR_NAME
+    """持久化 profile 目录（登录态 + 所有 cookie 都在这里）。只返回路径，不创建目录。"""
+    return Path(data_dir) / PROFILE_DIR_NAME
+
+
+# Chrome 放 Cookies 库的位置（新版 <profile>/Default/Network/Cookies）
+_PROFILE_COOKIE_DBS = (
+    Path("Default") / "Network" / "Cookies",
+    Path("Default") / "Cookies",
+    Path("Network") / "Cookies",
+    Path("Cookies"),
+)
+
+
+def latest_profile_cookie_db(profile: str | Path) -> Path | None:
+    """返回该 profile 里最新修改过的 Cookies 库路径（没有返回 None）。
+
+    只有存在 Cookies 库的目录才算「真正登录过」，用它来选择数据目录，
+    比单看 Local State 靠谱（Local State 启动浏览器就会生成）。
+    """
+    root = Path(profile)
+    best: Path | None = None
+    for rel in _PROFILE_COOKIE_DBS:
+        p = root / rel
+        try:
+            if p.is_file() and (best is None or p.stat().st_mtime > best.stat().st_mtime):
+                best = p
+        except OSError:
+            continue
+    return best
+
+
+def ensure_profile_dir(data_dir: str | Path) -> Path:
+    """创建 profile 目录（启动浏览器前才需要）。"""
+    p = profile_dir(data_dir)
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -192,7 +224,7 @@ def launch_context(
     - UA 伪造只会制造 "UA 说 Mac、platform 说 Win32" 这种致命矛盾
     """
     sanitize_profile_exit_state(data_dir)
-    pdir = profile_dir(data_dir)
+    pdir = ensure_profile_dir(data_dir)
     log("info", f"启动 patchright（持久化目录 {pdir}）")
 
     # 打包成单文件 exe 后，patchright 的 node driver（node.exe + package/cli.js）
@@ -284,10 +316,13 @@ def context_alive(ctx: Any) -> bool:
     except Exception:
         return False
     # 注意：浏览器被外部关掉后 ctx.pages 仍可能返回旧列表，
-    # 必须真开一个页面才能确认连接活着（否则会在死上下文上抓取报 TargetClosedError）。
+    # 所以这里必须真正问一次浏览器（否则会在死上下文上抓取报 TargetClosedError）。
+    # 但**绝不能** new_page()+close() 探活：登录流程每秒调一次，
+    # 在真实 Chrome 里就是标签页每秒闪现一次（用户看到的「登录页一直闪烁」），
+    # 还会把当前活动标签页抢走、打出满屏的「采集线程开始执行：_wrap」。
+    # 用带超时的 cookies() 代替：不新建页面，上下文已死时会抛 WrongTarget/Timeout。
     try:
-        probe = ctx.new_page()
-        probe.close()
+        ctx.cookies()
         return True
     except Exception:
         return False
@@ -470,6 +505,7 @@ class LoginSession:
 
     # --- 以下动作都在采集线程里执行 ---
     def _check_logged_in(self, page: Any) -> bool:
+        """在采集线程里执行：只读 cookie，不新建/刷新页面。"""
         try:
             return bool(detect_logged_in_from_page(page, self.platform))
         except Exception:

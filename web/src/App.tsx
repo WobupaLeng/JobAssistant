@@ -1127,7 +1127,13 @@ export default function App() {
                           setExpects(r.items)
                           setErr('')
                         } else {
-                          setErr(r.error || '没有读到期望职位（账号里可能没配置，或登录已失效）')
+                          const msg = r.error || '没有读到期望职位（账号里可能没配置，或登录已失效）'
+                          // 登录态失效时顺手把登录按钮标出来，别让用户干瞪眼
+                          if (/cookie|登录/.test(msg)) {
+                            setLoggedIn((v) => ({ ...v, boss: false }))
+                            refresh()
+                          }
+                          setErr(msg)
                         }
                       } catch (e: any) {
                         setErr(e?.message || String(e))

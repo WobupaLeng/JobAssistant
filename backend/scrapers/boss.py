@@ -165,18 +165,20 @@ class BossScraper(BaseScraper):
             captured: list[str] = []
 
             first_seen: list[Any] = []
+            seen_resps: set[int] = set()   # 重试时同一响应只算一次
 
             def on_response(resp: Any) -> None:
                 # 搜索接口：/wapi/zpgeek/search/joblist.json
+                if resp in seen_resps:
+                    return
                 if "joblist.json" in resp.url and resp.status == 200:
+                    seen_resps.add(resp)
                     try:
                         captured.append(resp.text())
                     except Exception:
                         # 偶发 "No resource with given identifier"：同步回调节点上
                         # 拿不到 body，先记下 resp，导航结束后再重试取一次
                         first_seen.append(resp)
-
-            page.on("response", on_response)
 
             # 预热：先回首页再带筛选条件进搜索页。
             # 直接带 salary/experience 多参数跳转会触发 Boss 的"加载中/风控"页，
@@ -189,6 +191,12 @@ class BossScraper(BaseScraper):
 
             url = build_search_url(cfg, kw)
             self.info(f"关键词「{kw}」第 {page_no} 页")
+            # 空页（风控验证码页 / 加载中 / 未登录跳转）不要空等，先看清页面是什么，
+            # 能重试就重试（刷新 + 换个入口重进），重试几次还空才算这一页失败。
+            captured.clear()
+            first_seen.clear()
+            page.on("response", on_response)
+            empty_retry = 0
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 self.stop.sleep(3.5)   # 可中断等待（停止/暂停立即生效）
@@ -207,26 +215,67 @@ class BossScraper(BaseScraper):
                 if body:
                     captured.append(body)
 
-            if not captured:
+            def _harvest_dom() -> int:
                 dom_items = self._parse_dom_cards(page)
-                if dom_items:
-                    self.warn(
-                        f"第 {page_no} 页接口未捕获，改用页面卡片解析，拿到 {len(dom_items)} 条"
-                    )
-                    added_dom = 0
-                    for item in dom_items:
-                        jid = item.get("job_id")
-                        if not jid or jid in jobs:
-                            continue
-                        jobs[jid] = item
-                        hit_kw.setdefault(jid, kw)
-                        added_dom += 1
-                    self.info(f"第 {page_no} 页（DOM）新增 {added_dom} 条（累计 {len(jobs)}）")
-                else:
-                    self.warn(
-                        f"第 {page_no} 页没有拿到任何岗位（接口与 DOM 都为空），"
-                        f"可能触发风控或未登录。当前地址：{page.url}"
-                    )
+                added_dom = 0
+                for item in dom_items:
+                    jid = item.get("job_id")
+                    if not jid or jid in jobs:
+                        continue
+                    jobs[jid] = item
+                    hit_kw.setdefault(jid, kw)
+                    added_dom += 1
+                return added_dom
+
+            if not captured:
+                added_dom = _harvest_dom()
+                if added_dom:
+                    self.warn(f"第 {page_no} 页接口未捕获，改用页面卡片解析，拿到 {added_dom} 条")
+            else:
+                added_dom = 0
+
+            # 空页处理：诊断 + 重试
+            while not captured and not added_dom and empty_retry < 2 and not self.should_stop():
+                empty_retry += 1
+                reason = self._diagnose_empty_page(page)
+                self.warn(f"第 {page_no} 页未拿到岗位：{reason}（第 {empty_retry} 次重试）")
+                try:
+                    # 退一步：先回首页去掉全部筛选参数，再带着条件重进
+                    page.goto("https://www.zhipin.com/web/geek/job", wait_until="domcontentloaded", timeout=30000)
+                    self.stop.sleep(2.0)
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    self.stop.sleep(3.5)
+                except Exception as exc:
+                    self.warn(f"重试打开搜索页失败：{exc}")
+                # 重新挂响应监听后再刷新一次（刷新会重新发 joblist.json）
+                page.on("response", on_response)
+                try:
+                    page.reload(wait_until="domcontentloaded", timeout=30000)
+                    self.stop.sleep(3.0)
+                except Exception as exc:
+                    self.warn(f"重试刷新失败：{exc}")
+                page.remove_listener("response", on_response)
+                for resp in first_seen:
+                    try:
+                        body = resp.text()
+                    except Exception:
+                        continue
+                    if body:
+                        captured.append(body)
+                first_seen.clear()
+                if not captured:
+                    added_dom = _harvest_dom()
+
+            if not captured and not added_dom:
+                self.warn(
+                    f"第 {page_no} 页没有拿到任何岗位（接口与 DOM 都为空），"
+                    f"可能触发风控或未登录。当前地址：{page.url}"
+                )
+                # 这一页彻底没戏：给用户一个明确动作，别让后面每页都白跑
+                self.warn("建议：先在左栏点「登录」完成扫码/验证码，再重新开始抓取")
+                if empty_retry >= 2:
+                    self.info(f"关键词「{kw}」连续空页，结束该关键词")
+                    break
 
             added = 0
             for raw in captured:
@@ -262,22 +311,118 @@ class BossScraper(BaseScraper):
                 break
             self.jitter()  # 每页之间的额外随机间隔
 
+    def _diagnose_empty_page(self, page: Any) -> str:
+        """空页到底是哪种：验证码/风控、登录失效、加载中、还是真没有结果。
+
+        这段判断直接决定用户下一步该干什么，所以把页面特征翻成人话，
+        别只丢一句「可能触发风控或未登录」。
+        """
+        try:
+            cur = (page.url or "").lower()
+            if "verify" in cur or "captcha" in cur:
+                return "跳到了安全验证页（需要手动过验证码）"
+            title = ""
+            try:
+                title = (page.title() or "")[:80]
+            except Exception:
+                pass
+            if "安全验证" in title or "验证码" in title:
+                return f"安全验证页（{title}）"
+            text = self._safe_inner_text(page, "body", 3000)
+            low = text.lower()
+            for marker in ("安全验证", "请完成验证", "拖动滑块", "点击验证", "人机验证"):
+                if marker in text:
+                    return f"页面要求安全验证（{marker}）"
+            if "/web/user/" in cur or "login" in cur:
+                return "被重定向到登录页（登录态失效）"
+            if "加载中" in text or "loading" in low:
+                return "页面一直停在加载中"
+            if "没有找到" in text or "暂无" in text or "换个条件" in text:
+                return "筛选条件下 Boss 没有返回结果"
+            if not text.strip():
+                return "页面内容为空（可能被风控拦截）"
+            # 有正文却没卡片：把「实际看到什么」说清楚，否则用户只会看到
+            # 「网页明明有数据」和程序各说各话。带上链接数便于判断是不是选择器失配。
+            links = 0
+            for sel in ("a[href*='/job_detail/']", "a[href*='job_detail']"):
+                try:
+                    links = max(links, page.locator(sel).count())
+                except Exception:
+                    pass
+            # 有链接就可能还能解析：先试一次，能解析出来就不是「结构变了」
+            if links and self._card_container(page):
+                return "卡片找到了但没解析出有效字段，正在重试"
+            if links:
+                return (
+                    f"页面里有 {links} 个岗位链接，但卡片选择器一个都没匹配上"
+                    f"（标题「{title}」，页面结构可能变了）"
+                )
+            snippet = " ".join(text.split())[:60]
+            return f"页面标题「{title}」没有任何岗位卡片（正文开头：{snippet}）"
+        except Exception as exc:
+            return f"无法判断空页原因（{exc}）"
+
+    @staticmethod
+    def _safe_inner_text(page: Any, selector: str, limit: int) -> str:
+        try:
+            loc = page.locator(selector)
+            if loc.count() == 0:
+                return ""
+            return (loc.first.inner_text(timeout=3000) or "")[:limit]
+        except Exception:
+            return ""
+
     # ---------- 解析 ----------
+    # 岗位卡片的容器标签（实测 2026-11 版 zhipin 列表页）。
+    # 曾经错误地只找 li.job-card-wrap，结果真实结构是：
+    #   ul.rec-job-list > div.card-area > div.job-card-wrap > li.job-card-box
+    # .job-card-wrap 是个 **div**，不是 li，所以旧选择器永远 count=0，
+    # 页面明明有 45 张卡也只能给出「没有任何岗位卡片」。
+    _CARD_SELECTORS = (
+        "li.job-card-box",
+        "li.job-card-wrap",
+        "li.job-card-wrapper",
+        ".job-card-box",
+        ".job-card-wrapper",
+    )
+
+    def _card_container(self, page: Any) -> str:
+        """返回当前页面里真正有卡片的那个选择器；都没有则返回空串。
+
+        先按候选选择器逐个试，全部落空时退回「有 job_detail 链接的最近祖先
+        列表项」这种结构性判定，Boss 下次换 class 名也不至于立刻瞎。
+        """
+        for sel in self._CARD_SELECTORS:
+            try:
+                if page.locator(sel).count() > 0:
+                    return sel
+            except Exception:
+                continue
+        return ""
+
     def _parse_dom_cards(self, page: Any) -> list[dict[str, Any]]:
         """接口捕获失败时的兜底：直接读页面上的岗位卡片。
 
         2026-11 版 zhipin 列表页的真实结构（实测）：
-          li.job-card-wrap
-            a.job-name                    职位名
-            span.job-salary               薪资（innerText 里的数字常被字体加密，取不到就留空）
-            li                            经验 / 学历
-            span.boss-name                公司名  ← 关键：不是 .company-name
-            span.company-location         城市·区·商圈
+          ul.rec-job-list
+            div.card-area
+              div.job-card-wrap
+                li.job-card-box            ← 卡片本身是 li.job-card-box
+                  div.job-title
+                    a.job-name            职位名 + /job_detail/ 链接
+                    span.job-salary       薪资（innerText 里的数字常被字体加密，取不到就留空）
+                  ul.tag-list li          经验 / 学历
+                  a.boss-info
+                    span.boss-name        公司名  ← 关键：不是 .company-name
+                  span.company-location   城市·区·商圈
         只用 DOM 拿标题/公司/城市/经验/链接，JD 全文仍由 _fetch_detail 打开详情页补。
         """
         out: list[dict[str, Any]] = []
+        sel = self._card_container(page)
+        if not sel:
+            return out
         try:
-            cards = page.locator("li.job-card-wrap, li.job-card-wrapper, .job-card-wrapper")
+            cards = page.locator(sel)
             n = min(cards.count(), 60)
         except Exception:
             return out
@@ -316,8 +461,11 @@ class BossScraper(BaseScraper):
 
                 exp = ""
                 deg = ""
-                if c.locator("ul.tag-list li, .tag-list li, li").count():
-                    lis = c.locator("ul.tag-list li, .tag-list li, li")
+                # 卡片是 li，所以「li」在这个作用域里会匹配到卡片自己（inner_text
+                # 是整张卡的文本，长度必然 >12 被跳过）。限定在 .tag-list 里找。
+                tag_sel = "ul.tag-list li, .tag-list li, .job-tags span, .job-tags li"
+                if c.locator(tag_sel).count():
+                    lis = c.locator(tag_sel)
                     for k in range(min(lis.count(), 6)):
                         t = (lis.nth(k).inner_text() or "").strip()
                         if not t or len(t) > 12:
