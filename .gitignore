@@ -75,3 +75,8 @@ desktop.ini
 *.rej
 tmp/
 temp/
+
+# ---------- 调试残留 / 工具缓存 ----------
+.dsh-acl-recovery/
+.diag-page.png
+*.tsbuildinfo
