@@ -53,6 +53,13 @@ class Greeting:
 
 def _profile_skills(profile: dict[str, Any]) -> list[str]:
     out: list[str] = []
+    # 界面「配置 → 技能」里手填的，优先级最高
+    raw = profile.get("skills")
+    if isinstance(raw, str):
+        raw = re.split(r"[,，、;；/\n]+", raw)
+    for s in raw or []:
+        if isinstance(s, str) and s.strip() and s.strip() not in out:
+            out.append(s.strip())
     for k in ("core_skills", "bonus_skills"):
         for s in profile.get(k) or []:
             if isinstance(s, str) and s.strip() and s.strip() not in out:
@@ -75,6 +82,17 @@ def matched_skills(job: dict[str, Any], profile: dict[str, Any]) -> list[str]:
     # 一个都没命中时，退而求其次：JD 里出现过的通用技能词
     found = [w for w in _SKILL_WORDS if w.lower() in blob]
     return found[:4] or mine[:3]
+
+
+def profile_with_skills(profile: dict[str, Any], skills_text: str | None) -> dict[str, Any]:
+    """把「配置」里手填的技能合进画像。技能留空时退回简历里自带的技能。"""
+    out = dict(profile or {})
+    text = (skills_text or "").strip()
+    if text:
+        out["skills"] = text
+    else:
+        out.pop("skills", None)
+    return out
 
 
 def build_prompt(user_prompt: str | None, job: dict[str, Any], profile: dict[str, Any]) -> tuple[str, str]:

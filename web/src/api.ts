@@ -128,6 +128,8 @@ export interface Config {
   exclude_rule_defaults?: ExcludeRules
   greet_prompt?: string
   greet_prompt_default?: string
+  skills?: string
+  score_mode?: 'rule' | 'llm'
   tokens_total?: number
   tokens_greet?: number
   profile: Record<string, any>
@@ -217,6 +219,33 @@ export interface ResumeItem {
   size: string
   upload_time: string
   suffix: string
+}
+
+export interface AutoGreetJob {
+  job_id: string
+  title: string
+  company: string
+  salary: string
+  score?: number | null
+  encrypt_job_id: string
+  hr_name?: string
+  job_url?: string
+}
+
+export interface AutoGreetOne {
+  ok: boolean
+  stage?: string
+  error?: string
+  skip?: boolean
+  text?: string
+  tokens?: number
+  source?: string
+  note?: string
+  company?: string
+  title?: string
+  uid?: string
+  tokens_total?: number
+  tokens_greet?: number
 }
 
 export interface GreetResp {
@@ -348,6 +377,14 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify({ uid, resume_id: resumeId ?? null }),
     }),
+  /** 自动打招呼：取待投递里还没发过的岗位 */
+  autoGreetNext: () =>
+    api<{ ok: boolean; items: AutoGreetJob[]; tokens_total?: number; tokens_greet?: number; error?: string }>(
+      '/api/auto-greet/next',
+    ),
+  /** 自动打招呼：处理指定岗位一条（找 HR → 生成话术 → 发送 → 记 token） */
+  autoGreetOne: (jobId: string) =>
+    api<AutoGreetOne>('/api/auto-greet/one', { method: 'POST', body: JSON.stringify({ job_id: jobId }) }),
   greet: (body: { job_id?: string; uid?: string; encrypt_job_id?: string }) =>
     api<GreetResp>('/api/greet', { method: 'POST', body: JSON.stringify(body) }),
   chatRecall: (uid: string) =>
@@ -356,7 +393,14 @@ export const apiClient = {
       body: JSON.stringify({ uid }),
     }),
   chatOpen: (p: { uid?: string; encrypt_job_id?: string; brand?: string }) =>
-    api<{ ok: boolean; found?: boolean; friend?: ChatFriend; error?: string }>('/api/chat/open', {
+    api<{
+      ok: boolean
+      found?: boolean
+      friend?: ChatFriend
+      fallback?: string
+      candidates?: { uid: number | string; name?: string; title?: string; brand?: string; avatar?: string }[]
+      error?: string
+    }>('/api/chat/open', {
       method: 'POST',
       body: JSON.stringify(p),
     }),

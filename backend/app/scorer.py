@@ -281,6 +281,14 @@ class RuleScorer:
         parts: list[str] = []
         total = 0
 
+        # 详情页没打开时 jd 为空：技能分与公司分都会按「无 JD」的降权处理，
+        # 总分会明显偏低，很容易低于分值门槛而被整批判掉。这里记下来，日志里好解释。
+        no_jd = not (jd or "").strip()
+        if no_jd:
+            penalty = "（详情页没拿到 JD，按保守值打分）"
+        else:
+            penalty = ""
+
         s_skill = self._skill(jd)
         total += s_skill
         parts.append(f"技能 {s_skill}/40")
@@ -301,13 +309,12 @@ class RuleScorer:
         total += s_company
         parts.append(f"公司质量 {s_company}/10")
 
-        penalty = ""
         text_all = f"{company or ''} {title or ''} {jd or ''}"
         if any(w in text_all for w in OUTSOURCE_WORDS) or SHORT_TERM_RE.search(
             f"{title or ''} {jd or ''}"
         ):
             total //= 2
-            penalty = "；外包/短期信号→总分减半"
+            penalty += "；外包/短期信号→总分减半"
 
         score = max(1, min(10, -(-total // 10)))
         return ScoreResult(
@@ -398,11 +405,26 @@ SYSTEM_PROMPT = (
 )
 
 
-def build_user_prompt(job: dict[str, Any]) -> str:
+def build_user_prompt(
+    job: dict[str, Any],
+    profile: dict[str, Any] | None = None,
+    filters: str = "",
+) -> str:
+    pf = profile or PROFILE
     lines = [
-        f"【求职者画像】{PROFILE['summary']}",
-        f"期望薪资 {PROFILE['salary_low']}-{PROFILE['salary_high']}K，"
-        f"期望城市 {PROFILE['city']}，工作年限约 {PROFILE['years']} 年。",
+        f"【求职者画像】{pf.get('summary') or PROFILE['summary']}",
+        f"期望薪资 {pf.get('salary_low', PROFILE['salary_low'])}-"
+        f"{pf.get('salary_high', PROFILE['salary_high'])}K，"
+        f"期望城市 {pf.get('city', PROFILE['city'])}，"
+        f"工作年限约 {pf.get('years', PROFILE['years'])} 年。",
+    ]
+    from .greeting import _profile_skills  # 兼容「配置→技能」里手填的字符串
+
+    skills = _profile_skills(pf)
+    lines.append(f"技能：{'、'.join(dict.fromkeys(skills))}")
+    if filters:
+        lines += ["", f"【我的筛选条件（投递偏好）】{filters}"]
+    lines += [
         "",
         "【岗位信息】",
         f"平台：{job.get('platform')}",
@@ -478,12 +500,13 @@ class LLMScorer:
             api_key=api_key, base_url=base_url or None, timeout=timeout
         )
 
-    def score(self, job: dict[str, Any]) -> ScoreResult:
+    def score(self, job: dict[str, Any], profile: dict[str, Any] | None = None,
+              filters: str = "") -> ScoreResult:
         resp = self._client.chat.completions.create(
             model=self.model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_user_prompt(job)},
+                {"role": "user", "content": build_user_prompt(job, profile, filters)},
             ],
             temperature=0.2,
             max_tokens=300,
@@ -506,10 +529,15 @@ class LLMScorer:
 class Scorer:
     """按配置自动选择大模型或规则打分；大模型失败时自动回退规则。"""
 
-    def __init__(self, llm: LLMScorer | None = None, rules: "ExcludeRules | None" = None) -> None:
+    def __init__(self, llm: LLMScorer | None = None, rules: "ExcludeRules | None" = None,
+                 use_llm: bool = False) -> None:
         self.rule = RuleScorer()
         self.llm = llm
         self.rules = rules or ExcludeRules()
+        # 默认规则打分（快、不花钱）；界面打开开关后才走大模型
+        self.use_llm = bool(use_llm)
+        self.profile: dict[str, Any] = PROFILE
+        self.filters = ""
 
     def reject(self, job: dict[str, Any]) -> str | None:
         return self.rule.reject(
@@ -520,9 +548,9 @@ class Scorer:
         )
 
     def score(self, job: dict[str, Any]) -> ScoreResult:
-        if self.llm is not None:
+        if self.llm is not None and self.use_llm:
             try:
-                return self.llm.score(job)
+                return self.llm.score(job, self.profile, self.filters)
             except Exception as exc:  # 网络/额度/解析失败都回退，保证流程不断
                 fallback = self.rule.score(
                     job.get("company"),

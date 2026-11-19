@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .scorer import ExcludeRules, LLMScorer, PROFILE, Scorer
-from .greeting import DEFAULT_PROMPT, GreetingWriter
+from .greeting import DEFAULT_PROMPT, GreetingWriter, profile_with_skills
 from .store import DB_NAME, Store
 from scrapers.base import ScrapeConfig, StopFlag, split_keywords
 from scrapers.boss import BossScraper
@@ -269,6 +269,11 @@ class Runtime:
             if task is None:
                 return
             fn, args = task
+            try:
+                self._worker_label = getattr(fn, "__wrapped_label__", None) or getattr(fn, "__name__", "任务")
+                self._worker_t0 = time.time()
+            except Exception:
+                pass
             # run_in_worker 投递的是内部包装函数 _wrap，直接打名字只会得到
             # 「采集线程开始执行：_wrap」，看不出在干什么。这里用 label 说清楚
             # 具体在做什么，同时在后台记一条 DEBUG 级的来源，便于对照。
@@ -293,6 +298,20 @@ class Runtime:
                         self.log("info", f"完成：{label}（{cost:.1f}s）")
                     except Exception:
                         pass
+            finally:
+                try:
+                    self._worker_label = ""
+                    self._worker_t0 = 0.0
+                except Exception:
+                    pass
+
+    def worker_busy(self) -> tuple[str, float]:
+        """采集线程当前在忙什么、忙了多久。空闲返回 ("", 0)。"""
+        label = getattr(self, "_worker_label", "") or ""
+        t0 = getattr(self, "_worker_t0", 0.0) or 0.0
+        if not label or not t0:
+            return ("", 0.0)
+        return (label, time.time() - t0)
 
     def submit(self, fn, *args) -> None:
         """把任务丢进采集线程执行。"""
@@ -424,22 +443,54 @@ class Runtime:
         except Exception:
             pass
 
+    def _filter_text(self) -> str:
+        """把界面上的筛选条件拼成一句话，喂给大模型打分时用。"""
+        parts: list[str] = []
+        try:
+            if self.salary_filter:
+                parts.append("薪资区间 " + "、".join(self.salary_filter))
+            if self.min_score:
+                parts.append(f"低于 {self.min_score} 分不要")
+            rules = self.exclude_rules()
+            for name in ("keywords", "companies"):
+                vals = [v for v in (getattr(rules, name, []) or []) if str(v).strip()]
+                if vals:
+                    parts.append(f"排除{'关键词' if name == 'keywords' else '公司'}：" + "、".join(map(str, vals)))
+        except Exception:
+            pass
+        return "；".join(parts)
+
     def _build_scorer(self) -> Scorer:
         rules = self.exclude_rules()
+        mode = (self.store.get_config("score_mode") or "rule").strip() or "rule"
         key = self.store.get_config("api_key") or ""
-        if not key.strip():
-            return Scorer(None, rules)
         try:
-            return Scorer(
-                LLMScorer(
-                    api_key=key.strip(),
-                    base_url=self.store.get_config("base_url") or None,
-                    model=self.store.get_config("model") or "deepseek-chat",
-                ),
-                rules,
-            )
+            profile = _greeting_profile(self)
         except Exception:
-            return Scorer(None, rules)
+            profile = None
+        try:
+            filters = self._filter_text()
+        except Exception:
+            filters = ""
+        if not key.strip():
+            sc = Scorer(None, rules, use_llm=False)
+        else:
+            try:
+                sc = Scorer(
+                    LLMScorer(
+                        api_key=key.strip(),
+                        base_url=self.store.get_config("base_url") or None,
+                        model=self.store.get_config("model") or "deepseek-chat",
+                    ),
+                    rules,
+                    use_llm=(mode == "llm"),
+                )
+            except Exception:
+                sc = Scorer(None, rules, use_llm=False)
+        if profile:
+            sc.profile = profile
+        sc.filters = filters
+        return sc
 
     def rebuild_scorer(self) -> None:
         self.scorer = self._build_scorer()
@@ -670,7 +721,9 @@ def process_job(rt: Runtime, job: dict[str, Any]) -> bool:
     # 3.5) 分值门槛：低于设定分值的 JD 不入库
     gate = int(getattr(rt, "min_score", 0) or 0)
     if gate > 1 and result.score < gate:
-        return _exclude(rt, job, label, f"匹配度 {result.score}/10 低于设定门槛 {gate} 分")
+        no_jd = not str(job.get("jd_text") or "").strip()
+        tail = "（详情页没拿到 JD，分数被压低了，重新抓一次通常就好了）" if no_jd else ""
+        return _exclude(rt, job, label, f"匹配度 {result.score}/10 低于设定门槛 {gate} 分{tail}")
 
     # 4) 入库（重复自动跳过）
     is_new = rt.store.enqueue_job(job)
@@ -1357,6 +1410,21 @@ def _run_chat(fn, timeout: float = 45.0):
     while not done.wait(0.4):
         last, budget = rt.chat.activity()
         limit = budget if budget > 0 else 30.0
+        # 浏览器在同一时刻只能给一个任务用。抓取/打分正在用时消息任务是在排队，
+        # 这不是卡死，只能提示「等一下」，绝不能报「浏览器可能卡住了」。
+        busy_label, busy_for = rt.worker_busy()
+        if busy_label and not last:
+            if busy_for > 90:
+                raise RuntimeError(
+                    f"浏览器正被「{busy_label}」占用（已 {int(busy_for)} 秒），"
+                    "消息操作排在它后面。等它跑完再试，或先点「停止抓取」。"
+                )
+            if time.time() > deadline:
+                raise RuntimeError(
+                    f"浏览器正被「{busy_label}」占用，消息操作还没轮到。"
+                    "等它跑完再试，或先点「停止抓取」。"
+                )
+            continue
         if last and time.time() - last > limit + 15:
             raise RuntimeError(
                 "Boss 消息页没有响应（浏览器可能卡住了），请稍后重试或重启程序"
@@ -1434,6 +1502,116 @@ def chat_send(req: ChatSendReq) -> dict[str, Any]:
         return {"ok": False, "error": msg}
 
 
+class AutoGreetReq(BaseModel):
+    job_id: str
+
+
+@app.get("/api/auto-greet/next")
+def auto_greet_next() -> dict[str, Any]:
+    """自动打招呼的下一条候选：待投递里还没聊过 HR 的岗位（按匹配分高→低）。"""
+    rt = get_rt()
+    rows = rt.store.list_jobs(
+        status="pending", platform="boss", include_rejected=False,
+        sort="score", order="desc", limit=50,
+    )
+    items = []
+    for r in rows:
+        jid = str(r.get("job_id") or "")
+        if not jid.startswith("boss:"):
+            continue
+        items.append({
+            "job_id": jid,
+            "title": r.get("title") or "",
+            "company": r.get("company") or "",
+            "salary": r.get("salary") or "",
+            "score": r.get("match_score"),
+            "encrypt_job_id": jid[5:],
+            "hr_name": r.get("hr_name") or "",
+            "job_url": r.get("job_url") or "",
+        })
+    return {"ok": True, "items": items, "tokens_total": rt.tokens_total, "tokens_greet": rt.tokens_greet}
+
+
+@app.post("/api/auto-greet/one")
+def auto_greet_one(req: AutoGreetReq) -> dict[str, Any]:
+    """自动打招呼的单步：找到 HR → 按提示词+JD+技能生成话术 → 发出去。
+
+    刻意做成「一次只处理一条」：浏览器同一时刻只能给一个任务用，
+    长流程会把抓取和聊天操作全堵死，由前端按间隔逐条驱动最稳。
+    """
+    rt = get_rt()
+    job = rt.store.get_job(req.job_id)
+    if job is None:
+        return {"ok": False, "stage": "job", "error": "岗位不在库里了", "done": True}
+    if str(job.get("status") or "") == "delivered":
+        return {"ok": False, "stage": "skip", "error": "已经标记为已投递，跳过", "skip": True}
+
+    ejid = str(job.get("job_id") or "")[5:] if str(job.get("job_id") or "").startswith("boss:") else ""
+
+    # 1) 找到这个岗位对应的 HR 会话
+    def _find():
+        ctx = rt.ensure_browser()
+        return rt.chat.friends(ctx, force=False)
+
+    _find.__chat_label__ = "自动打招呼：查找 HR 会话"
+    try:
+        friends = _run_chat(_find, timeout=90.0)
+    except Exception as exc:
+        return {"ok": False, "stage": "find", "error": str(exc) or exc.__class__.__name__}
+
+    target = None
+    for f in friends or []:
+        if ejid and str(f.get("encrypt_job_id") or "") == ejid:
+            target = f
+            break
+    if target is None:
+        # 没打过招呼的岗位在会话列表里不存在；同一家公司只有一位 HR 时直接发给他，
+        # 等于「主动建立会话」，比干等用户手动聊更符合自动打招呼的意图
+        brand = str(job.get("company") or "").strip()
+        same = [f for f in friends or [] if brand and brand in str(f.get("brand") or "")]
+        if len(same) == 1:
+            target = same[0]
+        else:
+            why = (f"这家公司有 {len(same)} 位 HR，无法确定发给谁" if same
+                   else "Boss 会话列表里没有这家公司的 HR")
+            return {"ok": False, "stage": "find", "error": why, "skip": True}
+
+    # 2) 生成话术（消耗的 token 在 _write_greeting 里累加）
+    writer = GreetingWriter(rt.scorer.llm if rt.scorer else None)
+    g = _write_greeting(rt, writer, job)
+    if not g.text:
+        return {"ok": False, "stage": "greet", "error": "生成话术为空", "tokens": g.tokens}
+
+    # 3) 发出去
+    uid = str(target.get("uid"))
+
+    def _send():
+        return rt.chat.send(rt.ensure_browser(), uid, g.text)
+
+    _send.__chat_label__ = f"自动打招呼：给 HR {uid} 发送消息"
+    try:
+        _run_chat(_send, timeout=90.0)
+    except Exception as exc:
+        return {"ok": False, "stage": "send", "error": str(exc) or exc.__class__.__name__, "tokens": g.tokens}
+
+    if rt.store.exists(req.job_id):
+        rt.store.set_delivered([req.job_id], True)
+    rt.log("info", f"自动打招呼：{job.get('company') or ''} · {job.get('title') or ''}（{g.tokens} token）")
+    return {
+        "ok": True,
+        "job_id": req.job_id,
+        "uid": uid,
+        "text": g.text,
+        "tokens": g.tokens,
+        "source": g.source,
+        "note": g.note,
+        "company": job.get("company") or "",
+        "title": job.get("title") or "",
+        "tokens_total": rt.tokens_total,
+        "tokens_greet": rt.tokens_greet,
+    }
+
+
 class ChatRecallReq(BaseModel):
     uid: str
 
@@ -1474,7 +1652,7 @@ def greet(req: GreetReq) -> dict[str, Any]:
                 pass
         job = {"title": title or "", "company": company or "", "jd_text": None, "salary": None}
     writer = GreetingWriter(rt.scorer.llm if rt.scorer else None)
-    g = writer.write(rt.store.get_config("greet_prompt"), job, PROFILE)
+    g = _write_greeting(rt, writer, job)
     if g.tokens:
         rt.add_tokens(g.tokens, "greet")
         rt.log("info", f"生成打招呼（{g.tokens} token）：{g.text[:40]}…")
@@ -1489,6 +1667,19 @@ def greet(req: GreetReq) -> dict[str, Any]:
         "tokens_total": rt.tokens_total,
         "tokens_greet": rt.tokens_greet,
     }
+
+
+def _greeting_profile(rt) -> dict[str, Any]:
+    """画像 + 「配置」里手填的技能（留空就用简历自带的技能）。"""
+    return profile_with_skills(PROFILE, rt.store.get_config("skills"))
+
+
+def _write_greeting(rt, writer, job: dict[str, Any]):
+    """按「提示词 + JD + 技能」写一条招呼语，顺手把 token 记进累计值。"""
+    g = writer.write(rt.store.get_config("greet_prompt"), job, _greeting_profile(rt))
+    if g.tokens:
+        rt.add_tokens(g.tokens, "greet")
+    return g
 
 
 @app.get("/api/chat/resumes")
@@ -1558,24 +1749,48 @@ class ChatOpenReq(BaseModel):
 
 @app.post("/api/chat/open")
 def chat_open(req: ChatOpenReq) -> dict[str, Any]:
-    """按岗位找 HR 会话（未投递卡片点开时用）。找不到就返回 ok=False，界面提示先打招呼。"""
+    """按岗位找 HR 会话（未投递卡片点开时用）。
+
+    Boss 只有在「打过招呼」之后才会为这个岗位建立会话，没聊过的岗位在会话列表里
+    根本不存在。所以找不到时**不再报「还没聊过」**，而是：
+      1) 按公司名挑出该公司的 HR（可能有多位），交给界面让人选；
+      2) 一位都没有就直接返回「可选 HR 列表」，界面展开消息面板让人挑一位开始聊。
+    """
     rt = get_rt()
     try:
         def _do():
+            ctx = rt.ensure_browser()
             return rt.chat.find_friend(
-                rt.ensure_browser(),
+                ctx,
                 uid=req.uid,
                 encrypt_job_id=req.encrypt_job_id or "",
                 brand=req.brand or "",
-            )
+            ), rt.chat.friends(ctx, force=False)
 
         _do.__chat_label__ = f"查找 {req.brand or ''} 的 HR 会话".strip()
-        friend = _run_chat(
-            _do
-        )
-        if not friend:
-            return {"ok": False, "found": False, "error": "还没有和这个岗位的 HR 聊过"}
-        return {"ok": True, "found": True, "friend": friend}
+        friend, friends = _run_chat(_do)
+        if friend:
+            return {"ok": True, "found": True, "friend": friend}
+
+        # 兜底一：同一家公司的 HR（会话名里带公司名）
+        brand = (req.brand or "").strip()
+        same = [f for f in friends or [] if brand and brand in str(f.get("brand") or "")]
+        if len(same) == 1:
+            return {"ok": True, "found": True, "friend": same[0], "fallback": "brand"}
+        return {
+            "ok": False,
+            "found": False,
+            "candidates": [
+                {"uid": f.get("uid"), "name": f.get("name"), "title": f.get("title"),
+                 "brand": f.get("brand"), "avatar": f.get("avatar")}
+                for f in same
+            ],
+            "error": (
+                "这个岗位还没和 HR 建立会话，右侧列出的都可以直接聊"
+                if not same else
+                f"这家公司有 {len(same)} 位 HR，右侧已列出，挑一位开始聊"
+            ),
+        }
     except Exception as exc:
         msg = str(exc) or exc.__class__.__name__
         rt.log("warn", f"查找 HR 会话失败：{msg}")
@@ -1594,6 +1809,8 @@ def get_config() -> dict[str, Any]:
         "resume_path": rt.store.get_config("resume_path") or "",
         "greet_prompt": rt.store.get_config("greet_prompt") or DEFAULT_PROMPT,
         "greet_prompt_default": DEFAULT_PROMPT,
+        "skills": rt.store.get_config("skills") or "",
+        "score_mode": (rt.store.get_config("score_mode") or "rule"),
         "tokens_total": rt.tokens_total,
         "tokens_greet": rt.tokens_greet,
         "theme": rt.store.get_config("theme") or "light",
@@ -1612,6 +1829,8 @@ class ConfigReq(BaseModel):
     model: str | None = None
     resume_path: str | None = None
     greet_prompt: str | None = None
+    skills: str | None = None
+    score_mode: str | None = None
     theme: str | None = None
     exclude_keywords: list[str] | None = None
     exclude_rules: dict[str, Any] | None = None
@@ -1630,6 +1849,11 @@ def set_config(req: ConfigReq) -> dict[str, Any]:
         rt.store.set_config("resume_path", req.resume_path)
     if req.greet_prompt is not None:
         rt.store.set_config("greet_prompt", req.greet_prompt)
+    if req.skills is not None:
+        rt.store.set_config("skills", req.skills)
+    if req.score_mode is not None:
+        mode = "llm" if req.score_mode.strip() == "llm" else "rule"
+        rt.store.set_config("score_mode", mode)
     if req.theme is not None:
         rt.store.set_config("theme", req.theme)
     if req.exclude_keywords is not None:
@@ -1637,7 +1861,11 @@ def set_config(req: ConfigReq) -> dict[str, Any]:
     if req.exclude_rules is not None:
         rt.store.set_config_json("exclude_rules", req.exclude_rules)
     rt.rebuild_scorer()
-    return {"ok": True, "llm_enabled": rt.scorer.llm is not None}
+    return {
+        "ok": True,
+        "llm_enabled": rt.scorer.llm is not None,
+        "score_mode": "llm" if getattr(rt.scorer, "use_llm", False) else "rule",
+    }
 
 
 @app.post("/api/rescore")

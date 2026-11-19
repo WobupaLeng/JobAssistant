@@ -4,6 +4,30 @@
 
 ---
 
+## 2026-11-19（下午·三次）打招呼兜底 + 打分方式开关
+
+用户需求：
+- 「打招呼时提示：还没有和这个hr聊过，修复它，点击打招呼生成直接与hr沟通对话框」
+- 「敏感库列表左边加上一个 大模型打分|规则打分 的开关 / 使用大模型打分时，获取jd后直接使用简历+配置技能+过滤条件和jd匹配打分」「默认使用规则打分」
+
+- `backend/app/main.py`
+  - `/api/chat/open` 不再返回「还没聊过」：先按 `encrypt_job_id` 找会话，找不到再按公司名筛 HR；只有 1 位就直接返回该会话（带 `fallback: "brand"`），多位则返回 `candidates` 列表让界面挑。
+  - `/api/auto-greet/one` 同样加了「同公司唯一 HR」兜底，否则 `skip` 掉并说明原因。
+  - `Runtime._build_scorer()` 读 `score_mode`（`rule`/`llm`，默认 `rule`），把 `use_llm`、`profile`（含「配置→技能」）、`filters`（薪资区间 + 分值门槛 + 排除关键词/公司拼成一句话）都灌进 `Scorer`。
+  - 新增 `Runtime._filter_text()`；`/api/config` 增加并保存 `score_mode`，返回体带 `score_mode`。
+- `backend/app/scorer.py`
+  - `build_user_prompt(job, profile=None, filters="")`：技能列表复用 `greeting._profile_skills()`（**注意**：直接对字符串做遍历会把「Java」拆成 J、a、v，必须走这个函数按分隔符切），末尾追加「【我的筛选条件（投递偏好）】…」。
+  - `LLMScorer.score(job, profile, filters)`；`Scorer.__init__(..., use_llm=False)`，只有开关打开且配了 key 才走大模型，否则规则打分。
+- `web/src/App.tsx` / `api.ts`
+  - 敏感库浮层标题左边加「大模型打分 | 规则打分」分段开关，默认规则；切换即 `POST /api/config {score_mode}` 并重建打分器，图片/日志立刻可见。
+  - `openJobChat` 找不到会话时改为提示「这家公司有 N 位 HR 可选，点右侧任意一位即可开始沟通」，不再当成错误弹红字。
+
+待办：
+- 「自动打招呼」链路已实现（`/api/auto-greet/next`、`/api/auto-greet/one` + 前端 20s 间隔驱动），但还没在真实环境跑通（会真的发消息给 HR，需要人工确认后再测）。
+- 用户报告的「第 1 页接口未捕获，DOM 解析 9 条却没入库」：DOM 卡片确实进了 `jobs` 并交给 `on_job`，怀疑卡在 `process_job` —— 详情页没拿到 JD 导致规则分被压低、低于 `min_score` 被排除。待从日志取证。
+- 薪资二次校验仍欠修：Boss 卡片薪资是私用区加密字符（`\ue031`=0 … `\ue03a`=9），`parse_salary` 匹配不到；`tighten_ranges` 会把多档并成连续区间；上限 9999 时 `hi-lo` 溢出给满分。
+
+---
 ## 2026-11-19（下午·二次）消息气泡与列表视图修正
 
 用户反馈：「选中的聊天高亮 boss，聊天内容没有左右区分，消息没有加背景色，消息类型也不对 / 刷新两个字变成了两行，适当加宽boss列表」。

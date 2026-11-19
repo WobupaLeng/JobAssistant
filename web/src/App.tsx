@@ -249,8 +249,34 @@ export default function App() {
   // 生成打招呼用的提示词（AI 按它 + 岗位 JD + 我的技能 写话术）
   const [greetPrompt, setGreetPrompt] = useState('')
   const [greetPromptDefault, setGreetPromptDefault] = useState('')
+  // 「配置 → 技能」：生成话术时优先用它；留空则退回简历画像里的技能
+  const [skills, setSkills] = useState('')
+  // 打分方式：默认规则打分（快、不花钱）；切到大模型后抓取时直接用 JD+简历+技能+筛选条件打分
+  const [scoreMode, setScoreMode] = useState<'rule' | 'llm'>('rule')
+  const scoreModeRef = useRef<'rule' | 'llm'>('rule')
   // 累计 token：total=打分+生成，greet=生成打招呼部分
   const [tokens, setTokens] = useState({ total: 0, greet: 0 })
+  // ---------- 自动打招呼 ----------
+  const [autoOn, setAutoOn] = useState(false)
+  const [autoPaused, setAutoPaused] = useState(false)
+  const [autoTick, setAutoTick] = useState(0)
+  const [autoCount, setAutoCount] = useState(0)
+  const [autoFail, setAutoFail] = useState(0)
+  const [autoMsg, setAutoMsg] = useState('')
+  const [autoBusy, setAutoBusy] = useState(false)
+  // 「每日投递上限」当前值（改上限不重启循环，下一轮就生效）
+  const maxJdRef = useRef(maxJd)
+  maxJdRef.current = maxJd
+  // 这些用 ref 是为了让「逐条发送」的循环读到最新值，而不是闭包里的旧值
+  const autoOnRef = useRef(false)
+  const autoPausedRef = useRef(false)
+  const autoCountRef = useRef(0)
+  const autoFailRef = useRef(0)
+  const autoInFlight = useRef(false)
+  // 已经处理过（发送成功或被判定跳过）的岗位，避免在同一轮里反复撞同一个
+  const autoDoneRef = useRef<Set<string>>(new Set())
+  // 每发一条之间等几秒（防封号）：基础 20 秒 ± 5 秒
+  const AUTO_GAP_MS = 20000
 
   // ---------- 投递列表 ----------
   const [items, setItems] = useState<JobRow[]>([])
@@ -303,10 +329,12 @@ export default function App() {
   }, [dark])
 
   // 点开未投递岗位：右栏切到该岗位 HR 的会话。
-  // 后端 /api/chat/open 会按 job_id(=boss:<encryptJobId>)/公司名在 Boss 会话列表里找；
-  // 还没聊过就保持现状并提示，不会发出任何消息。
+  // 后端 /api/chat/open 按 encryptJobId / 公司名在 Boss 会话列表里找。
+  // 找不到（没打过招呼的岗位，Boss 还没有会话）就退一步：直接展开消息面板，
+  // 让用户自己挑 HR；再不行才提示。全程不会发出任何消息。
   const openJobChat = useCallback(async (j: JobRow) => {
     const ejid = (j.job_id || '').startsWith('boss:') ? j.job_id.slice(5) : undefined
+    setChatOpen(true)
     try {
       const r = await apiClient.chatOpen({
         uid: j.hr_name || undefined,
@@ -317,13 +345,121 @@ export default function App() {
         setChatFocusUid(String(r.friend.uid))
         return
       }
-      setErr(r.error || '这个岗位还没有和 HR 聊过')
-      window.setTimeout(() => setErr(''), 3000)
+      // 没建立过会话：右侧已经列出全部 HR，直接让用户点一位开聊（不当作错误）
+      const n = r.candidates?.length || 0
+      setErr(
+        n > 0
+          ? `这家公司有 ${n} 位 HR 可选，点右侧任意一位即可开始沟通`
+          : `${j.company || '这个岗位'} 还没和 Boss 建会话，右侧已列出全部 HR，挑一位开始沟通`,
+      )
+      window.setTimeout(() => setErr(''), 4000)
     } catch (e: any) {
       setErr(String(e?.message || e))
-      window.setTimeout(() => setErr(''), 3000)
+      window.setTimeout(() => setErr(''), 4000)
     }
   }, [])
+
+  // ---------- 自动打招呼驱动 ----------
+  // 后端一次只处理一条（浏览器同一时刻只能给一个任务用），循环放在前端：
+  //   取待投递 → 生成话术 → 发送 → 记 token → 等 20 秒左右 → 下一条
+  // 停下来的时候：待投递发完 / 到每日上限 / 连续失败 3 次 / 用户手动暂停
+  useEffect(() => {
+    if (!autoOn || autoPaused) return
+    let cancelled = false
+    let timer = 0
+
+    const tick = async () => {
+      if (cancelled || autoInFlight.current) return
+      if (autoDoneRef.current.size >= maxJdRef.current) {
+        setAutoMsg(`已发满本轮上限 ${maxJdRef.current} 条，自动打招呼已停止`)
+        setAutoOn(false)
+        return
+      }
+      try {
+        autoInFlight.current = true
+        setAutoBusy(true)
+        const n = await apiClient.autoGreetNext()
+        if (!n.ok) {
+          setAutoMsg(n.error || '取不到待投递岗位')
+          setAutoOn(false)
+          return
+        }
+        const next = (n.items || []).find((x) => !autoDoneRef.current.has(x.job_id))
+        if (!next) {
+          setAutoMsg('待投递列表已经发完了，自动打招呼已停止')
+          setAutoOn(false)
+          return
+        }
+        const r = await apiClient.autoGreetOne(next.job_id)
+        if (r.tokens_total != null) {
+          setTokens({ total: r.tokens_total, greet: r.tokens_greet ?? 0 })
+        }
+        if (r.ok) {
+          autoCountRef.current += 1
+          autoFailRef.current = 0
+          setAutoCount(autoCountRef.current)
+          setAutoFail(0)
+          setAutoMsg(`刚发给「${r.company || next.company}」（${r.tokens ?? 0} token）`)
+        } else if (r.skip) {
+          // 跳过不算失败：这个岗位没有 HR 会话，按已处理记下来继续下一条
+          autoDoneRef.current.add(next.job_id)
+          setAutoMsg(`跳过「${next.company}」：${r.error || ''}`)
+        } else {
+          autoFailRef.current += 1
+          setAutoFail(autoFailRef.current)
+          setAutoMsg(`「${next.company}」发送失败：${r.error || '未知原因'}`)
+          if (autoFailRef.current >= 3) {
+            setAutoPaused(true)
+            setAutoMsg(`连续失败 3 次，已自动暂停：${r.error || ''}`)
+            return
+          }
+        }
+        setAutoTick((t) => t + 1)
+      } catch (e: any) {
+        autoFailRef.current += 1
+        setAutoFail(autoFailRef.current)
+        setAutoMsg(String(e?.message || e))
+        if (autoFailRef.current >= 3) {
+          setAutoPaused(true)
+          setAutoMsg(`连续失败 3 次，已自动暂停：${String(e?.message || e)}`)
+          return
+        }
+      } finally {
+        autoInFlight.current = false
+        setAutoBusy(false)
+        if (!cancelled && autoOnRef.current && !autoPausedRef.current) {
+          // 每条之间留个随机间隔，别像机器人在刷屏
+          const gap = AUTO_GAP_MS + (Math.random() * 10000 - 5000)
+          timer = window.setTimeout(tick, gap)
+        }
+      }
+    }
+
+    timer = window.setTimeout(tick, 400)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+    // autoTick 只是「再来一轮」的信号
+  }, [autoOn, autoPaused, autoTick])
+
+  const toggleAuto = () => {
+    const next = !autoOn
+    autoOnRef.current = next
+    setAutoOn(next)
+    if (next) {
+      autoDoneRef.current = new Set()
+      autoCountRef.current = 0
+      autoFailRef.current = 0
+      setAutoCount(0)
+      setAutoFail(0)
+      setAutoPaused(false)
+      autoPausedRef.current = false
+      setAutoMsg('自动打招呼已开启')
+    } else {
+      setAutoMsg('')
+    }
+  }
 
   // ---------- 拉取岗位（分页 + 排序） ----------
   // offset>0 表示「追加加载」（无限滚动），=0 表示刷新重来
@@ -476,6 +612,11 @@ export default function App() {
         if (typeof c.max_jd === 'number') setMaxJd(c.max_jd)
         if (typeof c.greet_prompt === 'string') setGreetPrompt(c.greet_prompt)
         if (typeof c.greet_prompt_default === 'string') setGreetPromptDefault(c.greet_prompt_default)
+        if (typeof c.skills === 'string') setSkills(c.skills)
+        if (c.score_mode === 'llm' || c.score_mode === 'rule') {
+          setScoreMode(c.score_mode)
+          scoreModeRef.current = c.score_mode
+        }
         setTokens({ total: c.tokens_total ?? 0, greet: c.tokens_greet ?? 0 })
       })
       .catch(() => {})
@@ -661,6 +802,8 @@ export default function App() {
         model,
         theme: dark ? 'dark' : 'light',
         greet_prompt: greetPrompt,
+        skills,
+        score_mode: scoreModeRef.current,
       }
       if (apiKey.trim()) patch.api_key = apiKey.trim()
       const r = await apiClient.setConfig(patch)
@@ -668,6 +811,19 @@ export default function App() {
       setApiKey('')
       const c = await apiClient.getConfig()
       setConfig(c)
+    } catch (e: any) {
+      setErr(e?.message || String(e))
+    }
+  }
+
+  // 切打分方式：立即写库并重建打分器，下一轮抓取就按新模式打分
+  const switchScoreMode = async (mode: 'rule' | 'llm') => {
+    if (mode === scoreModeRef.current) return
+    scoreModeRef.current = mode
+    setScoreMode(mode)
+    try {
+      await apiClient.setConfig({ score_mode: mode })
+      setLlmEnabled((await apiClient.getConfig()).has_key)
     } catch (e: any) {
       setErr(e?.message || String(e))
     }
@@ -897,8 +1053,38 @@ export default function App() {
             累计 {fmtTokens(tokens.total)} token
             {tokens.greet > 0 && `（其中生成 ${fmtTokens(tokens.greet)}）`}
           </span>
+          <button
+            className={`btn-ghost shrink-0 whitespace-nowrap ${autoOn ? '!bg-emerald-50 !text-emerald-700 dark:!bg-emerald-950 dark:!text-emerald-300' : ''}`}
+            onClick={toggleAuto}
+            title="从「待投递」里逐条生成招呼语并发给 HR；发出去即标记为已投递"
+          >
+            自动打招呼 {autoOn ? '开' : '关'}
+          </button>
+          {autoOn && (
+            <button
+              className="btn-ghost shrink-0 whitespace-nowrap"
+              onClick={() => {
+                const v = !autoPaused
+                autoPausedRef.current = v
+                setAutoPaused(v)
+                setAutoMsg(v ? '已暂停，点「继续」接着发' : '继续发送')
+              }}
+            >
+              {autoPaused ? '继续' : '暂停'}
+            </button>
+          )}
+          {autoOn && (
+            <span
+              className="max-w-[300px] shrink-0 truncate text-[11px] text-slate-500 dark:text-slate-400"
+              title={autoMsg}
+            >
+              {autoBusy ? '正在发…' : autoMsg}
+              {autoCount > 0 && `（已发 ${autoCount}`}
+              {autoCount > 0 && autoFail > 0 ? `，连续失败 ${autoFail}）` : autoCount > 0 ? '）' : ''}
+            </span>
+          )}
           <button className="btn-ghost" onClick={() => setDrawer((v) => !v)}>
-            {drawer ? '收起配置' : '模型配置'}
+            {drawer ? '收起配置' : '配置'}
           </button>
           <button className="btn-ghost" onClick={() => setDark((v) => !v)}>
             {dark ? '浅色' : '深色'}
@@ -923,7 +1109,7 @@ export default function App() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-center">
-              <h2 className="text-sm font-semibold">模型配置</h2>
+              <h2 className="text-sm font-semibold">配置</h2>
               <span className="ml-2 text-[11px] text-slate-400">JD 打分与生成招呼共用这个模型</span>
               <button className="ml-auto chip" onClick={() => setDrawer(false)}>
                 关闭
@@ -973,6 +1159,20 @@ export default function App() {
                   placeholder={greetPromptDefault || '在这里写提示词…'}
                   value={greetPrompt}
                   onChange={(e) => setGreetPrompt(e.target.value)}
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="label flex items-center">
+                  技能
+                  <span className="ml-2 font-normal text-slate-400">
+                    生成招呼语时优先用这里的技能；留空则用简历画像里的技能。多个用逗号/顿号分隔
+                  </span>
+                </label>
+                <textarea
+                  className="input min-h-[64px] resize-y !text-[11px] leading-5"
+                  placeholder="例如：Java、Spring Boot、MySQL、Redis、Vue，10 年后端与全栈经验"
+                  value={skills}
+                  onChange={(e) => setSkills(e.target.value)}
                 />
               </div>
               <div className="col-span-2 flex items-center gap-2">
@@ -1876,6 +2076,30 @@ export default function App() {
           <div onClick={(e) => e.stopPropagation()} className="contents">
             <div className="card flex max-h-[86vh] w-[min(1080px,94vw)] flex-col overflow-hidden p-3 shadow-xl">
                 <div className="mb-2 flex items-center gap-2">
+                  <div className="flex shrink-0 overflow-hidden rounded-md border border-slate-300 text-[11px] dark:border-slate-600">
+                    <button
+                      className={`px-2 py-0.5 ${
+                        scoreMode === 'llm'
+                          ? 'bg-primary text-white'
+                          : 'bg-white text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                      }`}
+                      onClick={() => void switchScoreMode('llm')}
+                      title="抓取到 JD 后直接调大模型，用简历 + 配置的技能 + 筛选条件一起打分（会消耗 token）"
+                    >
+                      大模型打分
+                    </button>
+                    <button
+                      className={`px-2 py-0.5 ${
+                        scoreMode === 'rule'
+                          ? 'bg-primary text-white'
+                          : 'bg-white text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                      }`}
+                      onClick={() => void switchScoreMode('rule')}
+                      title="按内置关键词规则打分，速度快、不消耗 token（默认）"
+                    >
+                      规则打分
+                    </button>
+                  </div>
                   <h2 className="text-xs font-semibold">敏感库 {sensitiveTotal} 条</h2>
                   <span className="text-[10px] text-slate-400">
                     已抓过的岗位（已入库 + 被排除）都会记在这里，下一轮抓取直接跳过；可手动移出
