@@ -313,12 +313,12 @@ export default function ChatPanel({ focusUid, onSent, onTokens, onOpenChange }: 
   return (
     <div className="flex min-h-0 flex-1 gap-3">
       {/* ========== Boss 消息列表：始终显示 ========== */}
-      <div className={`flex min-w-0 flex-col overflow-hidden ${open ? 'flex-[1]' : 'flex-1'}`}>
+      <div className={`flex min-w-0 flex-col overflow-hidden ${open ? 'flex-[1.2]' : 'flex-1'}`}>
         <div className="flex shrink-0 items-center gap-2 px-1 py-2">
-          <h2 className="text-xs font-semibold">Boss 消息</h2>
-          <span className="text-[10px] text-slate-400">{friends.length}</span>
+          <h2 className="shrink-0 whitespace-nowrap text-xs font-semibold">Boss 消息</h2>
+          <span className="shrink-0 text-[10px] text-slate-400">{friends.length}</span>
           <button
-            className="ml-auto btn-ghost !px-1.5 !py-0.5 text-[11px]"
+            className="ml-auto shrink-0 whitespace-nowrap btn-ghost !px-1.5 !py-0.5 text-[11px]"
             title="从 Boss 重新拉取会话列表"
             onClick={() => loadFriends(true)}
             disabled={friendsLoading}
@@ -326,7 +326,7 @@ export default function ChatPanel({ focusUid, onSent, onTokens, onOpenChange }: 
             {friendsLoading ? '读取中…' : '刷新'}
           </button>
           <button
-            className="btn-ghost !px-1.5 !py-0.5 text-[11px]"
+            className="shrink-0 whitespace-nowrap btn-ghost !px-1.5 !py-0.5 text-[11px]"
             title={open ? '收起对话框，列表保留' : '展开对话框'}
             onClick={() => setOpen((v) => !v)}
           >
@@ -360,10 +360,10 @@ export default function ChatPanel({ focusUid, onSent, onTokens, onOpenChange }: 
               <button
                 key={f.uid}
                 onClick={() => openFriend(f)}
-                className={`mb-1 flex w-full items-center gap-2.5 rounded-lg px-2 py-2.5 text-left transition ${
+                className={`mb-1 flex w-full items-center gap-2.5 rounded-lg border-l-[3px] px-2 py-2.5 text-left transition ${
                   on
-                    ? 'bg-slate-100 font-semibold dark:bg-slate-800/70'
-                    : 'hover:bg-slate-100/70 dark:hover:bg-slate-800/40'
+                    ? 'border-primary bg-primary/10 font-semibold shadow-sm ring-1 ring-primary/30 dark:bg-primary/15'
+                    : 'border-transparent hover:bg-slate-100/80 dark:hover:bg-slate-800/40'
                 }`}
               >
                 <Avatar f={f} size={on ? 38 : 34} />
@@ -397,7 +397,7 @@ export default function ChatPanel({ focusUid, onSent, onTokens, onOpenChange }: 
 
       {/* ========== 对话框：可收起，收起后列表独占 ========== */}
       {open && (
-      <div className="flex min-w-0 flex-[3] flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-[2] flex-col overflow-hidden">
         {/* 顶栏固定：标题 + 在招岗位，不是卡片，只是清楚的分区 */}
         <div className="flex shrink-0 items-center gap-2 px-1 py-2">
           <h2 className="text-xs font-semibold">对话框</h2>
@@ -459,8 +459,10 @@ export default function ChatPanel({ focusUid, onSent, onTokens, onOpenChange }: 
               {msgs.map((m, i) => {
                 if (m.system) {
                   return (
-                    <div key={m.id || i} className="text-center text-[10px] text-slate-400">
-                      {clean(m.text)}
+                    <div key={m.id || i} className="flex justify-center">
+                      <span className="rounded-full bg-slate-100/80 px-2 py-0.5 text-[10px] text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
+                        {clean(m.text)}
+                      </span>
                     </div>
                   )
                 }
@@ -472,12 +474,12 @@ export default function ChatPanel({ focusUid, onSent, onTokens, onOpenChange }: 
                       <div className="mb-1 text-center text-[10px] text-slate-400">{clean(m.time_text)}</div>
                     )}
                     <div className={`flex ${m.from_me ? 'justify-end' : 'justify-start'}`}>
-                      <div className="flex max-w-[85%] flex-col items-end gap-0.5">
+                      <div className={`flex max-w-[80%] flex-col gap-0.5 ${m.from_me ? 'items-end' : 'items-start'}`}>
                         <div
-                          className={`whitespace-pre-wrap break-words rounded-lg px-2 py-1 text-[12px] leading-5 ${
+                          className={`whitespace-pre-wrap break-words rounded-xl px-3 py-1.5 text-[12px] leading-5 shadow-sm ${
                             m.from_me
-                              ? 'bg-primary/12 text-slate-700 dark:bg-primary/20 dark:text-slate-100'
-                              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200'
+                              ? 'rounded-tr-sm bg-[#95ec69] text-[#1f2d3d] dark:bg-[#3a5a3c] dark:text-slate-100'
+                              : 'rounded-tl-sm border border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
                           }`}
                         >
                           {clean(m.text)}

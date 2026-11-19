@@ -1852,7 +1852,7 @@ export default function App() {
              展开时对话框占掉剩下的宽度 ========== */}
         <div
           className={`flex min-h-0 shrink-0 flex-col rounded-lg transition-[width] duration-200 ${
-            chatOpen ? 'w-[52%]' : 'w-[34%]'
+            chatOpen ? 'w-[60%]' : 'w-[34%]'
           }`}
         >
           <ChatPanel

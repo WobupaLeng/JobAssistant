@@ -139,24 +139,31 @@ def normalize_message(raw: dict[str, Any], my_id: int | None) -> dict[str, Any]:
             text = " ".join(html.unescape(v).split())
             break
     # 注意：body.type 是模板类型（如正文里的 16 只是模板 id），外层 raw.type 才是消息类型
-    btype = raw.get("type") or body.get("type")
+    try:
+        btype = int(raw.get("type") or 0)
+    except (TypeError, ValueError):
+        btype = 0
     if not text:
-        # 结构化消息（职位卡片、系统提示等）退化成一句类型说明
+        # 结构化消息（职位卡片、系统提示等）退化成一句说明
         if btype == 8:
             job = body.get("jobDesc") or {}
-            text = f"[职位卡片] {job.get('jobName') or ''}".strip()
-        elif btype == 16:
-            text = "[系统消息]"
-        elif btype == 5:
-            text = "[图片]"
-        elif btype == 3:
-            text = "[附件简历]"
-        elif btype == 4:
-            text = "[系统提示]"
-        elif btype:
-            text = f"[消息类型{btype}]"
+            text = "职位卡片" + (f"：{job.get('jobName')}" if job.get("jobName") else "")
+        elif btype in (5, 6):
+            text = "图片"
+        elif btype in (3, 7):
+            text = "附件简历"
+        elif btype == 2:
+            text = "语音"
+        elif btype in (1, 4, 16, 17, 18, 19, 20, 21):
+            text = ""          # 纯系统/时间线消息：不画气泡，只当时序处理
+        else:
+            text = "其他消息"
     ts = raw.get("msgTime") or raw.get("time") or body.get("msgTime") or 0
     ts_int = int(ts) if str(ts).isdigit() else 0
+    # 没有正文的类型一律按系统行（居中细字），有正文的才是真正的对话气泡；
+    # 正文只是类型兜底（「图片」「其他消息」这类）时也按系统行，避免误画成对方说的话
+    from_text = any(isinstance(body.get(k), str) and body.get(k).strip() for k in ("text", "content", "showText", "desc"))
+    system = (not from_text) or btype in (16, 17, 18, 19, 20, 21)
     return {
         "id": str(mid),
         "mid": mid,
@@ -165,7 +172,7 @@ def normalize_message(raw: dict[str, Any], my_id: int | None) -> dict[str, Any]:
         "time": ts_int,
         "time_text": _fmt_time(ts_int),
         "kind": btype,
-        "system": btype in (16, 8),
+        "system": system,
         # 回执只能从 DOM 补，接口里没有
         "status": "",
     }
