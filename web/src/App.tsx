@@ -868,7 +868,7 @@ export default function App() {
         </div>
         <div className="flex items-center gap-2">
           <button className="btn-ghost" onClick={() => setDrawer((v) => !v)}>
-            {drawer ? '收起配置' : '模型与简历配置'}
+            {drawer ? '收起配置' : '模型配置'}
           </button>
           <button className="btn-ghost" onClick={() => setDark((v) => !v)}>
             {dark ? '浅色' : '深色'}
@@ -882,127 +882,65 @@ export default function App() {
         </div>
       )}
 
-      {/* 配置抽屉 */}
+      {/* 模型配置小窗（浮层，不占据页面空间） */}
       {drawer && (
-        <div className="shrink-0 border-b border-slate-200 bg-light-card px-4 py-2 dark:border-dark-border dark:bg-dark-card">
-          <div className="grid grid-cols-4 gap-2">
-            <div>
-              <label className="label">API Key</label>
-              <input
-                className="input"
-                type="password"
-                placeholder={config?.has_key ? config.api_key_masked : 'sk-...'}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="label">Base URL</label>
-              <input
-                className="input"
-                placeholder="https://api.deepseek.com"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="label">模型</label>
-              <input className="input" value={model} onChange={(e) => setModel(e.target.value)} />
-            </div>
-            <div className="flex items-end gap-2">
-              <button className="btn-primary" onClick={saveConfig}>
-                保存配置
-              </button>
-              <button
-                className="btn-ghost"
-                onClick={() =>
-                  apiClient
-                    .rescore()
-                    .then(() => {
-                      loadJobs(0)
-                      refresh()
-                    })
-                    .catch((e) => setErr(e.message))
-                }
-              >
-                重新打分
+        <div
+          className="fixed inset-0 z-40 flex items-start justify-center bg-black/25 pt-24"
+          onClick={() => setDrawer(false)}
+        >
+          <div
+            className="card w-[520px] max-w-[92vw] p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center">
+              <h2 className="text-sm font-semibold">模型配置</h2>
+              <span className="ml-2 text-[11px] text-slate-400">仅影响 JD 打分，不配置则用规则打分</span>
+              <button className="ml-auto chip" onClick={() => setDrawer(false)}>
+                关闭
               </button>
             </div>
-          </div>
-
-          {/* 排除规则：留空 = 不排除 */}
-          <div className="mt-2 border-t border-slate-100 pt-2 dark:border-dark-border">
-            <div className="mb-1 flex items-center gap-2">
-              <span className="text-xs font-semibold">排除规则</span>
-              <span className="text-[11px] text-slate-400">
-                任意一项留空即表示不按该项排除；排除关键词见左侧筛选面板
-              </span>
-              <button className="btn-primary ml-auto !px-3 !py-1 text-[11px]" onClick={() => saveRules()}>
-                保存排除规则
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">薪资区间（K）：低于下限 / 高于上限 → 排除</label>
-                <div className="flex items-center gap-1">
-                  <input
-                    className="input"
-                    inputMode="numeric"
-                    placeholder="下限，如 15"
-                    value={exclSalaryMin ?? ''}
-                    onChange={(e) => setExclSalaryMin(NUM_OR_NULL(e.target.value))}
-                  />
-                  <span className="text-[11px] text-slate-400">~</span>
-                  <input
-                    className="input"
-                    inputMode="numeric"
-                    placeholder="上限，如 35"
-                    value={exclSalaryMax ?? ''}
-                    onChange={(e) => setExclSalaryMax(NUM_OR_NULL(e.target.value))}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="label">公司成立年限少于（年）→ 排除，如 3</label>
+                <label className="label">API Key</label>
                 <input
                   className="input"
-                  inputMode="numeric"
-                  placeholder="留空 = 不排除"
-                  value={exclFoundedBelow ?? ''}
-                  onChange={(e) => setExclFoundedBelow(NUM_OR_NULL(e.target.value))}
+                  type="password"
+                  placeholder={config?.has_key ? config.api_key_masked : 'sk-...'}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
                 />
               </div>
               <div>
-                <label className="label">JD 要求经验超过（年）→ 排除</label>
+                <label className="label">Base URL</label>
                 <input
                   className="input"
-                  inputMode="numeric"
-                  placeholder="留空 = 不排除（默认不限制）"
-                  value={exclMaxYears ?? ''}
-                  onChange={(e) => setExclMaxYears(NUM_OR_NULL(e.target.value))}
+                  placeholder="https://api.deepseek.com"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
                 />
               </div>
               <div>
-                <label className="label">JD 岗位要求 → 排除</label>
-                <div className="flex flex-wrap items-center gap-1">
-                  <button className="chip" onClick={() => setExclDegree([])}>
-                    学历不限
-                  </button>
-                  {DEGREE_VETO_OPTIONS.map((d) => (
-                    <button
-                      key={d}
-                      className={`chip ${exclDegree.includes(d) ? 'chip-on' : ''}`}
-                      onClick={() =>
-                        setExclDegree(
-                          exclDegree.includes(d) ? exclDegree.filter((x) => x !== d) : [...exclDegree, d],
-                        )
-                      }
-                    >
-                      {d}
-                      {exclDegree.includes(d) ? ' ×' : ''}
-                    </button>
-                  ))}
-                </div>
+                <label className="label">模型</label>
+                <input className="input" value={model} onChange={(e) => setModel(e.target.value)} />
+              </div>
+              <div className="col-span-2 flex justify-end gap-2">
+                <button className="btn-primary" onClick={saveConfig}>
+                  保存配置
+                </button>
+                <button
+                  className="btn-ghost"
+                  onClick={() =>
+                    apiClient
+                      .rescore()
+                      .then(() => {
+                        loadJobs(0)
+                        refresh()
+                      })
+                      .catch((e) => setErr(e.message))
+                  }
+                >
+                  重新打分
+                </button>
               </div>
             </div>
           </div>
@@ -1857,190 +1795,201 @@ export default function App() {
           </div>
         </section>
 
-        {/* ================= 右栏：JD 对话占位 ================= */}
+        {/* ================= 右栏：Boss 消息（常驻，敏感库用浮层不挤掉它） ================= */}
         <section className="flex min-w-0 flex-[1] flex-col gap-3">
-          {showSensitive ? (
-            <div className="card flex min-h-0 flex-1 flex-col p-3">
-              <div className="mb-2 flex items-center gap-2">
-                <h2 className="text-xs font-semibold">敏感库 {sensitiveTotal} 条</h2>
-                <span className="text-[10px] text-slate-400">
-                  已抓过的岗位（已入库 + 被排除）都会记在这里，下一轮抓取直接跳过；可手动移出
-                </span>
-                <button className="ml-auto chip" onClick={() => setShowSensitive(false)}>
-                  关闭
-                </button>
-              </div>
-              <div className="mb-2 flex items-center gap-2">
-                <input
-                  className="input h-7 flex-1 !py-0 text-[11px]"
-                  placeholder="搜索公司 / 岗位 / 排除原因"
-                  value={sensitiveKw}
-                  onChange={(e) => setSensitiveKw(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') loadSensitive(sensitiveKw)
-                  }}
-                />
-                <button className="chip" onClick={() => loadSensitive(sensitiveKw)}>
-                  搜索
-                </button>
-                <button
-                  className="chip"
-                  onClick={() => {
-                    setSensitiveKw('')
-                    loadSensitive('')
-                  }}
-                >
-                  重置
-                </button>
-                {[
-                  { k: '', name: '全部' },
-                  { k: 'stored', name: '已入库' },
-                  { k: 'rejected', name: '已排除' },
-                ].map((t) => (
-                  <button
-                    key={t.k || 'all'}
-                    className={`chip whitespace-nowrap ${sensitiveKind === t.k ? 'chip-on' : ''}`}
-                    onClick={() => {
-                      setSensitiveKind(t.k)
-                      loadSensitive(sensitiveKw, t.k)
-                    }}
-                  >
-                    {t.name}
-                  </button>
-                ))}
-                <button
-                  className="chip"
-                  onClick={() =>
-                    setSensChecked(
-                      sensChecked.size === sensitive.length
-                        ? new Set()
-                        : new Set(sensitive.map((r) => r.id)),
-                    )
-                  }
-                  disabled={sensitive.length === 0}
-                >
-                  {sensitive.length > 0 && sensChecked.size === sensitive.length ? '取消全选' : '全选'}
-                </button>
-                <button
-                  className="chip !text-rose-600 disabled:opacity-40"
-                  disabled={sensChecked.size === 0}
-                  onClick={async () => {
-                    await apiClient.deleteSensitive(Array.from(sensChecked))
-                    setSensChecked(new Set())
-                    loadSensitive(sensitiveKw)
-                  }}
-                >
-                  移出所选（{sensChecked.size}）
-                </button>
-              </div>
-              <div
-                className="grid min-h-0 flex-1 auto-rows-min content-start items-start gap-1.5 overflow-y-auto"
-                style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}
-              >
-                {sensitiveLoading && (
-                  <div className="col-span-full text-[11px] text-slate-400">加载中…</div>
-                )}
-                {!sensitiveLoading && sensitive.length === 0 && (
-                  <div className="col-span-full text-[11px] text-slate-400">（暂无记录）</div>
-                )}
-                {sensitive.map((r) => (
-                  <div
-                    key={r.id}
-                    className={`flex flex-col overflow-hidden rounded-lg border px-2 py-1.5 transition-all duration-300 dark:border-dark-border ${
-                      r.kind === 'stored'
-                        ? 'border-emerald-100 bg-white hover:border-emerald-300 hover:shadow-sm dark:bg-transparent'
-                        : 'border-rose-200 bg-rose-50/40 hover:border-rose-300 hover:shadow-sm dark:bg-rose-950/20'
-                    }`}
-                  >
-                    {/* 第 1 行：网站来源 + 公司 + 薪资 */}
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <input
-                        type="checkbox"
-                        className="h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-slate-300 accent-rose-500"
-                        checked={sensChecked.has(r.id)}
-                        onChange={() =>
-                          setSensChecked((prev) => {
-                            const nx = new Set(prev)
-                            if (nx.has(r.id)) nx.delete(r.id)
-                            else nx.add(r.id)
-                            return nx
-                          })
-                        }
-                      />
-                      <span
-                        className={'shrink-0 rounded px-1 py-0.5 text-[9px] font-medium ' + PLATFORM_CHIP_COLOR(r.platform)}
-                        title={`网站来源：${platformName(r.platform)}`}
-                      >
-                        {platformName(r.platform)}
-                      </span>
-                      <span
-                        className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-medium ${
-                          r.kind === 'stored'
-                            ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300'
-                            : 'bg-rose-50 text-rose-500 dark:bg-rose-900/30 dark:text-rose-300'
-                        }`}
-                        title={r.kind === 'stored' ? '已入库（抓取过，会跳过）' : '已排除（原因见下行）'}
-                      >
-                        {r.kind === 'stored' ? '已入库' : '已排除'}
-                      </span>
-                      <span
-                        className="min-w-0 flex-1 truncate text-[12px] font-semibold"
-                        title={r.company || ''}
-                      >
-                        {r.company || '-'}
-                      </span>
-                      <span className="shrink-0 text-[11px] font-semibold text-secondary">
-                        {r.salary || '-'}
-                      </span>
-                    </div>
-                    {/* 第 2 行：岗位名 + 记录类型 */}
-                    <div className="mt-[3px] flex min-w-0 items-center gap-1">
-                      <span
-                        className={`shrink-0 rounded px-1 text-[10px] font-medium ${
-                          r.kind === 'stored'
-                            ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300'
-                            : 'bg-rose-50 text-rose-500 dark:bg-rose-900/30 dark:text-rose-300'
-                        }`}
-                      >
-                        {r.kind === 'stored' ? '已入库' : '已排除'}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-[11px] text-slate-600 dark:text-slate-300" title={r.title || ''}>
-                        {r.title || '-'}
-                      </span>
-                    </div>
-                    {/* 第 3 行：排除原因（可换行） + 移出按钮 */}
-                    <div className="mt-1 flex min-w-0 items-start gap-1">
-                      <span
-                        className={`min-w-0 flex-1 text-[11px] leading-4 ${
-                          r.kind === 'stored' ? 'text-slate-500' : 'text-rose-500'
-                        }`}
-                        title={r.reason || ''}
-                      >
-                        {r.kind === 'stored'
-                          ? `已投递信息：${r.reason || '已入库（抓取过，下一轮自动跳过）'}`
-                          : `排除原因：${r.reason || '-'}`}
-                      </span>
-                      <span className="mt-[1px] shrink-0 text-[10px] text-slate-400">{fmtTime(r.created_at)}</span>
-                      <button
-                        className="shrink-0 whitespace-nowrap rounded border border-slate-300 px-1 text-[10px] text-slate-500 hover:border-rose-400 hover:text-rose-500"
-                        onClick={async () => {
-                          await apiClient.deleteSensitive([r.id])
-                          loadSensitive(sensitiveKw)
-                        }}
-                        title="从敏感库移出（下次抓取不再跳过）"
-                      >
-                        移出
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
           <ChatPanel focusUid={chatFocusUid} onSent={() => { loadJobs(0); setRefreshTick((t) => t + 1) }} />
-          )}
         </section>
       </div>
+
+      {/* 敏感库浮层：盖在页面之上，关闭后下面的 Boss 消息面板还在，不用重新加载 */}
+      {showSensitive && (
+        <div
+          className="fixed inset-0 z-40 flex items-start justify-center bg-black/25 pt-12"
+          onClick={() => {
+            setShowSensitive(false)
+            setSensChecked(new Set())
+          }}
+        >
+          <div onClick={(e) => e.stopPropagation()} className="contents">
+            <div className="card flex max-h-[86vh] w-[min(1080px,94vw)] flex-col overflow-hidden p-3 shadow-xl">
+                <div className="mb-2 flex items-center gap-2">
+                  <h2 className="text-xs font-semibold">敏感库 {sensitiveTotal} 条</h2>
+                  <span className="text-[10px] text-slate-400">
+                    已抓过的岗位（已入库 + 被排除）都会记在这里，下一轮抓取直接跳过；可手动移出
+                  </span>
+                  <button className="ml-auto chip" onClick={() => setShowSensitive(false)}>
+                    关闭
+                  </button>
+                </div>
+                <div className="mb-2 flex items-center gap-2">
+                  <input
+                    className="input h-7 flex-1 !py-0 text-[11px]"
+                    placeholder="搜索公司 / 岗位 / 排除原因"
+                    value={sensitiveKw}
+                    onChange={(e) => setSensitiveKw(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') loadSensitive(sensitiveKw)
+                    }}
+                  />
+                  <button className="chip" onClick={() => loadSensitive(sensitiveKw)}>
+                    搜索
+                  </button>
+                  <button
+                    className="chip"
+                    onClick={() => {
+                      setSensitiveKw('')
+                      loadSensitive('')
+                    }}
+                  >
+                    重置
+                  </button>
+                  {[
+                    { k: '', name: '全部' },
+                    { k: 'stored', name: '已入库' },
+                    { k: 'rejected', name: '已排除' },
+                  ].map((t) => (
+                    <button
+                      key={t.k || 'all'}
+                      className={`chip whitespace-nowrap ${sensitiveKind === t.k ? 'chip-on' : ''}`}
+                      onClick={() => {
+                        setSensitiveKind(t.k)
+                        loadSensitive(sensitiveKw, t.k)
+                      }}
+                    >
+                      {t.name}
+                    </button>
+                  ))}
+                  <button
+                    className="chip"
+                    onClick={() =>
+                      setSensChecked(
+                        sensChecked.size === sensitive.length
+                          ? new Set()
+                          : new Set(sensitive.map((r) => r.id)),
+                      )
+                    }
+                    disabled={sensitive.length === 0}
+                  >
+                    {sensitive.length > 0 && sensChecked.size === sensitive.length ? '取消全选' : '全选'}
+                  </button>
+                  <button
+                    className="chip !text-rose-600 disabled:opacity-40"
+                    disabled={sensChecked.size === 0}
+                    onClick={async () => {
+                      await apiClient.deleteSensitive(Array.from(sensChecked))
+                      setSensChecked(new Set())
+                      loadSensitive(sensitiveKw)
+                    }}
+                  >
+                    移出所选（{sensChecked.size}）
+                  </button>
+                </div>
+                <div
+                  className="grid min-h-0 flex-1 auto-rows-min content-start items-start gap-1.5 overflow-y-auto"
+                  style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}
+                >
+                  {sensitiveLoading && (
+                    <div className="col-span-full text-[11px] text-slate-400">加载中…</div>
+                  )}
+                  {!sensitiveLoading && sensitive.length === 0 && (
+                    <div className="col-span-full text-[11px] text-slate-400">（暂无记录）</div>
+                  )}
+                  {sensitive.map((r) => (
+                    <div
+                      key={r.id}
+                      className={`flex flex-col overflow-hidden rounded-lg border px-2 py-1.5 transition-all duration-300 dark:border-dark-border ${
+                        r.kind === 'stored'
+                          ? 'border-emerald-100 bg-white hover:border-emerald-300 hover:shadow-sm dark:bg-transparent'
+                          : 'border-rose-200 bg-rose-50/40 hover:border-rose-300 hover:shadow-sm dark:bg-rose-950/20'
+                      }`}
+                    >
+                      {/* 第 1 行：网站来源 + 公司 + 薪资 */}
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-slate-300 accent-rose-500"
+                          checked={sensChecked.has(r.id)}
+                          onChange={() =>
+                            setSensChecked((prev) => {
+                              const nx = new Set(prev)
+                              if (nx.has(r.id)) nx.delete(r.id)
+                              else nx.add(r.id)
+                              return nx
+                            })
+                          }
+                        />
+                        <span
+                          className={'shrink-0 rounded px-1 py-0.5 text-[9px] font-medium ' + PLATFORM_CHIP_COLOR(r.platform)}
+                          title={`网站来源：${platformName(r.platform)}`}
+                        >
+                          {platformName(r.platform)}
+                        </span>
+                        <span
+                          className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-medium ${
+                            r.kind === 'stored'
+                              ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300'
+                              : 'bg-rose-50 text-rose-500 dark:bg-rose-900/30 dark:text-rose-300'
+                          }`}
+                          title={r.kind === 'stored' ? '已入库（抓取过，会跳过）' : '已排除（原因见下行）'}
+                        >
+                          {r.kind === 'stored' ? '已入库' : '已排除'}
+                        </span>
+                        <span
+                          className="min-w-0 flex-1 truncate text-[12px] font-semibold"
+                          title={r.company || ''}
+                        >
+                          {r.company || '-'}
+                        </span>
+                        <span className="shrink-0 text-[11px] font-semibold text-secondary">
+                          {r.salary || '-'}
+                        </span>
+                      </div>
+                      {/* 第 2 行：岗位名 + 记录类型 */}
+                      <div className="mt-[3px] flex min-w-0 items-center gap-1">
+                        <span
+                          className={`shrink-0 rounded px-1 text-[10px] font-medium ${
+                            r.kind === 'stored'
+                              ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300'
+                              : 'bg-rose-50 text-rose-500 dark:bg-rose-900/30 dark:text-rose-300'
+                          }`}
+                        >
+                          {r.kind === 'stored' ? '已入库' : '已排除'}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[11px] text-slate-600 dark:text-slate-300" title={r.title || ''}>
+                          {r.title || '-'}
+                        </span>
+                      </div>
+                      {/* 第 3 行：排除原因（可换行） + 移出按钮 */}
+                      <div className="mt-1 flex min-w-0 items-start gap-1">
+                        <span
+                          className={`min-w-0 flex-1 text-[11px] leading-4 ${
+                            r.kind === 'stored' ? 'text-slate-500' : 'text-rose-500'
+                          }`}
+                          title={r.reason || ''}
+                        >
+                          {r.kind === 'stored'
+                            ? `已投递信息：${r.reason || '已入库（抓取过，下一轮自动跳过）'}`
+                            : `排除原因：${r.reason || '-'}`}
+                        </span>
+                        <span className="mt-[1px] shrink-0 text-[10px] text-slate-400">{fmtTime(r.created_at)}</span>
+                        <button
+                          className="shrink-0 whitespace-nowrap rounded border border-slate-300 px-1 text-[10px] text-slate-500 hover:border-rose-400 hover:text-rose-500"
+                          onClick={async () => {
+                            await apiClient.deleteSensitive([r.id])
+                            loadSensitive(sensitiveKw)
+                          }}
+                          title="从敏感库移出（下次抓取不再跳过）"
+                        >
+                          移出
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

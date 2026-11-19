@@ -72,20 +72,32 @@ export default function ChatPanel({ focusUid, onSent }: ChatPanelProps) {
     window.setTimeout(() => setToast(''), 2600)
   }
 
+  // 模块级缓存：ChatPanel 被隐藏/重建（例如打开敏感库）后回来不用重新
+  // 驱动浏览器拉一遍会话列表，否则每次都要等 5~20 秒。
+  let _friendCache: { at: number; items: ChatFriend[] } | null = null
+  const FRIEND_TTL = 5 * 60_000
+
   // ---------- 会话列表 ----------
   const loadFriends = useCallback(async (force = false) => {
+    if (!force && _friendCache && Date.now() - _friendCache.at < FRIEND_TTL) {
+      setFriends(_friendCache.items)
+      return
+    }
     setFriendsLoading(true)
     setFriendsErr('')
     try {
       const r = await apiClient.chatFriends(force)
       if (!r.ok) {
         setFriendsErr(r.error || '读取 Boss 会话列表失败')
-        setFriends([])
+        if (!_friendCache) setFriends([])
       } else {
-        setFriends(r.items || [])
+        const items = r.items || []
+        _friendCache = { at: Date.now(), items }
+        setFriends(items)
       }
     } catch (e: any) {
       setFriendsErr(String(e?.message || e))
+      if (_friendCache) setFriends(_friendCache.items)
     } finally {
       setFriendsLoading(false)
     }
@@ -190,10 +202,10 @@ export default function ChatPanel({ focusUid, onSent }: ChatPanelProps) {
   })
 
   return (
-    <div className="flex min-h-0 flex-1 gap-2 bg-slate-50/60 dark:bg-slate-900/30">
+    <div className="flex min-h-0 flex-1 gap-4 bg-slate-50/60 dark:bg-slate-900/30">
       {/* ========== 左 1/4：会话列表（选中项高亮） ========== */}
       <div className="flex min-w-0 flex-[1] flex-col overflow-hidden">
-        <div className="flex shrink-0 items-center gap-2 px-1.5 py-1.5">
+        <div className="flex shrink-0 items-center gap-2 px-1 py-2">
           <h2 className="text-xs font-semibold">Boss 消息</h2>
           <span className="text-[10px] text-slate-400">{friends.length}</span>
           <button
@@ -232,15 +244,15 @@ export default function ChatPanel({ focusUid, onSent }: ChatPanelProps) {
               <button
                 key={f.uid}
                 onClick={() => openFriend(f)}
-                className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition ${
+                className={`mb-1.5 flex w-full items-center gap-2.5 rounded-lg px-2 py-2.5 text-left transition ${
                   on
                     ? 'bg-primary/15 font-semibold ring-1 ring-primary/35'
                     : 'hover:bg-slate-100/80 dark:hover:bg-slate-800/50'
                 }`}
               >
-                <Avatar f={f} size={on ? 34 : 30} />
+                <Avatar f={f} size={on ? 38 : 34} />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-1">
+                  <div className="flex items-baseline gap-1.5">
                     <span
                       className={`truncate text-[12px] ${
                         on ? 'font-semibold text-primary' : 'font-medium'
@@ -253,7 +265,7 @@ export default function ChatPanel({ focusUid, onSent }: ChatPanelProps) {
                       {clean(f.last_time)}
                     </span>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="mt-1 flex items-center gap-1">
                     <span className="truncate text-[11px] text-slate-500 dark:text-slate-400">
                       {clean(f.brand)}
                       {f.last_msg ? ` · ${clean(f.last_msg)}` : ''}
@@ -272,9 +284,9 @@ export default function ChatPanel({ focusUid, onSent }: ChatPanelProps) {
       </div>
 
       {/* ========== 右 1/4：对话框 ========== */}
-      <div className="flex min-w-0 flex-[1] flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-[3] flex-col overflow-hidden">
         {/* 顶栏固定：标题 + 在招岗位，不是卡片，只是清楚的分区 */}
-        <div className="flex shrink-0 items-center gap-2 px-1 py-1.5">
+        <div className="flex shrink-0 items-center gap-2 px-1 py-2">
           <h2 className="text-xs font-semibold">对话框</h2>
           {active && (
             <>

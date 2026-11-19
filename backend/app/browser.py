@@ -378,6 +378,25 @@ def detect_logged_in_from_page(page: Any, platform: str) -> bool:
     return False
 
 
+# 这些动作每 1~2 秒就会执行一次，打日志只会把界面刷屏（之前登录页疯狂闪烁
+# 就是这么暴露出来的），所以采集线程执行时不报它们。
+_QUIET_STEPS = {"context_alive", "find_page_for", "_check_logged_in"}
+
+# 登录循环里每一步在做什么（给日志用，别让界面显示 _wrap）
+_STEP_LABELS = {
+    "ensure_browser": "启动浏览器（持久化登录态）",
+    "find_page_for": "查找 Boss 标签页",
+    "goto_login": "打开 Boss 登录页",
+    "context_alive": "检查浏览器是否还活着",
+    "check_logged_in": "检查是否已登录",
+    "goto_quiet": "刷新页面",
+    "new_page": "新建标签页",
+    "_open_browser": "启动浏览器（持久化登录态）",
+    "_check_logged_in": "检查是否已登录",
+    "_goto_quiet": "刷新页面",
+}
+
+
 class LoginSession:
     """在**同一个** patchright 持久化浏览器里打开登录页，等用户扫码登录。
 
@@ -525,6 +544,24 @@ class LoginSession:
             try:
                 action = next(gen)
                 while True:
+                    # yaml 里每一步是 (fn, ctx)；给投递到采集线程的调用起个中文名，
+                    # 否则界面日志只会刷「采集线程开始执行：_wrap」，看不出在干什么。
+                    if self._step_runner and action:
+                        fn = action[0]
+                        name = getattr(fn, "__name__", "")
+                        if name in _QUIET_STEPS:
+                            # 静默：清掉可能残留的标签，避免继承到别的调用
+                            try:
+                                fn.__wrapped_label__ = None
+                            except Exception:
+                                pass
+                        else:
+                            label = _STEP_LABELS.get(name, "")
+                            if label:
+                                try:
+                                    fn.__wrapped_label__ = label
+                                except Exception:
+                                    pass
                     result = step(*action)
                     action = gen.send(result)
             except StopIteration:

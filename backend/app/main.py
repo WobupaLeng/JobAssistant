@@ -260,20 +260,30 @@ class Runtime:
             if task is None:
                 return
             fn, args = task
-            # run_in_worker 投递的是内部包装函数 _wrap，直接打名字会变成
-            # 「采集线程开始执行：_wrap」，看不出在干什么；优先打被包装函数的真名。
-            name = getattr(fn, "__wrapped_name__", None) or getattr(fn, "__name__", "task")
-            try:
-                self.log("info", f"采集线程开始执行：{name}")
-            except Exception:
-                pass
+            # run_in_worker 投递的是内部包装函数 _wrap，直接打名字只会得到
+            # 「采集线程开始执行：_wrap」，看不出在干什么。这里用 label 说清楚
+            # 具体在做什么，同时在后台记一条 DEBUG 级的来源，便于对照。
+            label = getattr(fn, "__wrapped_label__", None) or getattr(fn, "__name__", "任务")
+            if label != "_wrap":
+                try:
+                    self.log("info", f"开始：{label}")
+                except Exception:
+                    pass
+            t0 = time.time()
             try:
                 fn(*args)
             except BaseException as exc:  # 单条任务出任何问题都不能把采集线程打死
                 try:
-                    self.log("error", f"任务异常：{exc}")
+                    self.log("error", f"失败：{label} —— {exc}")
                 except Exception:
                     pass
+            else:
+                cost = time.time() - t0
+                if cost >= 3 and label != "_wrap":
+                    try:
+                        self.log("info", f"完成：{label}（{cost:.1f}s）")
+                    except Exception:
+                        pass
 
     def submit(self, fn, *args) -> None:
         """把任务丢进采集线程执行。"""
@@ -1301,6 +1311,8 @@ def _run_chat(fn, timeout: float = 45.0):
     rt = get_rt()
     box: dict[str, Any] = {}
     done = threading.Event()
+    # 日志里要能看出这一步到底在干什么（_wrap 本身的名字没有信息量）
+    label = getattr(fn, "__chat_label__", None) or "Boss 消息"
 
     def _wrap():
         try:
@@ -1310,6 +1322,7 @@ def _run_chat(fn, timeout: float = 45.0):
         finally:
             done.set()
 
+    _wrap.__wrapped_label__ = label
     rt.submit(_wrap)
     deadline = time.time() + timeout
     while not done.wait(0.4):
@@ -1331,7 +1344,11 @@ def chat_friends(force: bool = False) -> dict[str, Any]:
     """Boss 会话列表（= 所有聊过的 HR）。界面左 1/4 的消息列表用它。"""
     rt = get_rt()
     try:
-        items = _run_chat(lambda: rt.chat.friends(rt.ensure_browser(), force=force))
+        def _do():
+            return rt.chat.friends(rt.ensure_browser(), force=force)
+
+        _do.__chat_label__ = "读取 Boss 会话列表" + ("（强制刷新）" if force else "")
+        items = _run_chat(_do)
         _CHAT_STATE.update({"ok": True, "error": "", "ts": time.time()})
         return {"ok": True, "items": items}
     except Exception as exc:
@@ -1346,7 +1363,11 @@ def chat_messages(uid: str, force: bool = False) -> dict[str, Any]:
     """某个会话的历史消息（点开会话时才拉，带缓存）。"""
     rt = get_rt()
     try:
-        items = _run_chat(lambda: rt.chat.messages(rt.ensure_browser(), uid, force=force))
+        def _do():
+            return rt.chat.messages(rt.ensure_browser(), uid, force=force)
+
+        _do.__chat_label__ = f"打开会话 {uid} 读取聊天记录" + ("（强制刷新）" if force else "")
+        items = _run_chat(_do)
         return {"ok": True, "uid": uid, "items": items}
     except Exception as exc:
         msg = str(exc) or exc.__class__.__name__
@@ -1373,6 +1394,8 @@ def chat_send(req: ChatSendReq) -> dict[str, Any]:
             rt.store.set_delivered([req.job_id], True)
         return res
 
+    _do.__chat_label__ = f"给 HR {req.uid} 发送消息"
+
     try:
         res = _run_chat(_do, timeout=90.0)
         return {"ok": True, **res}
@@ -1395,7 +1418,11 @@ def chat_recall(req: ChatRecallReq) -> dict[str, Any]:
     """
     rt = get_rt()
     try:
-        res = _run_chat(lambda: rt.chat.recall(rt.ensure_browser(), req.uid), timeout=90.0)
+        def _do():
+            return rt.chat.recall(rt.ensure_browser(), req.uid)
+
+        _do.__chat_label__ = f"撤回消息 {req.uid}"
+        res = _run_chat(_do, timeout=90.0)
         return {"ok": True, **res}
     except Exception as exc:
         msg = str(exc) or exc.__class__.__name__
@@ -1414,13 +1441,17 @@ def chat_open(req: ChatOpenReq) -> dict[str, Any]:
     """按岗位找 HR 会话（未投递卡片点开时用）。找不到就返回 ok=False，界面提示先打招呼。"""
     rt = get_rt()
     try:
-        friend = _run_chat(
-            lambda: rt.chat.find_friend(
+        def _do():
+            return rt.chat.find_friend(
                 rt.ensure_browser(),
                 uid=req.uid,
                 encrypt_job_id=req.encrypt_job_id or "",
                 brand=req.brand or "",
             )
+
+        _do.__chat_label__ = f"查找 {req.brand or ''} 的 HR 会话".strip()
+        friend = _run_chat(
+            _do
         )
         if not friend:
             return {"ok": False, "found": False, "error": "还没有和这个岗位的 HR 聊过"}
