@@ -396,12 +396,14 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify({ uid }),
     }),
-  chatOpen: (p: { uid?: string; encrypt_job_id?: string; brand?: string }) =>
+  chatOpen: (p: { uid?: string; encrypt_job_id?: string; brand?: string; force_new?: boolean }) =>
     api<{
       ok: boolean
       found?: boolean
       friend?: ChatFriend
       fallback?: string
+      /** force_new 时后端会去岗位页建会话，true 表示这次是新建的 */
+      created?: boolean
       candidates?: { uid: number | string; name?: string; title?: string; brand?: string; avatar?: string }[]
       error?: string
     }>('/api/chat/open', {

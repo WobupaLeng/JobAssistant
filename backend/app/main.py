@@ -1581,16 +1581,27 @@ def auto_greet_one(req: AutoGreetReq) -> dict[str, Any]:
             target = f
             break
     if target is None:
-        # 没打过招呼的岗位在会话列表里不存在；同一家公司只有一位 HR 时直接发给他，
-        # 等于「主动建立会话」，比干等用户手动聊更符合自动打招呼的意图
-        brand = str(job.get("company") or "").strip()
-        same = [f for f in friends or [] if brand and brand in str(f.get("brand") or "")]
-        if len(same) == 1:
-            target = same[0]
-        else:
-            why = (f"这家公司有 {len(same)} 位 HR，无法确定发给谁" if same
-                   else "Boss 会话列表里没有这家公司的 HR")
-            return {"ok": False, "stage": "find", "error": why, "skip": True}
+        # 没打过招呼的岗位在 Boss 会话列表里根本不存在。既然用户开了「自动打招呼」，
+        # 就是要主动发起：直接去岗位详情页点「立即沟通」把这个会话建出来。
+        if ejid:
+            def _new():
+                return rt.chat.start_conversation(rt.ensure_browser(), {"encrypt_job_id": ejid}, ejid)
+            _new.__chat_label__ = "自动打招呼：主动建立会话（岗位详情页「立即沟通」）"
+            try:
+                res = _run_chat(_new, timeout=120.0)
+                target = res.get("friend") or None
+            except Exception as exc:
+                return {"ok": False, "stage": "find",
+                        "error": f"没能主动发起会话：{exc}"}
+        if target is None:
+            brand = str(job.get("company") or "").strip()
+            same = [f for f in friends or [] if brand and brand in str(f.get("brand") or "")]
+            if len(same) == 1:
+                target = same[0]
+            else:
+                why = (f"这家公司有 {len(same)} 位 HR，无法确定发给谁" if same
+                       else "Boss 会话列表里没有这家公司的 HR")
+                return {"ok": False, "stage": "find", "error": why, "skip": True}
 
     # 2) 生成话术（消耗的 token 在 _write_greeting 里累加）
     writer = GreetingWriter(rt.scorer.llm if rt.scorer else None)
@@ -1763,6 +1774,8 @@ class ChatOpenReq(BaseModel):
     uid: str | None = None
     encrypt_job_id: str | None = None
     brand: str | None = None
+    # True = 用户点了「打招呼」，明确要主动发起：没有会话就去详情页点「立即沟通」建一个
+    force_new: bool = False
 
 
 @app.post("/api/chat/open")
@@ -1789,6 +1802,27 @@ def chat_open(req: ChatOpenReq) -> dict[str, Any]:
         friend, friends = _run_chat(_do)
         if friend:
             return {"ok": True, "found": True, "friend": friend}
+
+        # 用户主动点「打招呼」：没有会话就自己去建一个（岗位详情页「立即沟通」），
+        # 建完已经进了聊天页并选中这位 HR，直接返回，不需要再让用户挑
+        if req.force_new and (req.encrypt_job_id or "").strip():
+            ejid = (req.encrypt_job_id or "").strip()
+
+            def _start():
+                ctx2 = rt.ensure_browser()
+                seed: dict[str, Any] = {"encrypt_job_id": ejid, "brand": req.brand or ""}
+                if req.uid:
+                    seed["uid"] = req.uid
+                return rt.chat.start_conversation(ctx2, seed, ejid)
+
+            _start.__chat_label__ = f"主动联系 {req.brand or '该岗位'} 的 HR 并建立会话"
+            res = _run_chat(_start, timeout=120.0)
+            return {
+                "ok": True,
+                "found": True,
+                "friend": res.get("friend") or {},
+                "created": bool(res.get("created")),
+            }
 
         # 兜底一：同一家公司的 HR（会话名里带公司名）
         brand = (req.brand or "").strip()

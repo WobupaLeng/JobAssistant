@@ -243,6 +243,7 @@ class BossChat:
         # 接口响应缓存：只要页面还在，就不用每次重新拉
         self._friends: list[dict[str, Any]] = []
         self._friends_at = 0.0
+        self._opened_name = ""
         self._msgs: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         # Boss 上已上传的附件简历（点「发简历」才会拉一次）
         self._resumes: list[dict[str, Any]] = []
@@ -702,6 +703,118 @@ class BossChat:
             ) or ""
         except Exception:
             return ""
+
+    # ------------------------------------------------------------------
+    # 主动发起会话：从岗位详情页点「立即沟通」
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _job_detail_url(encrypt_job_id: str) -> str:
+        return f"https://www.zhipin.com/job_detail/{encrypt_job_id}.html"
+
+    def start_conversation(self, ctx, friend: dict[str, Any], encrypt_job_id: str = "") -> dict[str, Any]:
+        """还没和这位 HR 聊过时，用岗位详情页的「立即沟通」主动建会话。
+
+        Boss 的规则：只有对方在会话列表里出现过，才能点开聊天框。没打过招呼的新岗位
+        没有会话，必须先在详情页点「立即沟通」——点完会跳进聊天页并把他加进列表。
+        **只建会话，不发送任何内容**（打招呼由调用方决定发不发）。
+        返回：{"ok": True, "uid": ..., "friend": {...}, "created": True}
+        """
+        title = (friend or {}).get("name") or (friend or {}).get("brand") or "该 HR"
+        with self._lock, self._activity(60.0):
+            page = self._chat_page(ctx)
+            ejid = (encrypt_job_id or (friend or {}).get("encrypt_job_id") or "").strip()
+            if not ejid:
+                raise ChatError(f"拿不到岗位 ID，没法主动联系「{title}」")
+            # 已经在会话列表里就不用再建
+            key = str((friend or {}).get("uid") or "")
+            live = self._raw_friend(key) if key else None
+            if live is not None:
+                self._open_conversation(page, live)
+                return {"ok": True, "uid": key, "friend": live, "created": False}
+
+            on_resp = self._catch(page, "friendsList", self._on_friends, "start")
+            try:
+                page.goto(self._job_detail_url(ejid), wait_until="domcontentloaded", timeout=40000)
+                # 等详情页把「立即沟通」渲染出来
+                self._poll(page, "!!document.querySelector('.job-op .btn-startchat, a.btn-startchat')",
+                           timeout_ms=15000, step_ms=150)
+                btn = page.locator(".job-op .btn-startchat, a.btn-startchat").first
+                try:
+                    btn.wait_for(state="visible", timeout=8000)
+                    btn.click(timeout=15000)
+                except Exception as exc:
+                    raise ChatError(f"岗位详情页上没点到「立即沟通」（{exc}）") from exc
+                # 点完会跳到聊天页，并自动选中这位 HR
+                self._poll(page, "location.pathname.indexOf('/web/geek/chat') >= 0 && !!document.querySelector('#chat-input, ' + "
+                                 "JSON.stringify('.chat-conversation'))", timeout_ms=20000, step_ms=200)
+                if "/web/geek/chat" not in (page.url or ""):
+                    raise ChatError("点了「立即沟通」但没有进入聊天页，可能是账号被限制或页面加载失败")
+                # 等会话区出现这位 HR 的标题
+                self._poll(page, "!!document.querySelector('.chat-conversation .name-text, .chat-conversation')",
+                           timeout_ms=15000, step_ms=200)
+                self._page = page
+            finally:
+                try:
+                    page.remove_listener("response", on_resp)
+                except Exception:
+                    pass
+
+            # 点完「立即沟通」后，先从 DOM 里把刚选中会话的 HR 名字读出来
+            # （此时聊天区还开着，刷新列表就会把它清掉）
+            opened_name = ""
+            try:
+                opened_name = page.locator(".chat-conversation .name-text").first.inner_text(timeout=2000).strip()
+            except Exception:
+                opened_name = ""
+            self._opened_name = opened_name
+
+            # 列表刷新后把这位 HR 的真实条目找回来（uid 这里最可靠）
+            self._friends_at = 0.0
+            try:
+                self.friends(ctx, force=True)
+            except Exception:
+                pass
+            found = self._raw_friend(key) if key else None
+            if found is None:
+                want = (friend or {}).get("name") or ""
+                brand = (friend or {}).get("brand") or ""
+                for f in self._friends:
+                    if want and f.get("name") == want and (not brand or f.get("brand") == brand):
+                        found = f
+                        break
+            if found is None:
+                for f in self._friends:
+                    if (f.get("encrypt_job_id") or "") == ejid:
+                        found = f
+                        break
+            if found is None and opened_name:
+                # 按 uid / ejid 都没对上时，用刚读到的名字在列表里找
+                for f in self._friends:
+                    if str(f.get("name") or "") == opened_name:
+                        found = f
+                        break
+            if found is None and opened_name:
+                # 接口里没有这位 HR（Boss 刚建的会话还没进 friendList），
+                # 但会话列表 DOM 里已经有了：按名字构造一个条目，直接点开
+                rows = self._item_rows(page)
+                hit = [r for r in rows if r[1] == opened_name]
+                if hit:
+                    found = {"name": opened_name, "brand": (friend or {}).get("brand") or "",
+                             "encrypt_job_id": ejid}
+            if found is not None:
+                # friends(force=True) 会 reload 聊天页，把刚选中的会话清掉；
+                # 这里必须再点开一次，界面上才能真正看到和这位 HR 的聊天框
+                target = dict(found)
+                if not target.get("name"):
+                    target["name"] = opened_name
+                try:
+                    self._open_conversation(page, target)
+                except Exception as exc:
+                    self.log("warn", f"会话已建立，但没能自动点开：{exc}")
+                self._open_uid = str(found.get("uid") or "")
+                self._msgs.pop(self._open_uid, None)
+            return {"ok": True, "uid": (found or {}).get("uid") or key,
+                    "friend": found or friend, "created": True}
 
     def send(self, ctx, uid: Any, text: str) -> dict[str, Any]:
         """给某个 HR 发一条消息（DOM 输入 + 点发送，和真人操作一致）。"""

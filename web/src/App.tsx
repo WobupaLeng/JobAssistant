@@ -337,19 +337,25 @@ export default function App() {
 
   // 点开未投递岗位：右栏切到该岗位 HR 的会话。
   // 后端 /api/chat/open 按 encryptJobId / 公司名在 Boss 会话列表里找。
-  // 找不到（没打过招呼的岗位，Boss 还没有会话）就退一步：直接展开消息面板，
-  // 让用户自己挑 HR；再不行才提示。全程不会发出任何消息。
-  const openJobChat = useCallback(async (j: JobRow) => {
+  // 点卡片展开时只用已有会话（不打扰 Boss）。
+  // 点「打招呼」才是用户明确要主动发起：force_new 让后端去岗位详情页点「立即沟通」，
+  // 把和这位 HR 的会话建出来并跳进聊天页（只建会话，不发任何内容）。
+  const openJobChat = useCallback(async (j: JobRow, forceNew = false) => {
     const ejid = (j.job_id || '').startsWith('boss:') ? j.job_id.slice(5) : undefined
     setChatOpen(true)
     try {
       const r = await apiClient.chatOpen({
-        uid: j.hr_name || undefined,
         encrypt_job_id: ejid,
         brand: j.company || undefined,
+        force_new: forceNew,
       })
       if (r.ok && r.friend) {
         setChatFocusUid(String(r.friend.uid))
+        if (r.created) {
+          setErr('')
+          setAutoMsg(`已向 ${j.company || '该公司'} 的 HR 发起沟通，右侧可以直接发消息`)
+          window.setTimeout(() => setAutoMsg(''), 5000)
+        }
         return
       }
       // 没建立过会话：右侧已经列出全部 HR，直接让用户点一位开聊（不当作错误）
@@ -1988,11 +1994,11 @@ export default function App() {
                       {j.status !== 'delivered' && (
                         <button
                           className="shrink-0 rounded border border-primary/40 px-1 text-[10px] text-primary hover:bg-primary/10"
-                          title="向这位 HR 打招呼：展开 Boss 消息并切到该岗位的会话"
+                          title="主动和这位 HR 发起沟通：还没聊过就去岗位页点「立即沟通」建会话，然后跳进聊天框"
                           onClick={(e) => {
                             e.stopPropagation()
                             setSelected(j)
-                            openJobChat(j)
+                            openJobChat(j, true)
                           }}
                         >
                           打招呼

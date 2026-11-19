@@ -4,6 +4,41 @@
 
 ---
 
+## 2026-11-19（下午·七次）「打招呼」= 主动发起会话
+
+用户反馈：「我点击打招呼按钮，说明我正在主动发起请求，这时候应该新建一个与该 hr 的会话」，
+以及「自动打招呼也是如此，根据 jd，主动发起会话」「跳转到聊天页面并新建会话」。
+
+- 以前的行为：只去 Boss 会话列表里找，找不到就提示「右侧已列出全部 HR，挑一位」。
+  但 Boss 只有在**打过招呼之后**才会为该岗位建会话，所以没聊过的岗位永远找不到。
+- 实测可用入口：岗位详情页 `https://www.zhipin.com/job_detail/{encryptJobId}.html` 上的
+  `a.btn-startchat`（文案「立即沟通」）。点它会跳进 `/web/geek/chat` 并自动选中该 HR，
+  会话列表里立刻出现这条会话——**只建会话，不需要真的发消息**。
+- `backend/scrapers/boss_chat.py` 新增 `start_conversation(ctx, friend, encrypt_job_id)`：
+  1. 会话列表里已经有 → 直接 `_open_conversation`，返回 `created=False`；
+  2. 否则 goto 岗位详情页 → 等 `a.btn-startchat` 可见 → 点击 → 等进入 `/web/geek/chat`；
+  3. **先读下 `.chat-conversation .name-text`**（刷新列表会把它清掉），再 `friends(force=True)`
+     把这位 HR 的真实条目找回来；
+  4. 按 uid → 按名字 → 按 DOM 里刚建出来的行 依次兜底，最后重新 `_open_conversation`，
+     保证右侧聊天框真的打开了。
+  踩过的坑：`self._friends` 是 **list** 不是 dict（写成 `.values()` 直接 AttributeError）；
+  `friends(force=True)` 会 reload 聊天页，把「立即沟通」刚选中的会话清空。
+- `backend/app/main.py`：
+  - `ChatOpenReq` 增加 `force_new: bool = False`；`/api/chat/open` 在 `force_new` 且带
+    `encrypt_job_id` 时走 `start_conversation`，返回多一个 `created` 字段。
+  - `POST /api/auto-greet/one`：找不到会话时不再挑「同公司唯一 HR」凑数，而是直接
+    `start_conversation` 主动建会话，然后照样「生成话术 → 发送」，顺序是
+    **先开会话 → 生成话术 → 发送**。
+- `web/src/api.ts`：`chatOpen` 参数加 `force_new`，返回类型加 `created`。
+- `web/src/App.tsx`：`openJobChat(j, forceNew = false)`；卡片展开仍只用已有会话（不打扰 Boss），
+  只有「打招呼」按钮调 `openJobChat(j, true)`；建会话成功后提示
+  「已向 XX 的 HR 发起沟通，右侧可以直接发消息」。顺手修掉把 `j.hr_name`（HR 名字）
+  当 `uid` 传的 bug。
+- 验证（dev 副本 profile，不影响用户真实数据）：`start_conversation` 返回
+  `created=True uid=40761977 name=刘女士`，页面 URL 为 `/web/geek/chat`，
+  `.chat-conversation .name-text` = 「刘女士」，会话区有消息卡片，输入区可用。
+
+---
 ## 2026-11-19（下午·六次）大模型打分截断 + Boss 薪资反爬解码
 
 ### 1. 「第 1 页解析出 9 条却没入库、敏感库也没有」——数据其实都入库了
