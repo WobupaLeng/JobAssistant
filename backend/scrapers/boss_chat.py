@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import threading
 import time
 from typing import Any, Callable
@@ -90,17 +91,32 @@ def _fmt_time(ts: Any) -> str:
 
 
 def _merge_status(msgs: list[dict[str, Any]], dom: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """把 DOM 上读到的回执（已读/送达）按 mid 合并进接口消息。"""
+    """用 DOM 校正接口消息：回执（已读/送达）和「是不是我发的」。
+
+    接口的 received 字段并非每条都有，缺的时候 from_me 会是 None（也可能误判），
+    而 DOM 的 li 一定有 item-myself / item-friend，所以两边按 mid 对齐后以 DOM 为准。
+    """
     if not dom or not msgs:
         return msgs
-    by_mid = {str(d.get("mid") or d.get("id") or ""): d.get("status") or "" for d in dom}
+    by_mid = {str(d.get("mid") or d.get("id") or ""): d for d in dom}
     for m in msgs:
-        if m.get("status"):
-            continue
         k = str(m.get("mid") or m.get("id") or "")
-        st = by_mid.get(k)
-        if st:
-            m["status"] = st
+        d = by_mid.get(k)
+        if not d:
+            # 没有 mid 时按顺序对齐（接口与 DOM 的条数/顺序一般一致）
+            continue
+        if not m.get("status") and d.get("status"):
+            m["status"] = d["status"]
+        if d.get("from_me") is not None:
+            m["from_me"] = bool(d["from_me"])
+    # 剩下仍然 None 的，按同一 mid 在 dom 里的相对位置补一次
+    if any(m.get("from_me") is None for m in msgs) and len(dom) >= len(msgs):
+        for m, d in zip(msgs, dom[-len(msgs):]):
+            if m.get("from_me") is None and d.get("from_me") is not None:
+                m["from_me"] = bool(d["from_me"])
+    for m in msgs:
+        if m.get("from_me") is None:
+            m["from_me"] = False
     return msgs
 
 
@@ -123,26 +139,43 @@ def _status_from_text(txt: str, cls: str = "") -> str:
     return ""
 
 
+# 正文里的 HTML 标签（如 <copy>备注</copy>）和卡片上的纯按钮文字
+_TAG_RE = re.compile(r"<[^>]{0,40}>")
+_NAV_TEXT_RE = re.compile(r"^(查看详细分析|点击预览附件简历|复制微信号|拒绝|同意|暂不考虑|可以接受|复制|发送)$")
+
+
 def normalize_message(raw: dict[str, Any], my_id: int | None) -> dict[str, Any]:
     """把 historyMsg 的一条整理成 {id, from_me, text, time, time_text, kind}。"""
     body = raw.get("body") or {}
     mid = raw.get("mid") or raw.get("msgId") or 0
     received = raw.get("received")
-    from_me = (received is False) if received is not None else (
-        bool(my_id) and body.get("fromId") == my_id
-    )
     text = ""
+    from_text = False
     for key in ("text", "content", "showText", "desc"):
         v = body.get(key)
         if isinstance(v, str) and v.strip():
-            # 卡片消息的 text 里常带换行，压成一行更好读
-            text = " ".join(html.unescape(v).split())
+            # 卡片消息的 text 里常带换行，压成一行更好读；去标签前先确认这确实是正文
+            from_text = True
+            text = " ".join(html.unescape(_TAG_RE.sub("", v)).split())
+            text = _NAV_TEXT_RE.sub("", text).strip()
             break
     # 注意：body.type 是模板类型（如正文里的 16 只是模板 id），外层 raw.type 才是消息类型
     try:
         btype = int(raw.get("type") or 0)
     except (TypeError, ValueError):
         btype = 0
+    # 「是不是我发的」的判定顺序：received 字段有时缺，再依次看 fromId/from、最后用 _open_uid 之外的
+    # 一个固定锚点（my_id）兜底；都不确定时留 None，交给调用方用 DOM 覆盖
+    if received is not None:
+        from_me = bool(received) is False
+    else:
+        src_id = body.get("fromId") if body.get("fromId") is not None else body.get("from")
+        if isinstance(src_id, (int, str)) and my_id and str(src_id) == str(my_id):
+            from_me = True
+        elif src_id is not None:
+            from_me = False
+        else:
+            from_me = None
     if not text:
         # 结构化消息（职位卡片、系统提示等）退化成一句说明
         if btype == 8:
@@ -160,14 +193,13 @@ def normalize_message(raw: dict[str, Any], my_id: int | None) -> dict[str, Any]:
             text = "其他消息"
     ts = raw.get("msgTime") or raw.get("time") or body.get("msgTime") or 0
     ts_int = int(ts) if str(ts).isdigit() else 0
-    # 没有正文的类型一律按系统行（居中细字），有正文的才是真正的对话气泡；
-    # 正文只是类型兜底（「图片」「其他消息」这类）时也按系统行，避免误画成对方说的话
-    from_text = any(isinstance(body.get(k), str) and body.get(k).strip() for k in ("text", "content", "showText", "desc"))
-    system = (not from_text) or btype in (16, 17, 18, 19, 20, 21)
+    # 真的抓到正文才是对话气泡；类型兜底出来的（「图片」「附件简历」）算系统行，
+    # 免得把系统提示画成对方说的话
+    system = (not from_text) or (not text) or btype in (16, 17, 18, 19, 20, 21)
     return {
         "id": str(mid),
         "mid": mid,
-        "from_me": bool(from_me),
+        "from_me": from_me,   # True=我发的 False=对方发的 None=不确定（用 DOM 覆盖）
         "text": text,
         "time": ts_int,
         "time_text": _fmt_time(ts_int),
@@ -482,7 +514,7 @@ class BossChat:
             page = self._chat_page(ctx)
             cached = self._msgs.get(key)
             if cached and not force and time.time() - cached[0] < 8 and key != "":
-                return [normalize_message(m, self._my_id) for m in cached[1]]
+                return [x for x in (normalize_message(m, self._my_id) for m in cached[1]) if (x.get("text") or "").strip()]
             friend = self._raw_friend(key)
             if friend is None:
                 # 冷启动 / 新会话：先确保会话列表是新的
@@ -499,6 +531,8 @@ class BossChat:
                 cur = self._msgs.get(key)
                 if cur and cur[0] > before:
                     out = [normalize_message(m, self._my_id) for m in cur[1]]
+                    # 正文和类型说明都空的（纯时间线/占位）直接丢掉，不占一行
+                    out = [m for m in out if (m.get("text") or "").strip()]
                     # 回执在 DOM 上：拿到就把已读/送达补进去
                     if not dom_at or time.time() - dom_at > 2:
                         dom = self._messages_from_dom(page) or dom
@@ -555,8 +589,8 @@ class BossChat:
             if r.get("time"):
                 last_time = r["time"]
             text = (r.get("text") or "").strip()
-            if not text:
-                continue
+            if not text or _NAV_TEXT_RE.match(text):
+                continue   # 没有正文 / 只剩卡片按钮文字，当系统行处理，别冒充对方说话
             cls = r.get("cls") or ""
             out.append({
                 "id": r.get("mid") or f"dom-{r['i']}",

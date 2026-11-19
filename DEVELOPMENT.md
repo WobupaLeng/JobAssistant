@@ -21,6 +21,26 @@
   - 16~21 类（纯系统/时间线）不再画气泡。
 - 打包版运行时会独占浏览器 profile，dev 后端无法同时用 Chrome。用 mock 接口（`C:\Users\Administrator\AppData\Local\Temp\mock_shot.py`，路由注入 window.fetch 桩）在浏览器里验证渲染，再打包。
 
+## 2026-11-19（下午·三次）「有的会话能分清我和 Boss，有的不能」
+
+根因：`normalize_message` 判断「是不是我发的」只看 `raw.received`。这个字段**并非每条都有**，
+缺的时候就退化成 `body.fromId == my_id`，而 `my_id` 要靠猜（拿不到就一直是 None），于是这些会话
+里全部消息都被当成对方发的，左右自然就乱了。
+
+- `from_me` 现在允许三态：`True` 我发的 / `False` 对方 / `None` 不确定。
+  判定顺序：`received` → `body.fromId/from` 与 `my_id` 比对 → `None`。
+- `_merge_status()` 除了合并回执，现在也用 DOM 校正左右：DOM 的 `li.message-item`
+  一定有 `item-myself` / `item-friend`，按 `mid` 对齐后以 DOM 为准；实在对不上的再按顺序兜底。
+- 正文处理：先 `html.unescape` 再 `_TAG_RE` 去掉 `<copy>…</copy>` 这类标签，
+  `_NAV_TEXT_RE` 去掉「拒绝/同意/复制微信号/查看详细分析」这类纯按钮文字；
+  正文为空的消息直接丢弃（原来会画出空胶囊）。
+- 前端 `ChatPanel.tsx` 增加 `SYS_KINDS = {2,3,5,6,7,8}`：「附件简历 / 图片 / 职位卡片 / 语音」
+  一律画居中的浅灰胶囊，不管接口怎么标。
+- 验证（用 profile 副本跑 dev 后端，避免占用真实浏览器 profile）：
+  周俞 8 条/我 1 条、卞女士 5/2、朱鸿凡 4/1、王女士 4/2、黎女士 14/3、江伟阁 12/3，空文本 0 条。
+- 环境提示：打包版运行时独占 `data/browser-profile`，dev 后端必须改用副本目录
+  （`AJA_DATA_DIR=...\Temp\devdata`，里面放一份 `browser-profile`）才能和打包版并存。
+
 ## 2026-11-19（下午）Boss 消息面板 · 简历发送 · 回执
 
 ### 本轮做了什么

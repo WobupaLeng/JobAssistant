@@ -58,6 +58,9 @@ const RECEIPT_CLS: Record<string, string> = {
   unread: 'text-amber-600 dark:text-amber-400',
 }
 
+/** 这些 kind 是 Boss 的系统事件（附件简历/图片/职位卡片/语音），不画成对话气泡 */
+const SYS_KINDS = new Set(['2', '3', '5', '6', '7', '8'])
+
 const receiptOf = (m: ChatMessage): string =>
   m.from_me && m.status && RECEIPT_TEXT[m.status] ? m.status : ''
 
@@ -457,6 +460,16 @@ export default function ChatPanel({ focusUid, onSent, onTokens, onOpenChange }: 
                 <div className="py-3 text-center text-[11px] text-slate-400">还没有聊天记录</div>
               )}
               {msgs.map((m, i) => {
+                // 附件简历 / 图片 / 职位卡片本身就是系统事件，无论接口怎么标都画成居中胶囊
+                if (SYS_KINDS.has(String(m.kind ?? '')) || /^附件简历$|^图片$|^职位卡片/.test(clean(m.text))) {
+                  return (
+                    <div key={m.id || i} className="flex justify-center">
+                      <span className="rounded-full bg-slate-100/80 px-2 py-0.5 text-[10px] text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
+                        {clean(m.text)}
+                      </span>
+                    </div>
+                  )
+                }
                 if (m.system) {
                   return (
                     <div key={m.id || i} className="flex justify-center">
