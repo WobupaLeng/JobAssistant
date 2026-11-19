@@ -178,9 +178,14 @@ class Runtime:
         # 全局累计 token（打分 + 生成打招呼），持久化在 app_config，重启不清零
         self.tokens_total = 0
         self.tokens_greet = 0
+        self.tokens_score = 0
         try:
             self.tokens_total = int(self.store.get_config("tokens_total", "0") or 0)
             self.tokens_greet = int(self.store.get_config("tokens_greet", "0") or 0)
+            self.tokens_score = int(self.store.get_config("tokens_score", "0") or 0)
+            if self.tokens_score <= 0 and self.tokens_total > self.tokens_greet:
+                # 老数据没有分开记：剩下的都算打分消耗
+                self.tokens_score = self.tokens_total - self.tokens_greet
         except Exception:
             pass
         # 有效 JD 上限（0 = 不限制），抓取中改动即时生效
@@ -436,6 +441,12 @@ class Runtime:
             self.tokens_greet += n
             try:
                 self.store.set_config("tokens_greet", str(self.tokens_greet))
+            except Exception:
+                pass
+        else:
+            self.tokens_score += n
+            try:
+                self.store.set_config("tokens_score", str(self.tokens_score))
             except Exception:
                 pass
         try:
@@ -1143,6 +1154,7 @@ def status() -> dict[str, Any]:
         "stats": rt.store.stats(),
         "tokens_total": rt.tokens_total,
         "tokens_greet": rt.tokens_greet,
+        "tokens_score": rt.tokens_score,
         "logged_in": _logged_in(rt),
         "login_sessions": sessions,
     }
@@ -1533,7 +1545,7 @@ def auto_greet_next() -> dict[str, Any]:
             "hr_name": r.get("hr_name") or "",
             "job_url": r.get("job_url") or "",
         })
-    return {"ok": True, "items": items, "tokens_total": rt.tokens_total, "tokens_greet": rt.tokens_greet}
+    return {"ok": True, "items": items, "tokens_total": rt.tokens_total, "tokens_greet": rt.tokens_greet, "tokens_score": rt.tokens_score}
 
 
 @app.post("/api/auto-greet/one")
@@ -1613,6 +1625,7 @@ def auto_greet_one(req: AutoGreetReq) -> dict[str, Any]:
         "title": job.get("title") or "",
         "tokens_total": rt.tokens_total,
         "tokens_greet": rt.tokens_greet,
+        "tokens_score": rt.tokens_score,
     }
 
 
@@ -1670,6 +1683,7 @@ def greet(req: GreetReq) -> dict[str, Any]:
         "note": g.note,
         "tokens_total": rt.tokens_total,
         "tokens_greet": rt.tokens_greet,
+        "tokens_score": rt.tokens_score,
     }
 
 
@@ -1818,6 +1832,7 @@ def get_config() -> dict[str, Any]:
         "llm_prefilter": getattr(rt.scorer, "llm_prefilter", 5),
         "tokens_total": rt.tokens_total,
         "tokens_greet": rt.tokens_greet,
+        "tokens_score": rt.tokens_score,
         "theme": rt.store.get_config("theme") or "light",
         "exclude_keywords": rt.store.get_config_json("exclude_keywords", DEFAULT_EXCLUDE_KEYWORDS),
         "exclude_rules": rt.exclude_rules().as_dict(),

@@ -258,7 +258,7 @@ export default function App() {
   const [prefilter, setPrefilter] = useState(5)
   const prefilterRef = useRef(5)
   // 累计 token：total=打分+生成，greet=生成打招呼部分
-  const [tokens, setTokens] = useState({ total: 0, greet: 0 })
+  const [tokens, setTokens] = useState({ total: 0, greet: 0, score: 0 })
   // ---------- 自动打招呼 ----------
   const [autoOn, setAutoOn] = useState(false)
   const [autoPaused, setAutoPaused] = useState(false)
@@ -294,7 +294,11 @@ export default function App() {
   // 用 ref 包一层，保证 ChatPanel 拿到的回调引用恒定
   const chatOpenCb = useRef((v: boolean) => setChatOpen(v))
   const onChatOpenChange = useCallback((v: boolean) => chatOpenCb.current(v), [])
-  const onChatTokens = useCallback((t: { total: number; greet: number }) => setTokens(t), [])
+  const onChatTokens = useCallback(
+    (t: { total: number; greet: number; score?: number }) =>
+      setTokens({ total: t.total, greet: t.greet, score: t.score ?? 0 }),
+    [],
+  )
   const onChatSent = useCallback(() => {
     loadJobs(0)
     setRefreshTick((t) => t + 1)
@@ -395,7 +399,7 @@ export default function App() {
         }
         const r = await apiClient.autoGreetOne(next.job_id)
         if (r.tokens_total != null) {
-          setTokens({ total: r.tokens_total, greet: r.tokens_greet ?? 0 })
+          setTokens({ total: r.tokens_total, greet: r.tokens_greet ?? 0, score: r.tokens_score ?? 0 })
         }
         if (r.ok) {
           autoCountRef.current += 1
@@ -624,7 +628,7 @@ export default function App() {
           setPrefilter(c.llm_prefilter)
           prefilterRef.current = c.llm_prefilter
         }
-        setTokens({ total: c.tokens_total ?? 0, greet: c.tokens_greet ?? 0 })
+        setTokens({ total: c.tokens_total ?? 0, greet: c.tokens_greet ?? 0, score: c.tokens_score ?? 0 })
       })
       .catch(() => {})
     const t = setInterval(refresh, 3000)
@@ -1025,20 +1029,54 @@ export default function App() {
               </span>
             )
           })}
-          {/* 打分方式：跟在招聘网站右边 */}
-          <span
-            className={`ml-1 shrink-0 rounded px-1.5 py-0.5 text-[10px] ${
-              llmEnabled
-                ? 'bg-secondary/10 text-secondary'
-                : 'bg-slate-100 text-slate-500 dark:bg-dark-border dark:text-slate-300'
-            }`}
-            title={
-              llmEnabled
-                ? `当前使用大模型打分，本次已消耗 ${fmtTokens(status?.progress?.tokens ?? 0)} token`
-                : '未配置大模型 API Key，当前抓取使用规则打分，不消耗 token'
-            }
-          >
-            {llmEnabled ? `大模型打分 · ${fmtTokens(status?.progress?.tokens ?? 0)} token` : '规则打分（不消耗 token）'}
+          {/* 打分方式开关：和敏感库并排，切了就立刻生效 */}
+          <span className="ml-1 flex shrink-0 items-center gap-1">
+            <span className="flex overflow-hidden rounded-md border border-slate-300 text-[11px] dark:border-slate-600">
+              <button
+                className={`px-2 py-0.5 ${
+                  scoreMode === 'llm'
+                    ? 'bg-primary text-white'
+                    : 'bg-white text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                }`}
+                onClick={() => void switchScoreMode('llm')}
+                title="抓取到 JD 后先用规则初筛，过了初筛再用大模型结合简历 + 配置的技能 + 筛选条件细打分（消耗 token）"
+              >
+                大模型打分
+              </button>
+              <button
+                className={`px-2 py-0.5 ${
+                  scoreMode === 'rule'
+                    ? 'bg-primary text-white'
+                    : 'bg-white text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                }`}
+                onClick={() => void switchScoreMode('rule')}
+                title="按内置规则打分，速度快、不消耗 token（默认）"
+              >
+                规则打分
+              </button>
+            </span>
+            {scoreMode === 'llm' && (
+              <label
+                className="flex items-center gap-1 text-[10px] text-slate-500"
+                title="规则分低于这条线的不调用大模型（省 token），高于它的才让大模型细打分"
+              >
+                初筛≥
+                <input
+                  type="number"
+                  min={0}
+                  max={10}
+                  className="input h-6 w-11 !px-1 !py-0 text-center text-[10px]"
+                  value={prefilter}
+                  onChange={(e) => {
+                    const v = Math.max(0, Math.min(10, Number(e.target.value) || 0))
+                    setPrefilter(v)
+                    prefilterRef.current = v
+                  }}
+                  onBlur={() => void switchScoreMode('llm')}
+                />
+                分
+              </label>
+            )}
           </span>
           <button
             className="chip shrink-0"
@@ -1055,11 +1093,20 @@ export default function App() {
         </div>
         <div className="flex items-center gap-2">
           <span
-            className="text-[11px] text-slate-500 dark:text-slate-400"
-            title="累计消耗 token：打分 + 生成打招呼，跨启动累加"
+            className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400"
+            title="累计消耗 token，跨启动累加：合计 = 模型打分 + 打招呼生成"
           >
-            累计 {fmtTokens(tokens.total)} token
-            {tokens.greet > 0 && `（其中生成 ${fmtTokens(tokens.greet)}）`}
+            <span>
+              累计 <b className="text-slate-700 dark:text-slate-200">{fmtTokens(tokens.total)}</b> token
+            </span>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <span title="模型打分消耗">
+              模型打分 {fmtTokens(tokens.score)}
+            </span>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <span title="打招呼生成消耗">
+              打招呼 {fmtTokens(tokens.greet)}
+            </span>
           </span>
           <button
             className={`btn-ghost shrink-0 whitespace-nowrap ${autoOn ? '!bg-emerald-50 !text-emerald-700 dark:!bg-emerald-950 dark:!text-emerald-300' : ''}`}
@@ -1185,8 +1232,8 @@ export default function App() {
               </div>
               <div className="col-span-2 flex items-center gap-2">
                 <span className="text-[11px] text-slate-400">
-                  累计 {fmtTokens(tokens.total)} token
-                  {tokens.greet > 0 && ` · 生成 ${fmtTokens(tokens.greet)}`}
+                  累计 {fmtTokens(tokens.total)} token · 模型打分 {fmtTokens(tokens.score)} · 打招呼{' '}
+                  {fmtTokens(tokens.greet)}
                 </span>
                 <button className="ml-auto btn-primary" onClick={saveConfig}>
                   保存配置
@@ -2084,52 +2131,6 @@ export default function App() {
           <div onClick={(e) => e.stopPropagation()} className="contents">
             <div className="card flex max-h-[86vh] w-[min(1080px,94vw)] flex-col overflow-hidden p-3 shadow-xl">
                 <div className="mb-2 flex items-center gap-2">
-                  <div className="flex shrink-0 overflow-hidden rounded-md border border-slate-300 text-[11px] dark:border-slate-600">
-                    <button
-                      className={`px-2 py-0.5 ${
-                        scoreMode === 'llm'
-                          ? 'bg-primary text-white'
-                          : 'bg-white text-slate-600 dark:bg-slate-800 dark:text-slate-300'
-                      }`}
-                      onClick={() => void switchScoreMode('llm')}
-                      title="抓取到 JD 后直接调大模型，用简历 + 配置的技能 + 筛选条件一起打分（会消耗 token）"
-                    >
-                      大模型打分
-                    </button>
-                    <button
-                      className={`px-2 py-0.5 ${
-                        scoreMode === 'rule'
-                          ? 'bg-primary text-white'
-                          : 'bg-white text-slate-600 dark:bg-slate-800 dark:text-slate-300'
-                      }`}
-                      onClick={() => void switchScoreMode('rule')}
-                      title="按内置关键词规则打分，速度快、不消耗 token（默认）"
-                    >
-                      规则打分
-                    </button>
-                  </div>
-                  {scoreMode === 'llm' && (
-                    <label
-                      className="flex shrink-0 items-center gap-1 text-[11px] text-slate-500"
-                      title="规则打分低于这条线的不调用大模型（省 token），高于它的才让大模型结合 JD 与技能细打分"
-                    >
-                      初筛≥
-                      <input
-                        type="number"
-                        min={0}
-                        max={10}
-                        className="input h-6 w-12 !px-1 !py-0 text-center text-[11px]"
-                        value={prefilter}
-                        onChange={(e) => {
-                          const v = Math.max(0, Math.min(10, Number(e.target.value) || 0))
-                          setPrefilter(v)
-                          prefilterRef.current = v
-                        }}
-                        onBlur={() => void switchScoreMode('llm')}
-                      />
-                      分
-                    </label>
-                  )}
                   <h2 className="text-xs font-semibold">敏感库 {sensitiveTotal} 条</h2>
                   <span className="text-[10px] text-slate-400">
                     已抓过的岗位（已入库 + 被排除）都会记在这里，下一轮抓取直接跳过；可手动移出

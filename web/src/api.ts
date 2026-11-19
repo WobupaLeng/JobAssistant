@@ -133,6 +133,7 @@ export interface Config {
   llm_prefilter?: number
   tokens_total?: number
   tokens_greet?: number
+  tokens_score?: number
   profile: Record<string, any>
 }
 
@@ -247,6 +248,7 @@ export interface AutoGreetOne {
   uid?: string
   tokens_total?: number
   tokens_greet?: number
+  tokens_score?: number
 }
 
 export interface GreetResp {
@@ -257,6 +259,7 @@ export interface GreetResp {
   note?: string
   tokens_total: number
   tokens_greet: number
+  tokens_score?: number
 }
 
 export const apiClient = {
@@ -380,7 +383,7 @@ export const apiClient = {
     }),
   /** 自动打招呼：取待投递里还没发过的岗位 */
   autoGreetNext: () =>
-    api<{ ok: boolean; items: AutoGreetJob[]; tokens_total?: number; tokens_greet?: number; error?: string }>(
+    api<{ ok: boolean; items: AutoGreetJob[]; tokens_total?: number; tokens_greet?: number; tokens_score?: number; error?: string }>(
       '/api/auto-greet/next',
     ),
   /** 自动打招呼：处理指定岗位一条（找 HR → 生成话术 → 发送 → 记 token） */
