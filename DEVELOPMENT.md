@@ -4,6 +4,23 @@
 
 ---
 
+## 2026-11-19（下午·五次）打分开关进顶栏 + token 三项统计
+
+用户需求：
+- 「大模型打分和规则打分 放在外边，铭感库的左边，不是在铭感库的弹窗页面出现」
+- 「累计 token 分模型打分和打招呼的消耗，共计 3 个显示」
+
+- `web/src/App.tsx`
+  - 顶部工具栏原来那个只读小标签换成可点的分段开关「大模型打分 | 规则打分」（位置：招聘网站之后、「敏感库」之前），切到「大模型打分」时右侧出现「初筛≥ [5] 分」输入框；敏感库弹窗里那份开关与初筛输入已删除。
+  - 右上角 token 改成三项：`累计 N token | 模型打分 N | 打招呼 N`；配置小窗里也同步显示三项。
+- `backend/app/main.py`
+  - `Runtime` 新增 `self.tokens_score`（读 `app_config.tokens_score`）；老数据没有该键时按 `tokens_total - tokens_greet` 回填。
+  - `add_tokens(n, kind)` 现在 `score` 与 `greet` 分别累计并各自持久化；`/api/config`、`/api/status`、`/api/auto-greet/next`、`/api/greet` 的返回体都带上 `tokens_score`。
+- `web/src/api.ts`：`Config` / `GreetResp` / `AutoGreetJob` 补 `tokens_score`。
+
+回答用户提问「现在可以边打招呼边抓取数据吗」：可以，但**不能真并行**。抓取与消息操作共用同一个采集线程（patchright 页面必须留在该线程），只能排队；`_run_chat` 的看门狗会识别「浏览器正被「抓取…」占用」，只在超过 90 秒时提示，不会误报浏览器卡死。
+
+---
 ## 2026-11-19（下午·四次）大模型打分前的规则初筛
 
 用户需求：「大模型打分前先用规则做一次初步筛选，然后调用大模型结合 jd 详情和自己的技能打分」「规则给分和大模型给分只生效一个」。
