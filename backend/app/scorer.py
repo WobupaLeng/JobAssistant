@@ -122,6 +122,28 @@ SHORT_TERM_RE = re.compile(
     r"\d+\s*[-–~至]\s*\d+\s*个?月|周期\s*\d+|短期项目|项目制|过渡岗"
 )
 SALARY_RE = re.compile(r"(\d{1,3})\s*[-–~至]\s*(\d{1,3})\s*[Kk千]")
+# Boss 列表卡片把薪资数字换成私用区字符做反爬：U+E031→"0"、U+E032→"1" …（码点 - 0xE031）
+_PUA_BASE = 0xE031
+
+
+def decode_boss_salary(text: str | None) -> str:
+    """把 Boss 卡片里的私用区字符还原成阿拉伯数字。
+
+    列表页的 span.job-salary 长这样：`\ue032\ue037-\ue032\ue038K`，真实值是「16-17K」。
+    码点 0xE031 对应 0，0xE032 对应 1，以此类推；不在这个区的字符原样保留。
+    """
+    if not text:
+        return ""
+    out = []
+    for ch in str(text):
+        code = ord(ch)
+        if _PUA_BASE <= code <= _PUA_BASE + 9:
+            out.append(str(code - _PUA_BASE))
+        elif 0xE000 <= code <= 0xF8FF:
+            continue  # 其它私用区字符（字体占位）直接丢掉
+        else:
+            out.append(ch)
+    return "".join(out)
 SALARY_WAN_RE = re.compile(r"(\d{1,2}(?:\.\d)?)\s*[-–~至]\s*(\d{1,2}(?:\.\d)?)\s*万")
 EXP_REQUIRED_RE = re.compile(r"(\d{1,2})\s*年\s*(?:及|)\s*(?:以上|或以上|以上的)")
 
@@ -192,6 +214,8 @@ class RuleScorer:
     def parse_salary(self, text: str | None) -> tuple[int, int] | None:
         if not text:
             return None
+        # 先解 Boss 的反爬字符，否则列表卡片的「16-17K」永远匹配不到
+        text = decode_boss_salary(text)
         m = SALARY_RE.search(text)
         if m:
             return int(m.group(1)), int(m.group(2))
@@ -341,6 +365,12 @@ class RuleScorer:
         if rng is None:
             return 10
         low, high = rng
+        # 上限用 9999 这种写法时，high 会远大于期望区间，必须先夹到画像上限再算，
+        # 否则 min(high, salary_high) 之后 hi-lo 反而可能溢出给出满分
+        high = min(high, PROFILE["salary_high"])
+        low = min(low, PROFILE["salary_high"])
+        if high <= 0:
+            return 10
         lo = max(low, PROFILE["salary_low"])
         hi = min(high, PROFILE["salary_high"])
         if hi <= lo:
@@ -472,15 +502,40 @@ def parse_llm_score(raw: str) -> ScoreResult | None:
                 try:
                     obj = json.loads(blob)
                 except json.JSONDecodeError:
-                    return None
-                try:
-                    score = int(round(float(obj.get("score"))))
-                except (TypeError, ValueError):
-                    return None
-                score = max(1, min(10, score))
-                reason = str(obj.get("reason") or "").strip()[:300]
-                return ScoreResult(score=score, source="llm", reason=reason)
-    return None
+                    break
+                return _score_from_obj(obj)
+    # 输出被截断（finish_reason=length 很常见）：JSON 没闭合，但 score 通常已经出现了，
+    # 直接从残缺文本里抠分，别把已经拿到的分数丢掉。
+    return _score_from_partial(text[start:])
+
+
+def _score_from_obj(obj: dict[str, Any]) -> ScoreResult | None:
+    try:
+        score = int(round(float(obj.get("score"))))
+    except (TypeError, ValueError):
+        return None
+    score = max(1, min(10, score))
+    reason = str(obj.get("reason") or "").strip()[:300]
+    return ScoreResult(score=score, source="llm", reason=reason)
+
+
+_SCORE_FIELD_RE = re.compile(r'"score"\s*[:：]\s*(\d{1,2})')
+_REASON_FIELD_RE = re.compile(r'"reason"\s*[:：]\s*"(.+)$', re.S)
+
+
+def _score_from_partial(text: str) -> ScoreResult | None:
+    """从被截断的 JSON 里抠出 score 和（可能的半边）reason。"""
+    m = _SCORE_FIELD_RE.search(text)
+    if not m:
+        return None
+    score = max(1, min(10, int(m.group(1))))
+    reason = ""
+    rm = _REASON_FIELD_RE.search(text)
+    if rm:
+        # 去掉截断残留的半个转义 / 引号
+        reason = rm.group(1).replace('\\n', " ").replace('\\"', '"').rstrip('"\\, ')
+        reason = reason.strip()[:300]
+    return ScoreResult(score=score, source="llm", reason=reason)
 
 
 class LLMScorer:
@@ -509,12 +564,15 @@ class LLMScorer:
                 {"role": "user", "content": build_user_prompt(job, profile, filters)},
             ],
             temperature=0.2,
-            max_tokens=300,
+            # 中文 reason 动辄上百字，300 token 会被截断成不完整的 JSON（实测 deepseek-flash）
+            max_tokens=800,
         )
         raw = (resp.choices[0].message.content or "").strip()
         parsed = parse_llm_score(raw)
         if parsed is None:
-            raise ValueError(f"大模型返回无法解析为分数：{raw[:200]}")
+            raise ValueError(f"大模型返回无法解析为分数（finish={getattr(resp.choices[0], 'finish_reason', '?')}）：{raw[:200]}")
+        if getattr(resp.choices[0], "finish_reason", "") == "length" and "（输出被截断，理由可能不完整）" not in parsed.reason:
+            parsed.reason = (parsed.reason + "（输出被截断，理由可能不完整）")[:300]
         # 记录 token 消耗（用于界面累计展示）
         usage = getattr(resp, "usage", None)
         if usage is not None:

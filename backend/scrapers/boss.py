@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import quote
 
 from .base import BaseScraper
+from app.scorer import decode_boss_salary
 
 CITY_CODE = {"上海": "101020100"}
 SEARCH_BASE = "https://www.zhipin.com/web/geek/job"
@@ -479,7 +480,8 @@ class BossScraper(BaseScraper):
                     "job_id": f"boss:{jid}",
                     "job_url": link,
                     "title": title,
-                    "salary": salary,
+                    # 卡片里的薪资是私用区字符（U+E031~U+E03A），这里还原成真数字
+                    "salary": decode_boss_salary(salary),
                     "company": company,
                     "location": location,
                     "experience": exp,
@@ -585,9 +587,13 @@ class BossScraper(BaseScraper):
         h1 = _first_text(page, ".job-banner .info-primary h1, .info-primary h1, h1")
         if h1:
             item["title"] = h1
-        salary = _first_text(page, ".job-banner .salary, .info-primary .salary")
+        # 详情页顶部那个 salary 才是本岗位的；注意 .salary 这个宽选择器会命中页面里
+        # 所有推荐岗位的薪资（实测 37 个），只能作为最后兜底且必须带范围限制
+        salary = _first_text(page, ".job-banner .info-primary .salary, .job-banner .salary, .info-primary .salary")
+        if not salary:
+            salary = _first_text(page, ".job-banner .salary")
         if salary:
-            item["salary"] = salary
+            item["salary"] = decode_boss_salary(salary).strip()
         # 「上海 经验不限 本科」三段
         meta = _first_text(page, ".job-banner .info-primary p, .info-primary p")
         if meta:

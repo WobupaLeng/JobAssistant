@@ -4,6 +4,46 @@
 
 ---
 
+## 2026-11-19（下午·六次）大模型打分截断 + Boss 薪资反爬解码
+
+### 1. 「第 1 页解析出 9 条却没入库、敏感库也没有」——数据其实都入库了
+查库：`data/job_assistant_pro.db` 的 `job_queue` 20 条、`sensitive_jobs` 42 条，
+最近几条（珠海脉冲计算、瓦石能源、深圳鼎驰）都在。用户当时看不到，是因为同一轮里
+大模型打分抛异常退回了规则分，界面刷新时机也错过去了。**顺带发现了下面这个真 bug。**
+
+### 2. 大模型打分一直静默失败（真 bug，影响所有大模型模式下的打分）
+- 现象：库里 3 条 `score_reason` 是 `[大模型失败:ValueError] …`。
+- 根因（两个叠在一起）：
+  1. `LLMScorer.score` 里 `max_tokens=300` 太小。`deepseek-flash` 的 `reason` 是中文长句，
+     300 token 只够 150 来个汉字，输出被截断，`finish_reason="length"`。
+  2. `parse_llm_score` 只认**完整闭合**的 JSON，一截断就返回 `None` → 抛 ValueError → 回退规则分。
+- 改法：
+  - `max_tokens=300 → 800`。
+  - 新增 `_score_from_obj(obj)` 与 `_score_from_partial(text)`：完整 JSON 走前者；
+    被截断时用正则 `"score"\s*[:：]\s*(\d{1,2})` 从残缺文本里抠分，`reason` 能抠多少算多少。
+  - 截断时在 reason 末尾标注「（输出被截断，理由可能不完整）」，不再谎报「无法解析」。
+- 验证：同一个库里 3 条任务实跑大模型后返回真实分数 6 / 5 / 4（tokens 1284 / 1621 / 1319）。
+
+### 3. Boss 薪资反爬字符解码（薪资二次校验以前完全失效）
+- 实测：列表卡片 `span.job-salary` 的 innerText 是私用区字符，码点 `U+E032→"1"`、`U+E036→"5"`，
+  即**码点 - 0xE031 = 数字**。例：`\ue032\ue037-\ue032\ue038K` = `16-17K`。
+- `backend/app/scorer.py` 新增 `decode_boss_salary(text)`（`_PUA_BASE = 0xE031`，其它私用区字符丢弃），
+  `RuleScorer.parse_salary` 入口先解码。以前 `SALARY_RE` 永远匹配不到加密文本 → 返回 None →
+  `salary_out_of_range` 一律放行，薪资区间等于没生效；现在真正会拦。
+- `RuleScorer._salary` 修 9999 上限溢出：先把 `low/high` 夹到画像上限（`PROFILE["salary_high"]`）
+  再算 `hi - lo`，避免「15-9999K」被当成满分区间的正中拿满分。
+- `backend/scrapers/boss.py`：`_parse_dom_cards` 的 `salary` 过 `decode_boss_salary`；
+  `_parse_detail_dom` 的薪资选择器收窄为 `.job-banner .info-primary .salary` /
+  `.job-banner .salary` / `.info-primary .salary`，兜底才用 `.job-banner .salary`——
+  注意裸 `.salary` 会命中页面里全部推荐岗位（实测 37 个），绝不能直接用。
+- 验证：真实搜索页 15 张卡片全部解出正确薪资（`25-35K`、`8-9K`、`18-28K`、`15-18K·13薪`），空值 0；
+  `8-9K` / `6-10K` 在 `15-35` 区间下被正确排除，`16-17K` 在 `20-30` 下被正确排除。
+
+### 待办
+1. 自动打招呼真实环境验证（会真发消息给 HR）。
+2. 已有 3 条 `[大模型失败:ValueError]` 的旧记录不会自动重算，需要的话点「重新打分」。
+
+---
 ## 2026-11-19（下午·五次）打分开关进顶栏 + token 三项统计
 
 用户需求：
