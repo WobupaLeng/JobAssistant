@@ -209,6 +209,8 @@ class Runtime:
         self._pw = None
         self._ctx = None
         self._pw_lock = threading.Lock()
+        # 消息车道要连的本地调试端口（Chrome 启动时会额外监听它）
+        self.cdp_port = _free_port()
         import queue as _queue
 
         self._task: _queue.Queue = _queue.Queue()
@@ -217,6 +219,9 @@ class Runtime:
             target=self._worker_loop, name="aja-worker", daemon=True
         )
         self.worker_thread.start()
+        # 消息车道：独立的线程 + 独立的 Playwright 客户端（连同一台 Chrome），
+        # 抓取跑几分钟也不耽误点消息、发招呼。
+        self.chat_lane = ChatLane(self)
         try:
             self.log(
                 "info",
@@ -287,6 +292,7 @@ class Runtime:
     def _run_task(self, task) -> None:
         fn, args = task
         try:
+            self._worker_fn = fn
             self._worker_label = getattr(fn, "__wrapped_label__", None) or getattr(fn, "__name__", "任务")
             self._worker_t0 = time.time()
         except Exception:
@@ -317,10 +323,15 @@ class Runtime:
                     pass
         finally:
             try:
+                self._worker_fn = None
                 self._worker_label = ""
                 self._worker_t0 = 0.0
             except Exception:
                 pass
+
+    def worker_task(self):
+        """采集线程当前正在执行的函数对象，用来判断「现在跑的是不是我自己」。"""
+        return getattr(self, "_worker_fn", None)
 
     def worker_busy(self) -> tuple[str, float]:
         """采集线程当前在忙什么、忙了多久。空闲返回 ("", 0)。"""
@@ -357,6 +368,9 @@ class Runtime:
                 done.set()
 
         _wrap.__wrapped_name__ = getattr(fn, "__name__", "task")
+        # 把「这一步在干什么」的中文名带过去：_run_task 读的是 task[0]
+        # （也就是 _wrap），不带过去日志只会刷「采集线程开始执行：_wrap」。
+        _wrap.__wrapped_label__ = getattr(fn, "__wrapped_label__", None)
         self.submit(_wrap)
         if not done.wait(timeout):
             raise RuntimeError("采集线程执行超时（浏览器任务可能被阻塞，请重试或重启程序）")
@@ -402,7 +416,16 @@ class Runtime:
                 # （ctx.pages 抛错，即 CDP 连接已断）时才重建；其余情况信上一次。
                 try:
                     _ = self._ctx.pages
+                    # Chrome 被关掉时 ctx.pages 有时仍返回旧列表（不报错），
+                    # 必须再问一句驱动：连接还在不在。is_connected 读的是本地状态，不耗时。
+                    live = True
+                    try:
+                        live = bool(self._ctx.browser.is_connected())
+                    except Exception:
+                        live = True
                 except Exception:
+                    live = False
+                if not live:
                     self.log("warn", "浏览器连接已断开（窗口被关掉或进程退出），重新启动")
                     self._shutdown_browser_locked()
                 else:
@@ -421,7 +444,7 @@ class Runtime:
                 self._pw = None
             self._pw = sync_playwright().start()
             try:
-                self._ctx = launch_context(self._pw, app_data_dir(), self.log)
+                self._ctx = launch_context(self._pw, app_data_dir(), self.log, cdp_port=self.cdp_port)
             except Exception:
                 # 启动失败必须把 playwright 也停掉，否则下次 ensure_browser 会
                 # 在一个已经坏掉的连接上重试，报 "Playwright connection closed"。
@@ -433,6 +456,18 @@ class Runtime:
                 self._ctx = None
                 raise
             return self._ctx
+
+    def restart_browser(self):
+        """强制关掉旧浏览器再重新打开（只在采集线程里跑）。
+
+        用户的 Chrome 窗口被关掉后，驱动那边的连接状态有时「看起来还活着」，
+        ensure_browser 会直接把旧上下文还回来，于是每次操作都报
+        「Target page, context or browser has been closed」。消息车道重连时走这里，
+        不猜状态，直接重建。
+        """
+        with self._pw_lock:
+            self._shutdown_browser_locked()
+        return self.ensure_browser()
 
     # ---- 浏览器必须在采集线程里启动/使用（patchright sync API 绑定 event loop）----
 
@@ -621,6 +656,175 @@ class Runtime:
             except Exception as exc:
                 self.log("warn", f"补录岗位失败：{exc}")
         self.store.set_delivered([job_id], True)
+
+
+def _free_port() -> int:
+    """挑一个空闲的本地端口（给 Chrome 的 --remote-debugging-port 用）。"""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+class ChatLane:
+    """消息模块专用的「第二条浏览器车道」。
+
+    以前所有碰浏览器的动作都挤在采集线程里：抓取 JD 一跑就是几分钟，用户点一下
+    「消息」只能排队，等到最后超时。这里用到 Playwright 的一个特性——同一个 Chrome
+    可以被多个 Playwright 客户端同时连接（connect_over_cdp）。于是：
+      - 采集线程：原来的 worker，用启动时那个客户端；
+      - 消息车道：本类，自己一个线程 + 自己一个客户端，连的是同一台浏览器、同一个
+        持久化上下文，只是驱动不同的标签页。
+    不新开浏览器，所以指纹、登录态、cookie 全都不用搬，Boss 也看不出多了一个浏览器。
+    """
+
+    def __init__(self, rt: "Runtime") -> None:
+        import queue as _queue
+
+        self.rt = rt
+        self._q: _queue.Queue = _queue.Queue()
+        self._lock = threading.Lock()
+        self._pw = None
+        self._browser = None
+        self._ctx = None
+        self._fn = None
+        self._label = ""
+        self._t0 = 0.0
+        self.thread = threading.Thread(target=self._loop, name="aja-chat", daemon=True)
+        self.thread.start()
+
+    # ---- 线程里跑一个常驻 greenlet（patchright sync API 的要求，同采集线程）----
+    def _loop(self) -> None:
+        from greenlet import greenlet as _greenlet
+
+        def _runner():
+            while True:
+                task = self._q.get()
+                if task is None:
+                    return
+                self._run_task(task)
+
+        _greenlet(_runner).switch()
+
+    def _run_task(self, task) -> None:
+        fn, args = task
+        self._fn = fn
+        self._label = getattr(fn, "__wrapped_label__", None) or getattr(fn, "__name__", "消息操作")
+        self._t0 = time.time()
+        try:
+            fn(*args)
+        except BaseException as exc:  # 单条失败不能把车道的循环打死
+            try:
+                self.rt.log("error", f"消息操作失败：{self._label} —— {exc}")
+            except Exception:
+                pass
+        finally:
+            self._fn = None
+            self._label = ""
+            self._t0 = 0.0
+
+    def submit(self, fn, *args) -> None:
+        self._q.put((fn, args))
+
+    def worker_busy(self) -> tuple[str, float]:
+        label, t0 = self._label, self._t0
+        if not label or not t0:
+            return ("", 0.0)
+        return (label, time.time() - t0)
+
+    def worker_task(self):
+        return self._fn
+
+    # ---- 连上采集线程启动的那台 Chrome ----
+    def ensure_ctx(self):
+        """在消息车道里拿到浏览器上下文（必要时连上主浏览器）。"""
+        with self._lock:
+            if self._ctx is not None and self._browser is not None:
+                try:
+                    _ = self._ctx.pages
+                    if self._browser.is_connected():
+                        return self._ctx
+                except Exception:
+                    pass
+                self._drop_locked()
+            port = getattr(self.rt, "cdp_port", 0)
+            if not port:
+                raise RuntimeError("消息车道没有可用的调试端口，无法连接浏览器")
+            from patchright.sync_api import sync_playwright
+
+            last_exc: Exception | None = None
+            for attempt in (1, 2, 3):
+                try:
+                    if self._pw is None:
+                        self._pw = sync_playwright().start()
+                    self._browser = self._pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+                    ctxs = self._browser.contexts
+                    # 连的是 launch_persistent_context 起的浏览器，第一个上下文就是它
+                    self._ctx = ctxs[0] if ctxs else self._browser.new_context()
+                except Exception as exc:
+                    last_exc = exc
+                    self._browser = None
+                    self._ctx = None
+                    if attempt == 1:
+                        # 用户把 Chrome 窗口关掉了 / 浏览器崩了：调试端口随之消失，这边连不上。
+                        # 只有采集线程能重新拉起浏览器，所以让它重启一次，然后再连一遍。
+                        self._relaunch(reason="窗口已关闭或浏览器已退出")
+                        continue
+                    if attempt == 2:
+                        # 驱动自己也可能跟着废了：换一个新的 Playwright 再试最后一次。
+                        # 注意只在真的连不上时才重建：同一线程里反复 start/stop
+                        # 会让 patchright 误判「在 asyncio 循环里用同步 API」。
+                        self._drop_locked(stop_pw=True)
+                        time.sleep(0.5)
+                        continue
+                    raise RuntimeError(f"连不上浏览器：{exc}") from exc
+                self.rt.log("info", f"消息车道已连上浏览器（端口 {port}），采集和消息互不阻塞")
+                return self._ctx
+            raise RuntimeError(f"连不上浏览器（窗口已关闭），自动重开失败：{last_exc}")
+
+    def _relaunch(self, reason: str = "") -> None:
+        """浏览器没了：让采集线程重新打开（patchright 只能在采集线程里启动浏览器）。"""
+        self.rt.log("warn", f"浏览器不可用（{reason or '未知原因'}），正在自动重新打开")
+        time.sleep(0.8)  # 等旧进程真正退出，把调试端口让出来
+        try:
+            self.rt.run_in_worker(self.rt.restart_browser, timeout=150.0)
+        except Exception as exc:
+            raise RuntimeError(f"Chrome 窗口已关闭，自动重新打开失败：{exc}") from exc
+        self.rt.log("info", "浏览器已重新打开，消息车道正在重连")
+        time.sleep(1.2)  # 等新进程把调试端口监听起来
+
+    def _drop_locked(self, stop_pw: bool = False) -> None:
+        """丢掉浏览器/上下文。默认**不**停 Playwright 驱动。
+
+        驱动只是通往 node 那层的一根管子，浏览器被关掉它照样活着；留着它下次
+        connect_over_cdp 直接复用。反过来，同一线程里 pw.stop() 之后再 sync_playwright().start()
+        会让 patchright 误报「在 asyncio 循环里用同步 API」，消息车道就彻底废了。
+        """
+        pw = self._pw
+        self._browser = None
+        self._ctx = None
+        if stop_pw:
+            self._pw = None
+            if pw is not None:
+                try:
+                    pw.stop()  # 连的是别人的浏览器：只断开，不会把采集用的窗口关掉
+                except Exception:
+                    pass
+
+    def reset(self, reason: str = "") -> None:
+        """消息车道自己断了/页面废了：只断开重连，不碰采集线程的浏览器状态。"""
+        if reason:
+            self.rt.log("warn", f"消息车道重置：{reason}")
+        with self._lock:
+            self._drop_locked()
+
+    def ensure_main_browser(self) -> None:
+        """浏览器还没起来时，让采集线程先把它拉起来（只在那条线程能启动）。"""
+        try:
+            self.rt.run_in_worker(self.rt.ensure_browser, timeout=60.0)
+        except Exception as exc:
+            raise RuntimeError(f"浏览器还没准备好：{exc}") from exc
 
 
 RT: Runtime | None = None
@@ -1251,15 +1455,21 @@ def login_start(req: LoginReq) -> dict[str, Any]:
     # 里 ensure_browser()，之后采集线程再用就会报
     # "RuntimeError: no running event loop"。
     # 所以这里只登记登录会话，真正的启动交给采集线程 rt.worker()。
-    # 登录会话本身就跑在采集线程里（rt.submit(sess.start)），所以这里的
-    # start_browser / step_runner 必须是**直连**的：再用 run_in_worker 投递
-    # 会变成「采集线程往自己的队列塞任务并死等」——永远等不到，还会把
-    # greenlet / 浏览器状态搞坏。直连即可，因为本来就在正确的线程上。
+    #
+    # ⚠️ `sess.start()` 只是**再起一个登录调度线程**（LoginSession.start 里
+    # `threading.Thread(target=self._run)`），它并不在采集线程上跑。所以登录
+    # 流程里每一步「碰浏览器」的动作都必须显式投递到采集线程：step_runner 用
+    # rt.run_in_worker，_steps() 连「拿上下文」那一步也要 yield 出去。
+    # 早先把 step_runner 写成 `lambda fn, *a: fn(*a)`（直连）导致登录线程直接
+    # 调 patchright，报
+    #   Cannot switch to a different thread
+    #   Current: <greenlet ... main> Expected: <greenlet ... suspended main>
+    # —— greenlet 是当初在采集线程里建 event loop 时创建并绑死在线程上的。
     sess = LoginSession(
         plat, app_data_dir(), rt.log,
-        get_context=rt.ensure_browser,
+        get_context=None,
         start_browser=rt.ensure_browser,
-        step_runner=lambda fn, *a: fn(*a),
+        step_runner=rt.run_in_worker,
     )
     rt.logins[plat] = sess
     try:
@@ -1448,6 +1658,19 @@ def logs(since: float = 0.0) -> dict[str, Any]:
 
 _CHAT_STATE: dict[str, Any] = {"ok": None, "error": "", "ts": 0.0}
 
+# 采集线程的 label 是内部函数名，提示给用户时要换成能看懂的说法
+_BUSY_TEXT = {
+    "run_scrape": "抓取 JD",
+    "score": "给岗位打分",
+    "run_in_worker": "处理浏览器操作",
+}
+
+
+def _busy_text(label: str) -> str:
+    if not label:
+        return "其它任务"
+    return _BUSY_TEXT.get(label, label)
+
 
 def _run_chat(fn, timeout: float = 120.0):
     """把聊天任务投递到采集线程，按「有没有进展」而不是「总耗时」判超时。
@@ -1462,10 +1685,16 @@ def _run_chat(fn, timeout: float = 120.0):
     rt = get_rt()
     box: dict[str, Any] = {}
     done = threading.Event()
+    state = {"abort": False}
     # 日志里要能看出这一步到底在干什么（_wrap 本身的名字没有信息量）
     label = getattr(fn, "__chat_label__", None) or "Boss 消息"
 
     def _wrap():
+        # 排队期间调用方可能已经放弃（占用/超时提示）。这时排到队也直接跳过，
+        # 否则前端 3 秒一次的轮询会在抓取结束后堆出一串重复的浏览器操作。
+        if state["abort"]:
+            done.set()
+            return
         try:
             box["res"] = fn()
         except Exception as exc:  # noqa: BLE001 - 原样带回调用方
@@ -1473,8 +1702,20 @@ def _run_chat(fn, timeout: float = 120.0):
         finally:
             done.set()
 
+    def _give_up(msg: str):
+        state["abort"] = True
+        raise RuntimeError(msg)
+
     _wrap.__wrapped_label__ = label
-    rt.submit(_wrap)
+    # 消息车道是独立线程 + 独立 Playwright 客户端：浏览器还没起来时先让采集线程
+    # 把它拉起来（只有那条线程能启动），起来了以后两边各用各的标签页，互不阻塞。
+    if getattr(rt, "_ctx", None) is None:
+        try:
+            rt.chat_lane.ensure_main_browser()
+        except Exception as exc:  # noqa: BLE001 - 真起不来下面连端口时会报更清楚的错
+            rt.log("warn", f"消息操作前启动浏览器失败：{exc}")
+    submitted = time.time()
+    rt.chat_lane.submit(_wrap)
     # 注意：这里的 timeout 是「宽限总时长」，实际判死看的是有没有进展。
     # 新建会话要经历「岗位详情页 → 立即沟通 → 跳回聊天页 → 刷新列表 → 再点开」
     # 五个完整的页面加载，几十秒很正常，不能拿固定时长当死线。
@@ -1485,33 +1726,35 @@ def _run_chat(fn, timeout: float = 120.0):
     while not done.wait(0.4):
         last, budget = rt.chat.activity()
         limit = budget if budget > 0 else 30.0
-        if last and not progress_extended and time.time() > deadline:
+        # activity() 是 BossChat 的全局时间戳：上一次成功的消息操作（哪怕几分钟前）
+        # 也会留下非 0 的值。只有「本次投递之后」的刷新才算这个任务自己的进展，
+        # 拿旧值判死就会误报「浏览器可能卡住了」——抓取 JD 时点消息列表正是如此。
+        mine = last if last >= submitted - 0.5 else 0.0
+        if mine and not progress_extended and time.time() > deadline:
             progress_extended = True
             deadline = time.time() + timeout
             rt.log("info", f"{label} 仍在推进（已 {int(time.time() - started)} 秒），继续等待")
-        # 浏览器在同一时刻只能给一个任务用。抓取/打分正在用时消息任务是在排队，
+        # 浏览器在同一时刻只能给一个任务用。现在跑的不是我 = 我还在队列里排队，
         # 这不是卡死，只能提示「等一下」，绝不能报「浏览器可能卡住了」。
-        busy_label, busy_for = rt.worker_busy()
-        if busy_label and not last:
-            if busy_for > 90:
-                raise RuntimeError(
-                    f"浏览器正被「{busy_label}」占用（已 {int(busy_for)} 秒），"
-                    "消息操作排在它后面。等它跑完再试，或先点「停止抓取」。"
+        busy_label, busy_for = rt.chat_lane.worker_busy()
+        if rt.chat_lane.worker_task() is not _wrap:
+            if busy_label and busy_for > 90:
+                _give_up(
+                    f"前面的消息操作「{_busy_text(busy_label)}」已经跑了 {int(busy_for)} 秒，"
+                    "这一条还在排队。稍等一下再试。"
                 )
             if time.time() > deadline:
-                raise RuntimeError(
-                    f"浏览器正被「{busy_label}」占用，消息操作还没轮到。"
-                    "等它跑完再试，或先点「停止抓取」。"
+                _give_up(
+                    f"消息车道正被「{_busy_text(busy_label)}」占着，这一条还没轮到。"
+                    "稍等一下再试。"
                 )
             continue
-        if last and time.time() - last > limit + 15:
+        if mine and time.time() - mine > limit + 15:
             # 页面彻底没动静了，多半是浏览器句柄已经废了，丢给下面重开
-            raise RuntimeError(
-                "Boss 消息页没有响应（浏览器可能卡住了），请稍后重试或重启程序"
-            )
+            _give_up("Boss 消息页没有响应（浏览器可能卡住了），请稍后重试或重启程序")
         if time.time() > deadline:
             spent = int(time.time() - started)
-            raise RuntimeError(
+            _give_up(
                 f"{label} 超过 {spent} 秒还没有结果（页面加载太慢或网络异常）。"
                 "可以在浏览器窗口里看看当前页面停在哪儿"
             )
@@ -1520,7 +1763,7 @@ def _run_chat(fn, timeout: float = 120.0):
         msg = str(err)
         # 浏览器句柄被外部杀掉后，patchright 会抛这类错误，且永远不会自己恢复
         if "Event loop is closed" in msg or "Playwright already stopped" in msg or "Target page, context or browser has been closed" in msg:
-            rt.reset_browser(msg)
+            rt.chat_lane.reset(msg)
             raise RuntimeError("浏览器窗口已关闭或崩溃，下次操作会自动重新打开，请稍后重试") from err
         raise err
     return box.get("res")
@@ -1532,7 +1775,7 @@ def chat_friends(force: bool = False) -> dict[str, Any]:
     rt = get_rt()
     try:
         def _do():
-            return rt.chat.friends(rt.ensure_browser(), force=force)
+            return rt.chat.friends(rt.chat_lane.ensure_ctx(), force=force)
 
         _do.__chat_label__ = "读取 Boss 会话列表" + ("（强制刷新）" if force else "")
         items = _run_chat(_do)
@@ -1541,6 +1784,10 @@ def chat_friends(force: bool = False) -> dict[str, Any]:
     except Exception as exc:
         msg = str(exc) or exc.__class__.__name__
         _CHAT_STATE.update({"ok": False, "error": msg, "ts": time.time()})
+        cached = rt.chat.cached_friends()
+        if cached is not None:
+            rt.log("warn", f"拉取 Boss 会话失败（先显示上次的列表）：{msg}")
+            return {"ok": True, "items": cached, "stale": True, "error": msg}
         rt.log("warn", f"拉取 Boss 会话失败：{msg}")
         return {"ok": False, "items": [], "error": msg}
 
@@ -1551,13 +1798,17 @@ def chat_messages(uid: str, force: bool = False) -> dict[str, Any]:
     rt = get_rt()
     try:
         def _do():
-            return rt.chat.messages(rt.ensure_browser(), uid, force=force)
+            return rt.chat.messages(rt.chat_lane.ensure_ctx(), uid, force=force)
 
         _do.__chat_label__ = f"打开会话 {uid} 读取聊天记录" + ("（强制刷新）" if force else "")
         items = _run_chat(_do)
         return {"ok": True, "uid": uid, "items": items}
     except Exception as exc:
         msg = str(exc) or exc.__class__.__name__
+        cached = rt.chat.cached_messages(uid)
+        if cached is not None:
+            rt.log("warn", f"拉取会话消息失败（先显示上次的记录）：{msg}")
+            return {"ok": True, "uid": uid, "items": cached, "stale": True, "error": msg}
         rt.log("warn", f"拉取会话消息失败：{msg}")
         return {"ok": False, "uid": uid, "items": [], "error": msg}
 
@@ -1575,7 +1826,7 @@ def chat_send(req: ChatSendReq) -> dict[str, Any]:
     rt = get_rt()
 
     def _do():
-        ctx = rt.ensure_browser()
+        ctx = rt.chat_lane.ensure_ctx()
         res = rt.chat.send(ctx, req.uid, req.text)
         if req.job_id and rt.store.exists(req.job_id):
             rt.store.set_delivered([req.job_id], True)
@@ -1640,7 +1891,7 @@ def auto_greet_one(req: AutoGreetReq) -> dict[str, Any]:
 
     # 1) 找到这个岗位对应的 HR 会话
     def _find():
-        ctx = rt.ensure_browser()
+        ctx = rt.chat_lane.ensure_ctx()
         return rt.chat.friends(ctx, force=False)
 
     _find.__chat_label__ = "自动打招呼：查找 HR 会话"
@@ -1659,7 +1910,7 @@ def auto_greet_one(req: AutoGreetReq) -> dict[str, Any]:
         # 就是要主动发起：直接去岗位详情页点「立即沟通」把这个会话建出来。
         if ejid:
             def _new():
-                return rt.chat.start_conversation(rt.ensure_browser(), {"encrypt_job_id": ejid}, ejid)
+                return rt.chat.start_conversation(rt.chat_lane.ensure_ctx(), {"encrypt_job_id": ejid}, ejid)
             _new.__chat_label__ = "自动打招呼：主动建立会话（岗位详情页「立即沟通」）"
             try:
                 res = _run_chat(_new, timeout=240.0)
@@ -1687,7 +1938,7 @@ def auto_greet_one(req: AutoGreetReq) -> dict[str, Any]:
     uid = str(target.get("uid"))
 
     def _send():
-        return rt.chat.send(rt.ensure_browser(), uid, g.text)
+        return rt.chat.send(rt.chat_lane.ensure_ctx(), uid, g.text)
 
     _send.__chat_label__ = f"自动打招呼：给 HR {uid} 发送消息"
     try:
@@ -1791,7 +2042,7 @@ def chat_resumes(force: bool = False) -> dict[str, Any]:
     rt = get_rt()
 
     def _run():
-        ctx = rt.ensure_browser()
+        ctx = rt.chat_lane.ensure_ctx()
         return rt.chat.resumes(ctx, force=force)
 
     _run.__chat_label__ = "读取 Boss 附件简历列表"
@@ -1813,7 +2064,7 @@ def chat_send_resume(req: ChatResumeReq) -> dict[str, Any]:
     rt = get_rt()
 
     def _run():
-        ctx = rt.ensure_browser()
+        ctx = rt.chat_lane.ensure_ctx()
         return rt.chat.send_resume(ctx, req.uid, req.resume_id or "")
 
     _run.__chat_label__ = f"给 HR {req.uid} 发送附件简历"
@@ -1833,7 +2084,7 @@ def chat_recall(req: ChatRecallReq) -> dict[str, Any]:
     rt = get_rt()
     try:
         def _do():
-            return rt.chat.recall(rt.ensure_browser(), req.uid)
+            return rt.chat.recall(rt.chat_lane.ensure_ctx(), req.uid)
 
         _do.__chat_label__ = f"撤回消息 {req.uid}"
         res = _run_chat(_do, timeout=90.0)
@@ -1864,7 +2115,7 @@ def chat_open(req: ChatOpenReq) -> dict[str, Any]:
     rt = get_rt()
     try:
         def _do():
-            ctx = rt.ensure_browser()
+            ctx = rt.chat_lane.ensure_ctx()
             return rt.chat.find_friend(
                 ctx,
                 uid=req.uid,
@@ -1883,7 +2134,7 @@ def chat_open(req: ChatOpenReq) -> dict[str, Any]:
             ejid = (req.encrypt_job_id or "").strip()
 
             def _start():
-                ctx2 = rt.ensure_browser()
+                ctx2 = rt.chat_lane.ensure_ctx()
                 seed: dict[str, Any] = {"encrypt_job_id": ejid, "brand": req.brand or ""}
                 if req.uid:
                     seed["uid"] = req.uid
@@ -1948,6 +2199,8 @@ def get_config() -> dict[str, Any]:
         "min_score": rt.min_score or 0,
         "exclude_rule_defaults": ExcludeRules().as_dict(),
         "profile": PROFILE,
+        # 上次「开始抓取」时用的那套筛选条件，前端启动时还原到界面上
+        "last_filter": rt.store.get_config_json("last_filter", None),
     }
 
 

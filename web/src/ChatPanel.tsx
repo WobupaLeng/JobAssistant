@@ -123,6 +123,8 @@ export default function ChatPanel({ focusUid, onSent, onTokens, onOpenChange }: 
         const items = r.items || []
         _friendCache = { at: Date.now(), items }
         setFriends(items)
+        // 抓取 JD 时后端直接给上次缓存，标注 stale，别让用户以为列表卡住了
+        if (r.stale) flash(`正在${r.busy || '忙别的任务'}，下面显示的是上次拉到的列表`)
       }
     } catch (e: any) {
       setFriendsErr(String(e?.message || e))
@@ -148,6 +150,7 @@ export default function ChatPanel({ focusUid, onSent, onTokens, onOpenChange }: 
         setMsgs([])
       } else {
         setMsgs(r.items || [])
+        if (r.stale) flash(`正在${r.busy || '忙别的任务'}，聊天记录是上次拉到的`)
       }
     } catch (e: any) {
       setMsgsErr(String(e?.message || e))

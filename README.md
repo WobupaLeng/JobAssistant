@@ -231,6 +231,27 @@ Java / Spring Boot / Spring Cloud / MyBatis / MySQL / Redis / RabbitMQ。
 
 ---
 
+## 会话与自动打招呼（已实现）
+
+界面右侧「JD 智能对话 / 会话面板」不是占位，已接通的接口：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/chat/friends` | 会话列表（Boss「沟通」页好友） |
+| GET | `/api/chat/messages` | 单个会话的消息（可强制刷新，默认 10 分钟缓存） |
+| POST | `/api/chat/send` | 发送文本消息 |
+| POST | `/api/chat/open` | 打开 / 主动发起某个岗位的会话 |
+| GET/POST | `/api/chat/resumes` `/api/chat/resume` | 读取在线简历列表 / 发送简历 |
+| POST | `/api/chat/recall` | 撤回消息 |
+| POST | `/api/greet` | 生成打招呼文案（大模型；未配置或失败走规则兜底） |
+| GET | `/api/auto-greet/next` `/api/auto-greet/one` | 自动打招呼：取下一个候选 / 对单个执行 |
+
+消息能力跑在**独立车道**（独立线程 + 独立 Playwright 客户端，连同一台 Chrome），
+所以采集任务跑几分钟时照样能收发消息、发招呼。注意：**同机只能开一个程序实例**，否则抢 `data/browser-profile` 会报
+`Target page, context or browser has been closed`。
+
+---
+
 ## 已知限制
 
 - 只接入了 Boss 直聘；智联招聘 / 51job 在界面上置灰，`backend/app/browser.py` 里仍保留它们的登录页与
@@ -240,4 +261,12 @@ Java / Spring Boot / Spring Cloud / MyBatis / MySQL / Redis / RabbitMQ。
 - 频繁抓取会触发 Boss 风控：页面停在「确认中…」，接口与 DOM 都为空，日志会提示
   `第 1 页没有拿到任何岗位`。程序已加 1.5~9.8 秒随机延时，但仍需控制频率，必要时等几分钟再试。
 - 薪资筛选：Boss 自己的 `salary` 参数是模糊命中的，程序会本地再按你勾选的区间精确过滤一次。
-- 第一版不含 AI 自动沟通与简历上传，界面右侧「JD 智能对话」目前是占位区域。
+- **不含简历上传**（在线简历通过 Boss 既有的简历卡片发送），投递动作不在本程序内完成。
+- 暂无自动化测试：改动前请先看 `AGENTS.md` 第 4 节的三层验证门禁。
+
+---
+
+## 工程约定（给 AI / 协作者）
+
+仓库根目录的 [`AGENTS.md`](AGENTS.md) 是本项目的工程宪法（状态看板、目录写权限边界、验证门禁、提交规范），
+需求与接口契约见 `docs/specs/SPEC-001-mvp.md`，架构决策见 `docs/adr/`。动代码前先读宪法第 0 与第 2 节。

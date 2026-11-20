@@ -88,3 +88,27 @@ body {
   .row-in { animation: row-in 0.28s ease-out both; }
   .list-fade { animation: list-fade 0.24s ease-out both; }
 }
+
+/* token 增加时在该项上飘一个红色的「+N」，2 秒后淡出 */
+@keyframes token-bump {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.9);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(-6px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+}
+
+.token-bump {
+  animation: token-bump 2s ease-out forwards;
+}

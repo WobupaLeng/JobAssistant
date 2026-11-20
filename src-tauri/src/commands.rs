@@ -17,3 +17,17 @@ pub fn get_backend_port(state: tauri::State<BackendPort>) -> u16 {
 pub fn get_data_dir() -> String {
     data_dir().to_string_lossy().to_string()
 }
+
+/// 返回崩溃日志绝对路径（`%LOCALAPPDATA%\ai-job-assistant\logs\crash.log`）。
+///
+/// 打包态是窗口程序，没有控制台，启动失败时用户界面可能根本没出来。
+/// 给前端一个入口（以及给用户一个能自己找到的固定路径），
+/// 才能把「双击没反应 / 闪退」变成一份可贴回来的日志。
+#[tauri::command]
+pub fn get_crash_log_path() -> String {
+    crate::app_local_dir()
+        .join("logs")
+        .join("crash.log")
+        .to_string_lossy()
+        .to_string()
+}

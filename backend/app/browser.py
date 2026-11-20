@@ -216,6 +216,7 @@ def launch_context(
     pw: Any,
     data_dir: str | Path,
     log: Callable[[str, str], None],
+    cdp_port: int | None = None,
 ):
     """启动 patchright 持久化上下文（全平台共享，登录态自动落盘）。
 
@@ -261,6 +262,12 @@ def launch_context(
         # 用本机真实 Chrome，而不是 Chromium
         kwargs["channel"] = "chrome"
 
+    # 消息车道用「同一个 Chrome + 第二个 CDP 客户端」实现并行：
+    # 需要让 Chrome 额外监听一个本地调试端口（Playwright 自己用的是 pipe）。
+    args = list(_launch_args())
+    if cdp_port:
+        args.append(f"--remote-debugging-port={int(cdp_port)}")
+
     try:
         # 默认屏蔽自动化特征（patchright 的核心：去掉 navigator.webdriver、
         # Chrome 内部 UA 里的 "HeadlessChrome" 标记等）。
@@ -274,7 +281,7 @@ def launch_context(
         ctx = pw.chromium.launch_persistent_context(
             str(pdir),
             headless=False,          # 无头必被检测
-            args=_launch_args(),
+            args=args,
             slow_mo=50,              # 放慢操作，降低行为检测风险
             viewport=None,           # 不锁视口
             chromium_sandbox=True,   # 不加 --no-sandbox：它本身就是自动化特征
@@ -292,7 +299,7 @@ def launch_context(
                 ctx = pw.chromium.launch_persistent_context(
                     str(pdir),
                     headless=False,
-                    args=_launch_args(),
+                    args=args,
                     slow_mo=50,
                     viewport=None,
                     chromium_sandbox=True,
@@ -469,7 +476,11 @@ class LoginSession:
             self.message = "内部错误：未注入浏览器上下文"
             return
 
-        ctx = self._open_browser()
+        # 这一步也要 yield：本生成器跑在**登录调度线程**里，而 patchright 的
+        # sync API 绑死在采集线程的 greenlet 上。直接调 _open_browser() 会报
+        # "Cannot switch to a different thread"（Current = 登录线程的 main
+        # greenlet，Expected = 采集线程里那个 suspended greenlet）。
+        ctx = yield (self._open_browser,)
         if ctx is None:
             self.state = "error"
             self.message = "浏览器启动失败（详见运行日志）"

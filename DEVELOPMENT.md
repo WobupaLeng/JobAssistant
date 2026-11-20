@@ -2,7 +2,328 @@
 
 > 本文件记录 JobAssistant 每一轮的改动、踩过的坑和待办。追加式维护，最新的在最上面。
 
+## 2026-11-20 工程治理补齐：AGENTS.md 宪法 + SPEC 冻结 + 清理敏感库清空残留
+
+### 现象
+`POST /api/sensitive/clear`（界面「清空敏感库」）会抛 `AttributeError: 'Store' object has no attribute '_lock'`。
+
+### 根因
+`backend/app/store.py` 早期是「单连接 + `self._lock` / `self._conn()`」实现，后来重构成每线程独立连接
+（`threading.local` + `conn()` / `tx()`），`clear_sensitive()` 是唯一没跟着改的方法。
+
+### 改动
+- `backend/app/store.py`：`clear_sensitive()` 改用 `with self.tx() as c:`，与其它写方法一致。
+- 新增 `AGENTS.md`（根目录工程宪法，六节：状态看板 / 技术栈 / 目录边界 / 契约同源 / 三层验证门禁 / Git 规范）。
+- 新增 `docs/specs/SPEC-001-mvp.md`（状态 `SPEC_FROZEN`）与 `docs/adr/ADR-001`、`docs/adr/ADR-002`。
+- `README.md`：补「会话与自动打招呼（已实现）」接口表，更正「JD 智能对话是占位」的过时描述，新增「工程约定」。
+
+### 验证
+- `python -m compileall -q app scrapers entry.py` 通过。
+- `Store(tmp).clear_sensitive()` 单点验证通过（见本轮终端输出）。
+
+### 待办
+- 引入 pytest（store 去重/筛选、scorer 规则打分、薪资解析）与 vitest（`api.ts` 端口解析），回填 `AGENTS.md` 第 4 节槽位 B。
+- 决定 E2E 方案后回填槽位 C。
+
+## 2026-11-19（深夜 4）自动打招呼误报「已发满本轮上限 0 条」+ 顶栏状态高亮
+
+### 现象
+- 点「自动打招呼 开」后立刻停下，日志：「自动打招呼：已发满本轮上限 0 条，自动打招呼已停止」。
+- 用户明确要求：自动打招呼只看「待投递」列表，**列表空了才停**，不该有别的上限。
+
+### 根因
+- 前端 `tick()` 里有一条 `if (autoDoneRef.current.size >= maxJdRef.current)`，
+  把抓取用的「每日 JD 上限 `maxJd`」也当成了本轮发送上限；而 `max_jd` 在库里是 **0**（0 = 不限制），
+  于是 `0 >= 0` 立刻成立 → 开一次就停。
+- 顺带两处错：计数用的是 `autoDoneRef`（只装「跳过」的岗位，成功发送并不往里加），
+  所以上限判断本来也数不准；停止时只 `setAutoOn(false)`、没同步 `autoOnRef`。
+
+### 改动（`web/src/App.tsx`）
+- 删掉上限判断：现在只有三种停止——**待投递列表发完**、连续失败 3 次自动暂停、用户手动关闭。
+- 新增 `stopAuto(message, level)`：同时清 `autoOnRef`、`autoNextAt` 和 `autoOn`，
+  所有停止分支（取不到岗位 / 列表发完）统一走它，避免定时器拿旧 ref 再排一轮。
+- 新增倒计时显示：`autoNextAt` + 每秒跳动的 `autoNow`，算出 `autoNextIn`。
+- 顶栏「自动打招呼」按钮：运行中是**实心绿**，暂停是**实心琥珀**；旁边多一个状态胶囊
+  （绿色呼吸点 +「12s 后发下一条」/「发送中…」/「已暂停」+「· 已发 N 条」），
+  悬停看明细。暂停时点「继续」会清零连败计数。
+- 日志里不再出现「上限」字样，开启时提示「按待投递列表逐条发，发完自动停止」。
+
+### 验证
+- `npm run build` 通过（`index-CxqdvYGf.js` 296.88 kB）；`cargo tauri build` 通过。
+- 桌面 exe 已换新（71,005,184 字节，md5 `2a59fa74672ac8657d344f3668395568`）；
+  `/api/auto-greet/next` 返回 11 条待投递，重启后循环能正常跑起来。
+
+## 2026-11-19（深夜 3）关掉 Chrome 窗口后消息/打招呼不再报错：自动重新打开浏览器
+
+### 现象
+用户：「自动回复 窗口关闭后不能继续」。手动关掉采集用的 Chrome 窗口后，消息列表、打招呼一直报
+「浏览器窗口已关闭或崩溃，下次操作会自动重新打开」，但**从来没有真的重新打开过**，
+自动打招呼连败 3 次就自己暂停了。
+
+### 根因
+- `Runtime.ensure_browser()` 里其实有探活逻辑（`ctx.pages` 抛错 → 重启 Chrome），
+  但**只有走采集线程的路径才会调用它**。
+- 消息走 `ChatLane.ensure_ctx()`：它自己 `connect_over_cdp(端口)`，浏览器没了就连不上；
+  原来这里直接 `raise`，从不请求采集线程重新拉起浏览器。
+- `_run_chat()` 的前置检查是 `if rt._ctx is None` 才 `ensure_main_browser()`；
+  窗口被关掉后 `_ctx` 仍是**过期但不为 None**，检查被跳过 → 永远没有重启的机会。
+- 因此那句「下次操作会自动重新打开」是空头承诺。
+
+### 改动（`backend/app/main.py` 的 `ChatLane`）
+- `ensure_ctx()`：连不上时不再直接抛，改成最多两轮——第一轮失败就把浏览器拉起来再连一次。
+- 新增 `ChatLane._relaunch(reason)`：`time.sleep(0.8)` 等旧进程让出调试端口 →
+  `rt.run_in_worker(rt.ensure_browser, timeout=150)` 让**采集线程**重新启动 Chrome →
+  记一条「浏览器已重新打开，消息车道正在重连」→ `time.sleep(1.2)` 等端口监听 → 再连。
+  失败时抛「Chrome 窗口已关闭，自动重新打开失败：…」，前端能看到真正的原因。
+- 浏览器没被关、只是消息车道自己断了的情况仍走原来的 `_drop_locked()` 重连逻辑，不受影响。
+
+### 验证
+- 真机（开发态后端 + 真实 Chrome，2026-11-19 19:0x）：
+  1. 正常打开浏览器 → `消息车道已连上浏览器（端口 1273）`；
+  2. 强杀 Chrome 进程模拟「关掉窗口」→ 下一次消息请求报
+     「浏览器窗口已关闭或崩溃，下次操作会自动重新打开」；
+  3. 再下一次请求触发重开，日志依次出现
+     「浏览器不可用（窗口已关闭或浏览器已退出），正在自动重新打开」
+     →「启动 patchright（持久化目录 …）」
+     →「浏览器已重新打开，消息车道正在重连」
+     →「消息车道已连上浏览器（端口 1273）」，请求恢复正常（耗时约 30 秒）。
+- 顺带修掉两个让「自动重开」失效的坑：
+  - `ensure_browser()` 原来只靠 `ctx.pages` 探活，Chrome 被关掉后它**仍返回旧列表**，
+    于是把已经死掉的上下文当活的用。现在再加一次 `ctx.browser.is_connected()` 判断。
+  - `ChatLane._drop_locked()` 原来每次都 `pw.stop()`，同一线程里再
+    `sync_playwright().start()` 会被 patchright 误判成「在 asyncio 循环里用同步 API」
+    （日志原样报这句），消息车道从此全废。现在只丢浏览器/上下文、保留驱动，
+    确实连不上时（第 3 次尝试）才重建驱动；重开浏览器走新加的 `Runtime.restart_browser()`。
+
 ---
+
+## 2026-11-19（深夜 2）配置与筛选条件没回显：配置只在启动读一次 + 筛选条件只写不读
+
+### 现象
+用户：「配置信息没有回显」「也没有记住我的筛选条件」。重启程序后配置抽屉里的 Base URL / 模型 /
+提示词 / 技能看着像没保存，筛选面板（关键词、城市、薪资…）也回到默认值。
+
+### 根因（两个独立问题）
+1. **配置读取失败被静默吞掉**：`web/src/App.tsx` 启动时 `.getConfig().catch(() => {})` 只请求一次。
+   Tauri 先建窗口、sidecar 后端稍后就绪，第一次请求经常直接连接失败 → 配置永远停在默认值，
+   而数据库里其实是有值的（`/api/config` 本身返回是完整的）。没有任何重试，界面就一直「空着」。
+2. **筛选条件只写不读**：`POST /api/start` 里 `store.set_config_json("last_filter", req.model_dump())`
+   存了，但全仓库没有任何地方读回来（`grep -rn last_filter` 只有这一行 + pyc），
+   `/api/config` 也不返回它 → 前端无从还原。
+
+### 改动
+- `backend/app/main.py` `get_config()`：返回值增加 `"last_filter": rt.store.get_config_json("last_filter", None)`。
+- `web/src/api.ts`：`Config` 增加 `last_filter?: Record<string, any> | null`。
+- `web/src/App.tsx`：
+  - 启动配置加载改成 `loadConfig()`，失败每 1.5 秒重试（最多 60 次），成功才把值灌进 state；
+    卸载时清理定时器。
+  - 新增 `applyLastFilter(lf)`：把 `last_filter` 里的 keywords / platforms / city / salary /
+    experience / degree / scale / stage / industry / job_type / max_pages / exclude_keywords
+    还原到筛选面板（数组字段先做类型过滤，空数组不覆盖）。
+  - 配置加载成功后调 `applyLastFilter(c.last_filter)`；effect 依赖补上 `applyLastFilter`。
+
+### 验证
+- `cd web && npm run build` 通过（`dist/assets/index-a3c-Pge9.js` 294.46 kB）。
+- 库里确实有这套条件：`last_filter` = platforms=boss、keywords=[全栈工程师, Node.js, …]、
+  city=101280600、salary=[sal:15-30]、experience=[106,107]、scale=[303,302]、max_pages=3。
+
+---
+
+---
+
+## 2026-11-19（深夜）采集与消息并行：消息走独立车道 · 打招呼提示进日志
+
+### 需求
+用户：「消息列表和抓取 jd 不能同时运行吗」「采集、主程序、自动打招呼、自己打招呼各自使用不同的线程，互不影响」，
+以及「自动打招呼的提示、错误放日志里面，现在的位置会破坏布局」。
+
+### 根因
+所有碰浏览器的动作都挤在采集线程：`run_scrape` 一次调用抓完所有页，期间消息请求只能在队列里排队，
+等满 90~120 秒后报错。旧代码还会误报「Boss 消息页没有响应」——看门狗读的是 `BossChat` 的全局
+`_last_act`，上次成功开过消息页就会留下一个非 0 的旧时间戳。
+
+### 方案（同一台 Chrome，两个 Playwright 客户端）
+Playwright 允许**多个客户端连同一台浏览器**（`connect_over_cdp`），于是：
+- 采集线程：照旧启动浏览器（`launch_persistent_context`）并跑抓取；
+- 新增 `ChatLane`（`backend/app/main.py`，线程名 `aja-chat`）：自己的 `sync_playwright().start()` +
+  `connect_over_cdp("http://127.0.0.1:{cdp_port}")`，连的是同一个持久化上下文，只驱动自己的标签页。
+- 端口：`Runtime.cdp_port = _free_port()`，`launch_context(..., cdp_port=...)`
+  （`backend/app/browser.py`）把 `--remote-debugging-port=N` 加进 Chrome 启动参数。
+- 不新开浏览器 → 指纹、登录态、cookie 都不用搬，Boss 也看不出多了一个浏览器。
+
+### 改动
+- `_run_chat()`：任务投递到 `rt.chat_lane`；看门狗读 `chat_lane.worker_busy()/worker_task()`；
+  只有 `submitted` 之后刷新的 `activity()` 才算本任务自己的进展；放弃时置 `state["abort"]`，
+  排到队的 `_wrap` 直接跳过，避免前端 3 秒轮询在事后堆出一串重复浏览器操作。
+- 消息类接口里的 `rt.ensure_browser()` 全改成 `rt.chat_lane.ensure_ctx()`（登录、登录态检查仍走采集线程）。
+- `ChatLane.ensure_ctx()` 连接失败不会去杀采集用的浏览器；`reset()` 只 `pw.stop()` 断开自己的 CDP。
+- 拉会话列表/聊天记录失败时用 `BossChat.cached_friends()/cached_messages()` 兜底，返回 `stale: true`。
+- 前端 `web/src/App.tsx`：自动打招呼的提示/错误改走 `pushLog()` 写进日志面板（前缀 `[打招呼]`，
+  warn/error 会染色）；顶栏那行状态文字删掉（它 `shrink-0` + 长句会把按钮挤变形），已发/失败计数挪进按钮 `title`。
+
+### 验证
+- 临时脚本：采集线程被 60 秒假任务占住时，消息车道仍能在 **0.0 秒**内完成 `goto + title`（并行成立）。
+- 开发态起服务：`/api/health` 正常；`/api/chat/friends` 在未登录的 profile 下返回可读错误而不是卡死。
+- **打包版真机并行验证**（2026-11-19 18:15，抓取「后端开发/Java」正在进行中）：
+  `GET /api/chat/friends` 在 **2.5 秒**内返回真实会话列表，同时 `/api/status` 仍 `running:true`，
+  采集日志照常推进；`backend.log` 记 `消息车道已连上浏览器（端口 5447），采集和消息互不阻塞`。
+  同一时刻两个车道各自操作不同标签页，抓取节奏没被打乱。
+- `npm run build` 通过。
+
+### 注意
+- 打包后 patchright 的 driver 仍要可用（采集线程本来就在用 `sync_playwright().start()`），消息车道只是多起一个客户端。
+- 浏览器重启后端口不变（`cdp_port` 进程内固定），`ensure_ctx()` 会自动重连。
+
+---
+
+## 2026-11-19（晚）「生成回复」报 `大模型返回了空内容`（推理模型的思考吃光输出预算）
+
+### 现象
+点「生成回复」后提示：`大模型生成失败（ValueError: 大模型返回了空内容），已用规则话术代替`。
+
+### 根因
+用户配的模型是 **`deepseek-flash`，属于推理型模型**：它先写 `reasoning_content`（思维链），
+再写 `content`，而**思考 token 也算在 `max_tokens` 里**。
+
+`greeting.py` 里打招呼语只给了 `max_tokens=400`。实测同一份 prompt：
+
+| max_tokens | finish_reason | reasoning_tokens | content 长度 |
+|---|---|---|---|
+| 400 | `length` | 400 | **0** ← 报错现场 |
+| 800 | `stop` | 694 | 191 |
+| 1500 | `stop` | 542 | 261 |
+
+思考把 400 全吃光 → `choices[0].message.content` 为空 → 抛 `ValueError("大模型返回了空内容")` → 回退规则话术。
+
+### 本轮改动
+- `backend/app/greeting.py`（`GreetingWriter.write`）：输出预算 400 → **1200**，
+  被截断（`finish_reason=length` 且正文为空）时自动再试一次 **3000**；
+  空了也不再只说「返回了空内容」，而是带上 finish 与思考 token 数（新增 `empty_content_reason()`）：
+  「输出预算被思考过程耗尽，其中思考约 N tokens；可在设置里换非推理模型，或调大最大输出」。
+- `backend/app/scorer.py`（`LLMScorer.score`）：同理会话预算 800 → **1600**，被截断再试 3200；
+  解析失败信息里把 `finish` 和空内容显式打出来。
+
+### 验证
+用库里真实的 `api_key / base_url / model`（`%LOCALAPPDATA%\ai-job-assistant\data\job_assistant_pro.db`
+的 `app_config` 表）直接调接口：
+- 修复前 `GreetingWriter.write()` → `source=rule`，note 正是那句报错（复现成功）；
+- 修复后连续两次 → `source=llm`，tokens 1027 / 1508，正文 200+ 字，`note=''`；
+- `LLMScorer.score()` → `score=8, source=llm, tokens=604`，JSON 解析正常。
+
+### 经验
+推理型模型（`deepseek-flash` / `deepseek-reasoner` / 各家 thinking 模型）不能按「答案长度」给
+`max_tokens`，要按「思考 + 答案」给；判断依据看 `usage.completion_tokens_details.reasoning_tokens`。
+
+---
+
+## 2026-11-19（更晚）Boss 登录报 `Cannot switch to a different thread`（greenlet 回归）
+
+### 现象
+点「登录 Boss」后前端报：
+
+```
+Cannot switch to a different thread
+Current:  <greenlet.greenlet object ... current active started main>
+Expected: <greenlet.greenlet object ... suspended active started main>
+```
+
+### 根因
+上一轮 commit `7ec4585`（「采集线程改常驻 greenlet」）把 `main.py` 里登录会话的注入改成了直连：
+
+```python
+get_context=rt.ensure_browser,
+start_browser=rt.ensure_browser,
+step_runner=lambda fn, *a: fn(*a),   # 等于没投递
+```
+
+当时的注释断言「登录会话本身就跑在采集线程里（`rt.submit(sess.start)`）」，**这个前提是错的**：
+`LoginSession.start()`（`backend/app/browser.py`）只是
+`threading.Thread(target=self._run, daemon=True).start()`，跑在独立的登录调度线程上。
+patchright 的 sync API 绑定在 `sync_playwright().start()` 所在线程（采集线程）的 greenlet 上，
+在登录线程里直接调用就会被 greenlet 拒绝跨线程 switch。
+
+另有一处漏网：`_steps()` 开头的 `ctx = self._open_browser()` 是**绕过 step_runner 的直连调用**，
+即使 step_runner 修好，「拿上下文」这一步仍会在登录线程里启动浏览器。
+
+### 本轮改动
+- `backend/app/main.py`（`login_start`）：改回
+  `get_context=None, start_browser=rt.ensure_browser, step_runner=rt.run_in_worker`，
+  注释改写为「`sess.start()` 只是再起一个登录调度线程，每一步碰浏览器的动作都必须显式投递到采集线程」。
+- `backend/app/browser.py`（`_steps()` 开头）：`ctx = self._open_browser()` → `ctx = yield (self._open_browser,)`。
+- `backend/app/main.py`（`Runtime.run_in_worker`）：补 `_wrap.__wrapped_label__`，
+  否则采集线程日志只会刷「开始执行：_wrap」，看不到具体步骤名。
+
+> 注意：`start_browser` 要传**裸的** `rt.ensure_browser`，不能传 `rt.ensure_browser_on_worker` --
+> 后者内部自己就投递一次，再被 step_runner 包一层会在采集线程里二次投递，抛
+> 「内部错误：run_in_worker 不能在采集线程里再投递任务」。
+
+### 验证
+源码后端（`AJA_PORT=8791 python -m app.main`）：`POST /api/login/start {"platform":"boss"}` →
+12 秒后 `GET /api/login/status` 返回 `{"state":"logged_in","message":"登录成功"}`，
+`data/logs/backend.log` 时间线正常（开始 → 启动 patchright → 登录窗口已打开 → 登录成功），无 greenlet 报错。
+
+### 待办
+- 已确认除登录外的其他调用点（`run_scrape`、各 `_do/_find/_new/_run/_start`）本来就走
+  `rt.submit(...)` / `_run_chat(...)` 投递到采集线程，无需改动。
+- 可考虑在 login 的 step_runner 处加断言/注释防回归。
+
+---
+
+## 2026-11-19（晚）「把 exe 放到别的文件夹打开会闪退」排查与修复
+
+### 现象
+把 `src-tauri\target\release\ai-job-assistant.exe` 复制到别的文件夹双击，窗口一闪就没了；
+放在原地双击也一样。`crash.log` 里只有「主进程启动」，没有任何退出原因。
+
+### 根因（已复现，证据在 crash.log）
+用临时 build 打出 panic 详情，实际是 **WebView2 创建失败**：
+
+```
+Failed to setup app: runtime error: failed to create webview:
+WebView2 error: WindowsError(Error { code: HRESULT(0x800700AA), message: "请求的资源在使用中。" })
+```
+
+→ 上一轮 `ai-job-assistant.exe` 被异常结束（panic abort / 任务管理器结束）后，
+它拉起的 `msedgewebview2.exe` 变成孤儿，继续占着 WebView2 的用户数据目录，
+新进程建 webview 时直接 `E_ACCESSDENIED`，panic 后整个进程消失。
+**和 exe 放在哪个文件夹无关**——换个目录只是让人误以为是路径问题。
+
+排查中另外发现三个放大器：
+1. panic hook 里又调了 `default_hook` → 二次 panic 输出会 `process::abort()`（退出码 -1073740791），
+   日志根本来不及落盘；
+2. 单实例锁用的是 `app_local_data_dir()`（Tauri 下其实是 `%APPDATA%\com.ai.jobassistant`），
+   不是 `main.rs` 释放后端用的 `%LOCALAPPDATA%\ai-job-assistant`，两边目录对不上，锁形同虚设；
+3. 锁抢不到时 `exit(0)`，和「正常退出」完全无法区分。
+
+### 本轮改动（`src-tauri/src/lib.rs`、`commands.rs`）
+- **启动前置检查**（`run()` 里，Builder 建 WebView **之前**）：
+  `prepare_webview_dir()` 先抢单实例锁（固定路径 `%LOCALAPPDATA%\ai-job-assistant\app.lock`），
+  抢不到 → `exit(2)`；抢到后 `taskkill /F /IM msedgewebview2.exe` 清残留、
+  预建 `EBWebView` 目录，日志记下 WebView2 用户数据目录。
+- **按路径杀残留**：`kill_pids_under(%LOCALAPPDATA%\ai-job-assistant)`，只结束从释放目录起的实例，
+  不影响从 `target/` 打开的调试实例。
+- **panic hook 不再转发 `default_hook`**：panic 变成普通 unwind，稳定拿到退出码，不再 abort。
+- **WebView2 失败时写人话**：`crash.log` 追加 `[fatal]` + 三步处理指引
+  （结束 msedgewebview2 → 删 `EBWebView` → 反馈日志）。
+- 新命令 `get_crash_log_path`（Rust + `generate_handler!`），给界面一个日志入口。
+
+### 验证
+- `cargo tauri build` 通过（`cargo build` 在受限沙箱里被 `target/.cargo-build-lock`
+  挡住过一次，切到完全权限后按 `build.bat` 的步骤正常构建成功）。
+  产物：`src-tauri\target\release\ai-job-assistant.exe`（70 996 992 字节）、
+  `bundle\nsis\AI Job Assistant_0.1.0_x64-setup.exe`（64.10 MiB）。
+- 桌面实测（已复制到 `C:\Users\Administrator\Desktop\ai-job-assistant.exe`，md5 与构建产物一致）：
+  1. **从桌面启动正常**：`crash.log` 依次出现「已清理残留的 msedgewebview2.exe」
+     →「WebView2 用户数据目录: …\EBWebView」→「后端已就绪，端口 2628」，窗口正常，进程常驻；
+  2. **多开被挡**：第二个实例 `exit=2`，日志写明「另一个实例正在运行（锁 …app.lock 被占用）」；
+  3. **把 exe 复制到另一个文件夹（`data\.smoketest\`）启动正常**，端口 13356；
+  4. **强杀后再启动能自愈**：任务管理器结束进程后重开，
+     日志出现「已结束残留进程 pid=19836,20180」+「已清理残留的 msedgewebview2.exe」，随后正常起后端。
+- 也就是当初「换文件夹就闪退」的场景已经走通，不再复现。
+
+### 待办
+- 若 `[fatal]` 指向 `EBWebView` 目录权限，考虑给 WebView2 换一个可控的 user data 目录。
+- 前端「崩溃日志」入口还没做界面按钮，只加好了 Rust 命令。
 
 ## 2026-11-19（傍晚）Boss 主动发起会话 · 采集线程与事件循环大修 · 自动打招呼实跑
 
