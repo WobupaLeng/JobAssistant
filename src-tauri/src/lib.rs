@@ -25,7 +25,7 @@ use tauri::Manager;
 /// 放到子模块里即可彻底隔离命名空间。
 mod commands;
 
-pub use commands::{get_backend_port, get_data_dir};
+pub use commands::{get_backend_port, get_crash_log_path, get_data_dir};
 
 /// 全局持有的后端子进程，窗口关闭时 kill 掉。
 pub struct BackendProcess(pub Mutex<Option<Child>>);
@@ -94,15 +94,25 @@ pub fn crash_log(tag: &str, msg: &str) {
 }
 
 /// 安装 panic 钩子：panic 内容写进 crash.log，而不是静默 abort。
+///
+/// ⚠️ 这里**故意不调用** `default_hook`：
+/// 1. 默认钩子会往 stderr 打一坨给开发者看的文字。打包态下后端也是
+///    `CREATE_NO_WINDOW` 子进程，用户既看不到也没用；
+/// 2. 更关键的是：`Option::expect` / `run().unwrap_or_else` 一路回到 main
+///    返回 Result<(), Box<dyn Error>> 时，`unwrap` 会再 panic 一次，
+///    默认钩子**第二次**输出 panic 就会 `process::abort()`（exit -1073740791）。
+///    自己接管后 panic 变成一次普通 unwind，进程能走正常退出码、错误信息稳定落盘。
 pub fn install_panic_hook() {
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
+    std::panic::set_hook(Box::new(|info| {
         let loc = info
             .location()
             .map(|l| format!("{}:{}", l.file(), l.line()))
             .unwrap_or_else(|| "?".into());
-        crash_log("panic", &format!("{info} @ {loc}"));
-        default_hook(info);
+        let text = format!("{info} @ {loc}");
+        crash_log("panic", &text);
+        if text.contains("Failed to setup app") {
+            report_startup_failure(&text);
+        }
     }));
 }
 
@@ -278,33 +288,43 @@ pub fn spawn_backend() -> Result<(Child, u16), String> {
 pub fn run() {
     install_panic_hook();
     crash_log("tauri", &format!("主进程启动 pid={}", std::process::id()));
+
+    // ---- 必须在 Builder 之前：webview 一创建就没机会了 ----
+    // 先抢单实例锁（抢不到直接退出，绝不和另一个实例抢 WebView 环境），
+    // 再清理上一轮残留、把 WebView2 用户数据目录准备好。
+    // 这里的 `_app` 只用来算路径，随后整个丢掉；
+    // 真正跑窗口的是下面带 plugin / setup 的那个 Builder。
+    let startup = (|| -> Result<std::fs::File, String> {
+        let _app = tauri::Builder::default()
+            .build(tauri::generate_context!())
+            .map_err(|e| format!("构建 Tauri 应用失败: {e}"))?;
+        prepare_webview_dir(_app.handle())
+    })();
+    let lock = match startup {
+        Ok(lock) => lock,
+        Err(e) => {
+            crash_log("tauri", &format!("启动前置检查失败: {e}"));
+            // 退出码 2：告诉用户/脚本「这次没起来」，与正常退出区分
+            std::process::exit(2);
+        }
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(BackendPort(Mutex::new(0)))
         .manage(BackendProcess(Mutex::new(None)))
-        .manage(InstanceLock(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![commands::get_backend_port, commands::get_data_dir])
+        // 锁句柄交给 managed state，保证活到进程退出
+        .manage(InstanceLock(Mutex::new(Some(lock))))
+        .invoke_handler(tauri::generate_handler![
+            commands::get_backend_port,
+            commands::get_data_dir,
+            commands::get_crash_log_path
+        ])
         .setup(|app| {
             // 浏览器由后端拉起（Chrome 子进程挂在后端下面），
             // 任务管理器里对着 aja-backend.exe「结束任务」会把浏览器一起带走，
-            // 两边状态对不上就只能重启程序——所以这里禁止多开。
-            // 注意：锁文件句柄必须活到进程结束。这里早先把它当作局部变量，
-            // setup 一返回句柄就 drop，锁被立即释放，多开其实根本没拦住；
-            // 现在存进 managed state，由应用生命周期持有。
-            if let Ok(dir) = app.path().app_local_data_dir() {
-                let _ = std::fs::create_dir_all(&dir);
-                match single_instance(&dir.join("app.lock")) {
-                    Ok(lock) => {
-                        // 锁句柄交给 managed state，保证活到进程退出
-                        app.manage(InstanceLock(Mutex::new(Some(lock))));
-                    }
-                    Err(e) => {
-                        crash_log("tauri", &format!("禁止多开：{e}"));
-                        // 已经有实例在跑：直接退出，别再起第二个后端
-                        std::process::exit(0);
-                    }
-                }
-            }
+            // 两边状态对不上就只能重启程序——所以禁止多开。
+            // 单实例锁在进入本函数之前就抢好了（见 prepare_webview_dir）。
             match spawn_backend() {
                 Ok((child, port)) => {
                     crash_log("tauri", &format!("后端已就绪，端口 {port}"));
@@ -335,11 +355,200 @@ pub fn run() {
         });
 }
 
+/// 在创建 WebView2 **之前**：清掉上一轮崩溃残留的 webview 进程，
+/// 并预先把 WebView2 的 user data 目录建好（顺带把系统分配的
+/// `EBWebView` 目录固定到我们自己算出来的路径上，见下）。
+///
+/// 症状：把 exe 复制到别的文件夹（或上一轮被强杀后）双击，窗口一闪就没了，
+/// 什么都没留下。实测 panic 内容就是
+///   failed to create webview: WebView2 error: WindowsError(HRESULT 0x800700AA)
+///   "请求的资源在使用中。"
+/// —— 上一个 ai-job-assistant.exe 被以 `ExitProcess` 之外的方式结束
+/// （panic abort / 任务管理器结束 / 上一个实例还在后台），它拉起的一整套
+/// `msedgewebview2.exe` 会变成孤儿进程继续持有 WebView2 的 user data 目录，
+/// 新的 WebView2 环境就起不来。
+///
+/// 为什么锁要先抢：两个实例同时启动时会**都**去删对方的 WebView 环境，
+/// 反而制造出上面那种占用。所以这里先抢锁，抢不到就立刻退出（退出码 2），
+/// 抢到了才动手清理。
+///
+/// 系统自带 `taskkill`，不引额外依赖。
+fn prepare_webview_dir(app: &tauri::AppHandle) -> Result<std::fs::File, String> {
+    let lock = acquire_instance_lock(app)?;
+    // 上面只保证「同一时刻只有一个实例」。把 exe 复制到别的文件夹后反复双击时，
+    // 上一个实例可能还活着但被我们当成「已退出」——这里必须主动确认。
+    // 否则两个进程会争用同一个 WebView2 环境，报
+    //   WebView2 error: HRESULT(0x800700AA) "请求的资源在使用中。"
+    // 然后窗口一闪就退。属于防御性清理：结束不掉就记日志，不阻塞正常启动。
+    kill_pids_under(&app_local_dir());
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    match Command::new("taskkill")
+        .args(["/F", "/IM", "msedgewebview2.exe"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+    {
+        Ok(st) if st.success() => crash_log("tauri", "已清理残留的 msedgewebview2.exe"),
+        Ok(_) => {} // 本来就没有残留，正常情况
+        Err(e) => crash_log("tauri", &format!("清理 webview 残留失败: {e}")),
+    }
+    match app.path().app_local_data_dir() {
+        Ok(dir) => {
+            let ud = dir.join("EBWebView");
+            match std::fs::create_dir_all(&ud) {
+                Ok(()) => crash_log("tauri", &format!("WebView2 用户数据目录: {}", ud.display())),
+                Err(e) => crash_log("tauri", &format!("创建 {} 失败: {e}", ud.display())),
+            }
+        }
+        Err(e) => crash_log("tauri", &format!("无法确定 app_local_data_dir: {e}")),
+    }
+    Ok(lock)
+}
+
+/// 结束所有「可执行文件位于 `dir` 之下」的进程（`dir` 是 `%LOCALAPPDATA%\ai-job-assistant`）。
+///
+/// 为什么要按完整路径而不是按镜像名：`taskkill /IM ai-job-assistant.exe` 会连带
+/// 杀掉用户从项目 target/ 里打开的调试实例；而只杀「释放出来的那份」才是安全的。
+/// 用的是系统自带的 `powershell`，不新增依赖；拿不到进程列表就静默跳过。
+#[cfg(windows)]
+fn kill_pids_under(dir: &std::path::Path) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut marker = dir.to_string_lossy().to_lowercase();
+    marker = marker
+        .replace("'", "''")
+        .replace("\\\\?\\", "")
+        .replace('/', "\\");
+    let script = format!(
+        "$m='{marker}'; Get-Process -ErrorAction SilentlyContinue | \
+         Where-Object {{ $_.Path -and $_.Id -ne {me} -and $_.Path.ToLower().StartsWith($m) }} | \
+         ForEach-Object {{ $_.Kill(); $_.Id }}",
+        me = std::process::id()
+    );
+    let out = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &script])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    match out {
+        Ok(o) => {
+            let killed: Vec<_> = String::from_utf8_lossy(&o.stdout)
+                .split_whitespace()
+                .filter(|s| s.chars().all(|c| c.is_ascii_digit()))
+                .map(|s| s.to_string())
+                .collect();
+            if !killed.is_empty() {
+                crash_log("tauri", &format!("已结束残留进程 pid={}", killed.join(",")));
+            }
+        }
+        Err(e) => crash_log("tauri", &format!("残留进程检查失败: {e}")),
+    }
+}
+
+#[cfg(not(windows))]
+fn kill_pids_under(_dir: &std::path::Path) {}
+
+/// 记录「为什么没起来」，并给出用户能自己处理的下一步。
+///
+/// 典型场景是 WebView2 创建失败（`HRESULT 0x800700AA 请求的资源在使用中`）：
+/// 用户双击后窗口一闪而过，任务管理器里还残留着上一轮的
+/// `msedgewebview2.exe` 子进程。这时程序必须把原因写进 crash.log，
+/// 而不是像以前那样 panic 后随进程一起消失。
+pub fn report_startup_failure(text: &str) {
+    let hint = if text.contains("800700AA") || text.contains("webview") {
+        "WebView2 创建失败：通常是上一轮残留的 msedgewebview2.exe 进程还占着用户数据目录。\n\
+         处理（按顺序试）：\n\
+         1. 任务管理器 → 详细信息 → 结束所有 msedgewebview2.exe / ai-job-assistant.exe，再双击；\n\
+         2. 仍不行就把 %LOCALAPPDATA%\\com.ai.jobassistant\\EBWebView 整个删掉再双击；\n\
+         3. 再不行把这份 crash.log 最后几行发给开发者。"
+    } else {
+        "启动失败，请把本文件最后几行反馈给我。"
+    };
+    crash_log("fatal", &format!("{text}\n{hint}"));
+}
+
 /// 单实例锁的持有者：把 File 放进 Tauri 的 managed state，避免 setup 结束就释放。
 #[allow(dead_code)]
 struct InstanceLock(Mutex<Option<std::fs::File>>);
 
-/// 单实例锁：用独占方式打开 lock 文件，进程退出时系统自动释放。
+/// 单实例锁：独占打开 lock 文件，进程退出时系统自动释放。
+///
+/// **位置必须与 exe 无关**：早先用的 `app_local_data_dir()`（= `%LOCALAPPDATA%\<identifier>`）
+/// 在 Tauri 里实际是 `%APPDATA%\<identifier>`。只要这个路径哪天算不出来、或落到了
+/// 另一个 URL（比如把 exe 复制到别的目录后 WebView2 用 file:// 起页面，
+/// app_local_data_dir 就变成 `...\Local\file_127.0.0.1`），第二份进程就再也
+/// 抢不到锁——于是又拉起一个后端、再开一个浏览器窗口。这里显式钉死
+/// `%LOCALAPPDATA%\ai-job-assistant`，和 main.rs 释放后端用的目录保持一致。
+#[cfg(windows)]
+fn single_instance_path() -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::temp_dir()
+                .parent()
+                .map(|d| d.join("Local"))
+                .unwrap_or_else(std::env::temp_dir)
+        })
+        .join("ai-job-assistant")
+        .join("app.lock")
+}
+
+#[cfg(not(windows))]
+fn single_instance_path() -> PathBuf {
+    std::env::temp_dir().join("ai-job-assistant.lock")
+}
+
+/// 打开（或自愈重建）单实例锁。成功返回持有者 File，失败返回给用户看的原因。
+fn acquire_instance_lock(app: &tauri::AppHandle) -> Result<std::fs::File, String> {
+    let path = single_instance_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("创建锁目录 {} 失败：{e}", dir.display()))?;
+    }
+    // 先尽量做个位置自检：锁目录算不出用户名时 app_local_data_dir 会退化成
+    // `...\file_127.0.0.1` 这类按 URL 命名的目录，不同启动方式（file:// vs http://）
+    // 会算出不同结果，锁就形同虚设
+    if let Ok(dir) = app.path().app_local_data_dir() {
+        if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
+            if name.contains("file_") || name.contains("127.0.0.1") {
+                crash_log("tauri", &format!("注意：app_local_data_dir 异常（{}），已改用固定锁路径", dir.display()));
+            }
+        }
+    }
+    match single_instance(&path) {
+        Ok(lock) => Ok(lock),
+        Err(e) => {
+            // 独占打开失败 → 很可能另一个实例正在跑。
+            // 但如果文件被一个已经死掉的进程留下的僵尸句柄占着（或被占用），
+            // 用户就会永远双击无反应。所以这里带重试地删掉重建一次。
+            let mut last = e;
+            let mut stale_fixed = false;
+            for _ in 0..10 {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                if std::fs::remove_file(&path).is_ok() {
+                    stale_fixed = true;
+                    // 删得掉 → 说明没有活着的进程持着它（Windows 上独占句柄时
+                    // 删除会直接失败），这是上次崩溃留下的陈旧锁，重建即可
+                    match single_instance(&path) {
+                        Ok(lock) => return Ok(lock),
+                        Err(e2) => last = e2,
+                    }
+                }
+            }
+            if stale_fixed {
+                Err(format!("锁文件 {} 重建后仍无法独占：{last}", path.display()))
+            } else {
+                Err(format!(
+                    "另一个实例正在运行（锁 {} 被占用：{last}）",
+                    path.display()
+                ))
+            }
+        }
+    }
+}
+
 #[cfg(windows)]
 fn single_instance(lock: &std::path::Path) -> Result<std::fs::File, String> {
     use std::os::windows::fs::OpenOptionsExt;
@@ -348,7 +557,7 @@ fn single_instance(lock: &std::path::Path) -> Result<std::fs::File, String> {
         .write(true)
         .share_mode(0) // 不共享：第二个实例打开会失败
         .open(lock)
-        .map_err(|e| format!("程序已在运行（{}）", e))
+        .map_err(|e| format!("独占打开失败：{e}"))
 }
 
 #[cfg(not(windows))]
@@ -357,5 +566,5 @@ fn single_instance(lock: &std::path::Path) -> Result<std::fs::File, String> {
         .create(true)
         .write(true)
         .open(lock)
-        .map_err(|e| format!("程序已在运行（{e}）"))
+        .map_err(|e| format!("打开失败：{e}"))
 }

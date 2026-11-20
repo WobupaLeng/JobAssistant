@@ -367,9 +367,10 @@ class Store:
     # ---------- sensitive_jobs（敏感库 / 已抓取库） ----------
     def clear_sensitive(self) -> int:
         """把敏感库清空（界面上「清空」按钮用）。"""
-        with self._lock:
-            cur = self._conn().execute("DELETE FROM sensitive_jobs")
-            self._conn().commit()
+        # 走 per-thread 连接 + 事务：`_lock` / `_conn()` 是早期单连接实现残留，
+        # 本类已改成每线程独立连接（threading.local），继续引用会 AttributeError。
+        with self.tx() as c:
+            cur = c.execute("DELETE FROM sensitive_jobs")
             return cur.rowcount or 0
 
     def add_sensitive(

@@ -135,6 +135,8 @@ export interface Config {
   tokens_greet?: number
   tokens_score?: number
   profile: Record<string, any>
+  /** 上次开始抓取时选的条件，用来在界面上还原筛选面板 */
+  last_filter?: Record<string, any> | null
 }
 
 /** 排除规则：值为 null / 空数组 = 该项不排除 */
@@ -362,11 +364,11 @@ export const apiClient = {
 
   // ---- Boss 消息 ----
   chatFriends: (force = false) =>
-    api<{ ok: boolean; items: ChatFriend[]; error?: string }>(
+    api<{ ok: boolean; items: ChatFriend[]; error?: string; stale?: boolean; busy?: string; busy_for?: number }>(
       `/api/chat/friends?force=${force ? 'true' : 'false'}`,
     ),
   chatMessages: (uid: string, force = false) =>
-    api<{ ok: boolean; items: ChatMessage[]; error?: string }>(
+    api<{ ok: boolean; items: ChatMessage[]; error?: string; stale?: boolean; busy?: string; busy_for?: number }>(
       `/api/chat/messages?uid=${encodeURIComponent(uid)}&force=${force ? 'true' : 'false'}`,
     ),
   chatSend: (uid: string, text: string, jobId?: string | null) =>

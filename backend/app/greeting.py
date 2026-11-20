@@ -144,6 +144,23 @@ def rule_greeting(job: dict[str, Any], profile: dict[str, Any]) -> str:
     )
 
 
+def empty_content_reason(resp: Any, finish: str = "") -> str:
+    """把「空内容」翻译成人能看懂的失败原因（尤其是推理型模型的思考挤占预算）。
+
+    实测 deepseek-flash：max_tokens=400 时 completion_tokens_details.reasoning_tokens
+    可以正好等于 400，content 为空、finish_reason=length。
+    """
+    usage = getattr(resp, "usage", None)
+    details = getattr(usage, "completion_tokens_details", None) if usage is not None else None
+    reasoning = getattr(details, "reasoning_tokens", None) if details is not None else None
+    if finish == "length":
+        spent = f"，其中思考约 {reasoning} tokens" if reasoning else ""
+        return f"大模型返回了空内容（输出预算被思考过程耗尽{spent}；可在设置里换非推理模型，或调大最大输出）"
+    if reasoning:
+        return f"大模型返回了空内容（思考了约 {reasoning} tokens 但正文为空，finish={finish or '?'}）"
+    return f"大模型返回了空内容（finish={finish or '?'}）"
+
+
 class GreetingWriter:
     """调用 OpenAI 兼容接口生成打招呼语，返回正文 + token 消耗。"""
 
@@ -160,21 +177,33 @@ class GreetingWriter:
             return Greeting(text=rule_greeting(job, profile), tokens=0, source="rule", note="未配置大模型，使用规则话术")
         system, user = build_prompt(user_prompt, job, profile)
         try:
-            resp = self.llm._client.chat.completions.create(
-                model=self.llm.model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                temperature=0.7,
-                max_tokens=400,
-            )
-            raw = (resp.choices[0].message.content or "").strip()
+            # 输出预算：**推理型模型**（deepseek-flash / deepseek-reasoner 等）会先写
+            # reasoning_content，思考 token 也算进 max_tokens。原来给 400，实测思考就
+            # 吃掉 400 → content 为空、finish_reason=length，界面报「大模型返回了空内容」。
+            # 所以先给 1200；万一还是被截断，再加一次 3000 的预算重试。
+            resp = None
+            raw = ""
+            finish = ""
+            for budget in (1200, 3000):
+                resp = self.llm._client.chat.completions.create(
+                    model=self.llm.model,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    temperature=0.7,
+                    max_tokens=budget,
+                )
+                raw = (resp.choices[0].message.content or "").strip()
+                finish = getattr(resp.choices[0], "finish_reason", "") or ""
+                # 有正文就收；或者不是「被预算截断」，说明模型确实什么都没写，重试也没用
+                if raw or finish != "length":
+                    break
             usage = getattr(resp, "usage", None)
             tokens = int(getattr(usage, "total_tokens", 0) or 0) if usage is not None else 0
             text = _clean(raw)
             if not text:
-                raise ValueError("大模型返回了空内容")
+                raise ValueError(empty_content_reason(resp, finish))
             return Greeting(text=text, tokens=tokens, source="llm")
         except Exception as exc:  # noqa: BLE001 - 生成失败要给用户可见的原因
             return Greeting(

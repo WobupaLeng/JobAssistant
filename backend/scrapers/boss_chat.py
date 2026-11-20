@@ -557,6 +557,26 @@ class BossChat:
                 return n
             page.wait_for_timeout(300)
 
+    # ---------------- 缓存兜底（不碰浏览器）----------------
+
+    def cached_friends(self, max_age: float = 600.0) -> list[dict[str, Any]] | None:
+        """上次成功拉到的会话列表。抓取 JD 时浏览器被占用，界面上先用它顶着，
+        总比让用户看着「没有响应」或者列表被清空好。"""
+        with self._act_lock:
+            friends = list(self._friends)
+            age = time.time() - self._friends_at
+        if not friends or age > max_age:
+            return None
+        return [normalize_friend(f) for f in friends]
+
+    def cached_messages(self, uid: Any, max_age: float = 600.0) -> list[dict[str, Any]] | None:
+        """某个会话上次拉到的聊天记录（同上，抓取期间兜底用）。"""
+        cached = self._msgs.get(str(uid))
+        if not cached or time.time() - cached[0] > max_age:
+            return None
+        return [x for x in (normalize_message(m, self._my_id) for m in cached[1])
+                if (x.get("text") or "").strip()]
+
     # ---------------- 对外 API ----------------
 
     def friends(self, ctx, force: bool = False) -> list[dict[str, Any]]:

@@ -557,21 +557,31 @@ class LLMScorer:
 
     def score(self, job: dict[str, Any], profile: dict[str, Any] | None = None,
               filters: str = "") -> ScoreResult:
-        resp = self._client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_user_prompt(job, profile, filters)},
-            ],
-            temperature=0.2,
-            # 中文 reason 动辄上百字，300 token 会被截断成不完整的 JSON（实测 deepseek-flash）
-            max_tokens=800,
-        )
-        raw = (resp.choices[0].message.content or "").strip()
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": build_user_prompt(job, profile, filters)},
+        ]
+        resp = None
+        raw = ""
+        finish = ""
+        # 中文 reason 动辄上百字，300 token 会被截断成不完整的 JSON（实测 deepseek-flash）；
+        # 而且推理型模型（deepseek-flash / deepseek-reasoner）的思考 token 也算在
+        # max_tokens 里，800 会被思考吃光 → content 为空。先给 1600，被截断再加一次 3200。
+        for budget in (1600, 3200):
+            resp = self._client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=budget,
+            )
+            raw = (resp.choices[0].message.content or "").strip()
+            finish = getattr(resp.choices[0], "finish_reason", "") or ""
+            if raw or finish != "length":
+                break
         parsed = parse_llm_score(raw)
         if parsed is None:
-            raise ValueError(f"大模型返回无法解析为分数（finish={getattr(resp.choices[0], 'finish_reason', '?')}）：{raw[:200]}")
-        if getattr(resp.choices[0], "finish_reason", "") == "length" and "（输出被截断，理由可能不完整）" not in parsed.reason:
+            raise ValueError(f"大模型返回无法解析为分数（finish={finish or '?'}）：{raw[:200] or '（空内容）'}")
+        if finish == "length" and "（输出被截断，理由可能不完整）" not in parsed.reason:
             parsed.reason = (parsed.reason + "（输出被截断，理由可能不完整）")[:300]
         # 记录 token 消耗（用于界面累计展示）
         usage = getattr(resp, "usage", None)

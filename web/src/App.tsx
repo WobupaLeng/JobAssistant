@@ -259,13 +259,49 @@ export default function App() {
   const prefilterRef = useRef(5)
   // 累计 token：total=打分+生成，greet=生成打招呼部分
   const [tokens, setTokens] = useState({ total: 0, greet: 0, score: 0 })
+  // token 增长的浮动提示：哪一项涨了就在那一项上飘一个红色的「+N」，2 秒后淡出
+  type TokenKey = 'total' | 'score' | 'greet'
+  const [tokenBumps, setTokenBumps] = useState<
+    { id: number; key: TokenKey; delta: number; at: number }[]
+  >([])
+  const prevTokensRef = useRef<{ total: number; score: number; greet: number } | null>(null)
+  useEffect(() => {
+    const prev = prevTokensRef.current
+    prevTokensRef.current = { total: tokens.total, greet: tokens.greet, score: tokens.score }
+    if (!prev) return // 首次拿到的是累计值，不是「涨了」，不飘
+    const now = Date.now()
+    const adds: { id: number; key: TokenKey; delta: number; at: number }[] = []
+    for (const key of ['total', 'score', 'greet'] as const) {
+      const d = tokens[key] - prev[key]
+      if (d > 0) adds.push({ id: now + adds.length, key, delta: d, at: now })
+    }
+    if (adds.length) setTokenBumps((b) => [...b, ...adds])
+  }, [tokens.total, tokens.greet, tokens.score])
+  useEffect(() => {
+    if (!tokenBumps.length) return
+    const timer = window.setInterval(() => {
+      const alive = tokenBumps.filter((b) => Date.now() - b.at < 2000)
+      if (alive.length !== tokenBumps.length) setTokenBumps(alive)
+    }, 250)
+    return () => window.clearInterval(timer)
+  }, [tokenBumps])
+  const tokenBumpEls = (key: TokenKey) =>
+    tokenBumps
+      .filter((b) => b.key === key)
+      .map((b) => (
+        <span
+          key={b.id}
+          className="token-bump pointer-events-none absolute -top-3 left-0 whitespace-nowrap text-[11px] font-semibold text-rose-500"
+        >
+          +{b.delta.toLocaleString()}
+        </span>
+      ))
   // ---------- 自动打招呼 ----------
   const [autoOn, setAutoOn] = useState(false)
   const [autoPaused, setAutoPaused] = useState(false)
   const [autoTick, setAutoTick] = useState(0)
   const [autoCount, setAutoCount] = useState(0)
   const [autoFail, setAutoFail] = useState(0)
-  const [autoMsg, setAutoMsg] = useState('')
   const [autoBusy, setAutoBusy] = useState(false)
   // 「每日投递上限」当前值（改上限不重启循环，下一轮就生效）
   const maxJdRef = useRef(maxJd)
@@ -274,8 +310,30 @@ export default function App() {
   const autoOnRef = useRef(false)
   const autoPausedRef = useRef(false)
   const autoCountRef = useRef(0)
+  // 自动打招呼的提示/错误统一写进日志面板：以前挂在顶栏，长句会把按钮挤变形
+  const pushLog = useCallback(
+    (message: string, level: 'info' | 'warn' | 'error' = 'info') => {
+      setLogs((prev) =>
+        [...prev, { ts: Date.now() / 1000, level, message: `[打招呼] ${message}` }].slice(-500),
+      )
+    },
+    [],
+  )
   const autoFailRef = useRef(0)
   const autoInFlight = useRef(false)
+  // 下一条的预定发送时间 + 一个每秒跳动的时钟，用来显示「N 秒后发下一条」
+  const [autoNextAt, setAutoNextAt] = useState(0)
+  const [autoNow, setAutoNow] = useState(() => Date.now())
+  // 停止自动打招呼：把状态和 ref 一起清掉，避免定时器用旧 ref 再排一轮
+  const stopAuto = useCallback(
+    (message: string, level: 'info' | 'warn' | 'error' = 'warn') => {
+      autoOnRef.current = false
+      setAutoOn(false)
+      setAutoNextAt(0)
+      pushLog(message, level)
+    },
+    [pushLog],
+  )
   // 已经处理过（发送成功或被判定跳过）的岗位，避免在同一轮里反复撞同一个
   const autoDoneRef = useRef<Set<string>>(new Set())
   // 每发一条之间等几秒（防封号）：基础 20 秒 ± 5 秒
@@ -355,8 +413,7 @@ export default function App() {
         setRefreshTick((t) => t + 1)
         if (r.created) {
           setErr('')
-          setAutoMsg(`已向 ${j.company || '该公司'} 的 HR 发起沟通，右侧可以直接发消息`)
-          window.setTimeout(() => setAutoMsg(''), 5000)
+          pushLog(`已向 ${j.company || '该公司'} 的 HR 发起沟通，右侧可以直接发消息`)
         }
         return
       }
@@ -385,24 +442,18 @@ export default function App() {
 
     const tick = async () => {
       if (cancelled || autoInFlight.current) return
-      if (autoDoneRef.current.size >= maxJdRef.current) {
-        setAutoMsg(`已发满本轮上限 ${maxJdRef.current} 条，自动打招呼已停止`)
-        setAutoOn(false)
-        return
-      }
+      setAutoNextAt(0)
       try {
         autoInFlight.current = true
         setAutoBusy(true)
         const n = await apiClient.autoGreetNext()
         if (!n.ok) {
-          setAutoMsg(n.error || '取不到待投递岗位')
-          setAutoOn(false)
+          stopAuto(n.error || '取不到待投递岗位', 'error')
           return
         }
         const next = (n.items || []).find((x) => !autoDoneRef.current.has(x.job_id))
         if (!next) {
-          setAutoMsg('待投递列表已经发完了，自动打招呼已停止')
-          setAutoOn(false)
+          stopAuto('待投递列表已经发完了，自动打招呼已停止')
           return
         }
         const r = await apiClient.autoGreetOne(next.job_id)
@@ -414,18 +465,19 @@ export default function App() {
           autoFailRef.current = 0
           setAutoCount(autoCountRef.current)
           setAutoFail(0)
-          setAutoMsg(`刚发给「${r.company || next.company}」（${r.tokens ?? 0} token）`)
+          pushLog(`已发给「${r.company || next.company}」（${r.tokens ?? 0} token）`)
         } else if (r.skip) {
           // 跳过不算失败：这个岗位没有 HR 会话，按已处理记下来继续下一条
           autoDoneRef.current.add(next.job_id)
-          setAutoMsg(`跳过「${next.company}」：${r.error || ''}`)
+          pushLog(`跳过「${next.company}」：${r.error || ''}`, 'warn')
         } else {
           autoFailRef.current += 1
           setAutoFail(autoFailRef.current)
-          setAutoMsg(`「${next.company}」发送失败：${r.error || '未知原因'}`)
+          pushLog(`「${next.company}」发送失败：${r.error || '未知原因'}`, 'error')
           if (autoFailRef.current >= 3) {
             setAutoPaused(true)
-            setAutoMsg(`连续失败 3 次，已自动暂停：${r.error || ''}`)
+            autoPausedRef.current = true
+            pushLog(`连续失败 3 次，已自动暂停：${r.error || ''}`, 'error')
             return
           }
         }
@@ -433,10 +485,11 @@ export default function App() {
       } catch (e: any) {
         autoFailRef.current += 1
         setAutoFail(autoFailRef.current)
-        setAutoMsg(String(e?.message || e))
+        pushLog(String(e?.message || e), 'error')
         if (autoFailRef.current >= 3) {
           setAutoPaused(true)
-          setAutoMsg(`连续失败 3 次，已自动暂停：${String(e?.message || e)}`)
+          autoPausedRef.current = true
+          pushLog(`连续失败 3 次，已自动暂停：${String(e?.message || e)}`, 'error')
           return
         }
       } finally {
@@ -445,18 +498,29 @@ export default function App() {
         if (!cancelled && autoOnRef.current && !autoPausedRef.current) {
           // 每条之间留个随机间隔，别像机器人在刷屏
           const gap = AUTO_GAP_MS + (Math.random() * 10000 - 5000)
+          setAutoNextAt(Date.now() + gap)
           timer = window.setTimeout(tick, gap)
         }
       }
     }
 
+    setAutoNextAt(Date.now() + 400)
     timer = window.setTimeout(tick, 400)
     return () => {
       cancelled = true
       window.clearTimeout(timer)
+      setAutoNextAt(0)
     }
     // autoTick 只是「再来一轮」的信号
-  }, [autoOn, autoPaused, autoTick])
+  }, [autoOn, autoPaused, autoTick, stopAuto])
+
+  // 倒计时显示：跑着的时候每秒刷一次，让用户看见「还有几秒发下一条」
+  useEffect(() => {
+    if (!autoOn || autoPaused) return
+    const t = window.setInterval(() => setAutoNow(Date.now()), 1000)
+    return () => window.clearInterval(t)
+  }, [autoOn, autoPaused])
+  const autoNextIn = autoNextAt > autoNow ? Math.max(0, Math.round((autoNextAt - autoNow) / 1000)) : 0
 
   const toggleAuto = () => {
     const next = !autoOn
@@ -470,9 +534,11 @@ export default function App() {
       setAutoFail(0)
       setAutoPaused(false)
       autoPausedRef.current = false
-      setAutoMsg('自动打招呼已开启')
+      setAutoNow(Date.now())
+      pushLog('自动打招呼已开启（按待投递列表逐条发，发完自动停止）')
     } else {
-      setAutoMsg('')
+      setAutoNextAt(0)
+      pushLog('自动打招呼已关闭')
     }
   }
 
@@ -604,44 +670,86 @@ export default function App() {
     }
   }, [sensitiveKind])
 
+  // 上次「开始抓取」时选的那套筛选条件（关键词/城市/薪资/经验/学历/规模/阶段/行业/翻页…）
+  // 后端在 /api/start 时存进 app_config.last_filter，这里负责把它还原到界面上
+  const applyLastFilter = useCallback((lf: Record<string, any> | null | undefined) => {
+    if (!lf || typeof lf !== 'object') return
+    const arr = (v: any): string[] => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : [])
+    if (arr(lf.keywords).length) setKeywords(arr(lf.keywords))
+    if (arr(lf.platforms).length) setPlatforms(arr(lf.platforms))
+    if (typeof lf.city === 'string' && lf.city) setCity(lf.city)
+    if (Array.isArray(lf.salary)) setSalary(arr(lf.salary))
+    if (Array.isArray(lf.experience)) setExperience(arr(lf.experience))
+    if (Array.isArray(lf.degree)) setDegree(arr(lf.degree))
+    if (Array.isArray(lf.scale)) setScale(arr(lf.scale))
+    if (Array.isArray(lf.stage)) setStage(arr(lf.stage))
+    if (Array.isArray(lf.industry)) setIndustry(arr(lf.industry))
+    if (typeof lf.job_type === 'string' && lf.job_type) setJobType(lf.job_type)
+    if (typeof lf.max_pages === 'number' && lf.max_pages > 0) setMaxPages(lf.max_pages)
+    if (arr(lf.exclude_keywords).length) setExcludeText(arr(lf.exclude_keywords).join(','))
+  }, [])
+
   useEffect(() => {
     refresh()
-    apiClient
-      .getConfig()
-      .then((c) => {
-        setConfig(c)
-        setBaseUrl(c.base_url)
-        setModel(c.model)
-        setDark(c.theme === 'dark')
-        if (c.exclude_keywords?.length) setExcludeText(c.exclude_keywords.join(','))
-        if (c.exclude_rules) {
-          setVetoWords(c.exclude_rules.name_words || [])
-          setExclSalaryMin(c.exclude_rules.exclude_salary_min ?? null)
-          setExclSalaryMax(c.exclude_rules.exclude_salary_max ?? null)
-          setExclDegree(c.exclude_rules.exclude_degree || [])
-          setExclFoundedBelow(c.exclude_rules.exclude_founded_below ?? null)
-          setExclMaxYears(c.exclude_rules.exclude_resume_max_years ?? null)
-          setExclHrDays(c.exclude_rules.exclude_hr_active_days ?? null)
-          setWeekendRule(c.exclude_rules.weekend === 'double' ? 'double' : 'any')
-        }
-        if (typeof c.max_jd === 'number') setMaxJd(c.max_jd)
-        if (typeof c.greet_prompt === 'string') setGreetPrompt(c.greet_prompt)
-        if (typeof c.greet_prompt_default === 'string') setGreetPromptDefault(c.greet_prompt_default)
-        if (typeof c.skills === 'string') setSkills(c.skills)
-        if (c.score_mode === 'llm' || c.score_mode === 'rule') {
-          setScoreMode(c.score_mode)
-          scoreModeRef.current = c.score_mode
-        }
-        if (typeof c.llm_prefilter === 'number') {
-          setPrefilter(c.llm_prefilter)
-          prefilterRef.current = c.llm_prefilter
-        }
-        setTokens({ total: c.tokens_total ?? 0, greet: c.tokens_greet ?? 0, score: c.tokens_score ?? 0 })
-      })
-      .catch(() => {})
+    // 配置只取一次，但启动瞬间后端可能还没监听完（sidecar 比窗口晚就绪），
+    // 原来 catch 里直接吞掉错误 → 界面永远停在默认值上，看着像「没记住」。
+    // 现在失败就重试，直到拿到为止。
+    let cancelled = false
+    let timer = 0
+    let tries = 0
+
+    const applyConfig = (c: Config) => {
+      setConfig(c)
+      setBaseUrl(c.base_url)
+      setModel(c.model)
+      setDark(c.theme === 'dark')
+      if (c.exclude_keywords?.length) setExcludeText(c.exclude_keywords.join(','))
+      if (c.exclude_rules) {
+        setVetoWords(c.exclude_rules.name_words || [])
+        setExclSalaryMin(c.exclude_rules.exclude_salary_min ?? null)
+        setExclSalaryMax(c.exclude_rules.exclude_salary_max ?? null)
+        setExclDegree(c.exclude_rules.exclude_degree || [])
+        setExclFoundedBelow(c.exclude_rules.exclude_founded_below ?? null)
+        setExclMaxYears(c.exclude_rules.exclude_resume_max_years ?? null)
+        setExclHrDays(c.exclude_rules.exclude_hr_active_days ?? null)
+        setWeekendRule(c.exclude_rules.weekend === 'double' ? 'double' : 'any')
+      }
+      if (typeof c.max_jd === 'number') setMaxJd(c.max_jd)
+      if (typeof c.greet_prompt === 'string') setGreetPrompt(c.greet_prompt)
+      if (typeof c.greet_prompt_default === 'string') setGreetPromptDefault(c.greet_prompt_default)
+      if (typeof c.skills === 'string') setSkills(c.skills)
+      if (c.score_mode === 'llm' || c.score_mode === 'rule') {
+        setScoreMode(c.score_mode)
+        scoreModeRef.current = c.score_mode
+      }
+      if (typeof c.llm_prefilter === 'number') {
+        setPrefilter(c.llm_prefilter)
+        prefilterRef.current = c.llm_prefilter
+      }
+      setTokens({ total: c.tokens_total ?? 0, greet: c.tokens_greet ?? 0, score: c.tokens_score ?? 0 })
+      applyLastFilter(c.last_filter)
+    }
+
+    const loadConfig = async () => {
+      try {
+        const c = await apiClient.getConfig()
+        if (cancelled) return
+        applyConfig(c)
+      } catch {
+        if (cancelled || tries >= 60) return
+        tries += 1
+        timer = window.setTimeout(loadConfig, 1500)
+      }
+    }
+
+    loadConfig()
     const t = setInterval(refresh, 3000)
-    return () => clearInterval(t)
-  }, [refresh])
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+      clearInterval(t)
+    }
+  }, [refresh, applyLastFilter])
 
   // 岗位列表定时刷新（保持当前页与排序）
   useEffect(() => {
@@ -1104,25 +1212,76 @@ export default function App() {
             className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400"
             title="累计消耗 token，跨启动累加：合计 = 模型打分 + 打招呼生成"
           >
-            <span>
+            <span className="relative">
+              {tokenBumpEls('total')}
               累计 <b className="text-slate-700 dark:text-slate-200">{fmtTokens(tokens.total)}</b> token
             </span>
             <span className="text-slate-300 dark:text-slate-600">|</span>
-            <span title="模型打分消耗">
+            <span className="relative" title="模型打分消耗">
+              {tokenBumpEls('score')}
               模型打分 {fmtTokens(tokens.score)}
             </span>
             <span className="text-slate-300 dark:text-slate-600">|</span>
-            <span title="打招呼生成消耗">
+            <span className="relative" title="打招呼生成消耗">
+              {tokenBumpEls('greet')}
               打招呼 {fmtTokens(tokens.greet)}
             </span>
           </span>
           <button
-            className={`btn-ghost shrink-0 whitespace-nowrap ${autoOn ? '!bg-emerald-50 !text-emerald-700 dark:!bg-emerald-950 dark:!text-emerald-300' : ''}`}
+            className={`btn-ghost shrink-0 whitespace-nowrap ${
+              autoOn && !autoPaused
+                ? '!border-emerald-600 !bg-emerald-600 !text-white shadow-sm hover:!bg-emerald-700'
+                : autoOn && autoPaused
+                  ? '!border-amber-500 !bg-amber-500 !text-white shadow-sm hover:!bg-amber-600'
+                  : ''
+            }`}
             onClick={toggleAuto}
-            title="从「待投递」里逐条生成招呼语并发给 HR；发出去即标记为已投递"
+            title={
+              `从「待投递」里逐条生成招呼语并发给 HR；发出去即标记为已投递` +
+              (autoOn ? `｜本轮已发 ${autoCount} 条${autoFail ? `，连续失败 ${autoFail}` : ''}` : '') +
+              `｜待投递列表发完自动停止` +
+              (autoBusy ? '｜正在发送…' : '') +
+              '｜过程写在下方日志里'
+            }
           >
             自动打招呼 {autoOn ? '开' : '关'}
           </button>
+          {autoOn && (
+            /* 状态胶囊：跑着=绿色呼吸点，暂停=琥珀色；悬停看明细 */
+            <span
+              className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${
+                autoPaused
+                  ? 'bg-amber-50 text-amber-700 ring-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:ring-amber-800'
+                  : 'bg-emerald-50 text-emerald-700 ring-emerald-300 dark:bg-emerald-950 dark:text-emerald-300 dark:ring-emerald-800'
+              }`}
+              title={
+                `本轮已发 ${autoCount} 条` +
+                (autoFail ? `，连续失败 ${autoFail}` : '') +
+                (autoPaused ? '｜已暂停，点右侧「继续」' : autoBusy ? '｜正在发送这条…' : '｜待投递列表发完自动停止')
+              }
+            >
+              <span className="relative flex h-2 w-2 shrink-0">
+                {!autoPaused && (
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                )}
+                <span
+                  className={`relative inline-flex h-2 w-2 rounded-full ${
+                    autoPaused ? 'bg-amber-500' : 'bg-emerald-500'
+                  }`}
+                />
+              </span>
+              <span className="tabular-nums">
+                {autoPaused
+                  ? '已暂停'
+                  : autoBusy
+                    ? '发送中…'
+                    : autoNextIn > 0
+                      ? `${autoNextIn}s 后发下一条`
+                      : '准备中…'}
+              </span>
+              <span className="opacity-70 tabular-nums">· 已发 {autoCount} 条</span>
+            </span>
+          )}
           {autoOn && (
             <button
               className="btn-ghost shrink-0 whitespace-nowrap"
@@ -1130,21 +1289,16 @@ export default function App() {
                 const v = !autoPaused
                 autoPausedRef.current = v
                 setAutoPaused(v)
-                setAutoMsg(v ? '已暂停，点「继续」接着发' : '继续发送')
+                if (!v) {
+                  autoFailRef.current = 0
+                  setAutoFail(0)
+                  setAutoNow(Date.now())
+                }
+                pushLog(v ? '已暂停，点「继续」接着发' : '继续发送')
               }}
             >
               {autoPaused ? '继续' : '暂停'}
             </button>
-          )}
-          {autoOn && (
-            <span
-              className="max-w-[300px] shrink-0 truncate text-[11px] text-slate-500 dark:text-slate-400"
-              title={autoMsg}
-            >
-              {autoBusy ? '正在发…' : autoMsg}
-              {autoCount > 0 && `（已发 ${autoCount}`}
-              {autoCount > 0 && autoFail > 0 ? `，连续失败 ${autoFail}）` : autoCount > 0 ? '）' : ''}
-            </span>
           )}
           <button className="btn-ghost" onClick={() => setDrawer((v) => !v)}>
             {drawer ? '收起配置' : '配置'}
