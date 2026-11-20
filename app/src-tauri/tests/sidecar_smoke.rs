@@ -6,7 +6,7 @@
 //! 跑法（在仓库根）：
 //! ```text
 //! $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
-//! cd core
+//! cd app/src-tauri
 //! cargo test --test sidecar_smoke -- --ignored --nocapture
 //! ```
 //!
@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use jobassistant_app_lib::core::domain::job::Job;
 use jobassistant_app_lib::core::domain::profile::DEFAULT_PROFILE;
 use jobassistant_app_lib::core::sidecar::ingest::IngestConfig;
-use jobassistant_app_lib::core::sidecar::process::{locate_script_dir, SidecarConfig, SidecarError};
+use jobassistant_app_lib::core::sidecar::process::{locate_script_dir, SidecarConfig};
 use jobassistant_app_lib::core::sidecar::session::{NoSensitive, Ports, SessionUpdate, SidecarSession};
 
 fn repo_root() -> PathBuf {
@@ -57,6 +57,9 @@ fn sidecar_starts_handshakes_and_stops() {
     let sink = Ports::new(
         put,
         |_e: &jobassistant_app_lib::core::domain::job::SensitiveEntry<'_>| {},
+        // 冒烟只验控制通道，决策日志不接库；
+        // `record` 没有默认实现，这里必须显式写出来
+        |_n: &jobassistant_app_lib::core::sidecar::ingest::DecisionNote| {},
     );
 
     let t0 = Instant::now();
@@ -68,11 +71,10 @@ fn sidecar_starts_handshakes_and_stops() {
         NoSensitive,
     ) {
         Ok(s) => s,
-        // 环境没装 python 时不应判红：那是机器差异，不是代码缺陷
-        Err(SidecarError::Spawn { program, source }) => {
-            eprintln!("跳过：无法启动 {program}（{source}）");
-            return;
-        }
+        // **不允许**因为起不来就静默跳过：`Spawn` 只包住了「进程创建」这一步，
+        // 真正创建成功之后握手超时/协议错会走 `Handshake`/`Protocol` 分支并判红。
+        // 所以能执行到 `Spawn` 失败，「python 存在但不可用」与「代码坏了」长得一样；
+        // 一律判红，让门禁把问题暴露出来，而不是给一条薛定谔的绿灯。
         Err(e) => panic!("启动 sidecar 失败：{e}"),
     };
     eprintln!("ready 握手耗时 {:?}，pid={}", t0.elapsed(), session.pid());

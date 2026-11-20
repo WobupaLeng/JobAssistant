@@ -145,10 +145,16 @@ where
     }
 }
 
-/// 入库端口：写岗位 + 记敏感库。
+/// 入库端口：写岗位 + 记敏感库 + 记决策日志。
 ///
-/// 拆成两个方法而不是一个，是因为「已入库」与「被否决」在敏感库里是两种
-/// `kind`，而 session 层只知道本次结论、不该知道表结构。
+/// 拆成三个方法而不是一个，是因为「已入库」「被否决」在敏感库里是两种
+/// `kind`，而 session 层只知道本次结论、不该知道表结构；决策日志又是第三张表。
+///
+/// **三个方法都没有默认实现，这是刻意的。** 决策日志曾经整条写入链缺失
+/// （`jd_decisions` 里只有 `rescore` 一种 kind 有数据，界面一半是空的），
+/// 修法若留一个「默认什么都不做」的方法，任何新的实现忘写都照样编译通过、
+/// 测试照样绿灯，故障只是从「写错」变成「静默恒空」——同一个坑换个位置再踩一次。
+/// 忘写必须编译失败，这是唯一可靠的护栏。
 pub trait IngestPort: Send + 'static {
     /// 写一条达标岗位，返回 `false` 表示 `job_id` 已存在。
     fn put(&mut self, job: &Job) -> Result<bool, String>;
@@ -156,32 +162,31 @@ pub trait IngestPort: Send + 'static {
     fn remember(&mut self, entry: &SensitiveEntry<'_>);
     /// 记一条决策日志（`jd_decisions`），让界面能回答「这个岗位为什么被排除」。
     ///
-    /// 默认空实现：端口是「能收就收」的旁路，测试桩与不关心决策日志的调用方
-    /// 不必为此改签名。生产实现（`scrape::make_sink`）必须覆盖，否则决策日志
-    /// 在生产路径上**恒空**——这正是本次要修的 bug。
-    fn record(&mut self, _note: &DecisionNote) {}
+    /// 真不想记也必须显式写空实现，让 code review 看得见这是**做出的决定**，
+    /// 而不是**忘记的接线**。
+    fn record(&mut self, note: &DecisionNote);
 }
 
-/// 用两个闭包拼出 [`IngestPort`]，避免调用方为每种组合定义结构体。
-pub struct Ports<P, R, D = fn(&DecisionNote)> {
+/// 用三个闭包拼出 [`IngestPort`]，避免调用方为每种组合定义结构体。
+///
+/// 三个字段都是必填的：没有 `Default`，没有「少传一个就静默不记」的便利构造。
+/// 曾经有一个 `Ports::new(put, remember)` 省掉 `record`，那正是静默失效的入口。
+pub struct Ports<P, R, D> {
     pub put: P,
     pub remember: R,
-    /// 决策日志旁路；`None` 等价于「不记」
     pub record: D,
 }
 
-impl<P, R> Ports<P, R> {
-    /// 不记决策日志的端口（只写岗位 + 敏感库）。
-    pub fn new(put: P, remember: R) -> Self {
+impl<P, R, D> Ports<P, R, D> {
+    /// 三个闭包一个都不能少。参数顺序即字段顺序，漏写在编译期就报。
+    pub fn new(put: P, remember: R, record: D) -> Self {
         Ports {
             put,
             remember,
-            record: no_decision,
+            record,
         }
     }
 }
-
-fn no_decision(_note: &DecisionNote) {}
 
 impl<P, R, D> IngestPort for Ports<P, R, D>
 where
@@ -647,6 +652,8 @@ mod tests {
                     Ok(true)
                 },
                 |_: &SensitiveEntry<'_>| {},
+                // 本用例只验入库与记账；决策日志另有专测
+                |_: &DecisionNote| {},
             )
         };
         let icfg = IngestConfig {
@@ -679,7 +686,11 @@ mod tests {
     fn duplicate_is_counted_separately_from_inserted() {
         // insert_job 返回 false = job_id 已存在；此时不能计入 inserted，
         // 否则界面会显示「入库 10 条」而数据库一条没多
-        let mut sink = Ports::new(|_job: &Job| Ok(false), |_: &SensitiveEntry<'_>| {});
+        let mut sink = Ports::new(
+            |_job: &Job| Ok(false),
+            |_: &SensitiveEntry<'_>| {},
+            |_: &DecisionNote| {},
+        );
         let icfg = IngestConfig {
             min_score: 0,
             ..Default::default()
@@ -710,6 +721,7 @@ mod tests {
         let mut sink = Ports::new(
             |_job: &Job| Err("数据库只读".to_string()),
             |_: &SensitiveEntry<'_>| {},
+            |_: &DecisionNote| {},
         );
         let icfg = IngestConfig {
             min_score: 0,
@@ -747,6 +759,7 @@ mod tests {
                     Ok(true)
                 },
                 |_: &SensitiveEntry<'_>| {},
+                |_: &DecisionNote| {},
             )
         };
         let sj = ScrapedJob {
@@ -800,7 +813,11 @@ mod tests {
             tx,
             DEFAULT_PROFILE.clone(),
             IngestConfig::default(),
-            Ports::new(|_: &Job| Ok(false), |_: &SensitiveEntry<'_>| {}),
+            Ports::new(
+                |_: &Job| Ok(false),
+                |_: &SensitiveEntry<'_>| {},
+                |_: &DecisionNote| {},
+            ),
             NoSensitive,
             Arc::new(AtomicBool::new(false)),
         );
@@ -827,6 +844,7 @@ mod tests {
                     );
                     kept.lock().unwrap().push(line);
                 },
+                |_: &DecisionNote| {},
             )
         };
         // 必须用「只有看了 JD 才判得出来」的规则（外包/驻场关键词在 JD 里）：
@@ -867,6 +885,7 @@ mod tests {
                 move |_: &SensitiveEntry<'_>| {
                     rejected.fetch_add(1, Ordering::SeqCst);
                 },
+                |_: &DecisionNote| {},
             )
         };
         let progress = Arc::new(Mutex::new(ScrapeProgress::new()));

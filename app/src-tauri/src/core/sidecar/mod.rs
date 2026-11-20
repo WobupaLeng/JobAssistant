@@ -11,7 +11,7 @@ pub mod ingest;
 pub mod process;
 pub mod session;
 
-pub use ingest::{prepare, to_job, IngestConfig, IngestDetail, IngestVerdict};
+pub use ingest::{decision_note, prepare, to_job, DecisionNote, IngestConfig, IngestDetail, IngestVerdict};
 pub use process::{
     locate_script_dir, parse_line, protocol_line, SidecarConfig, SidecarError, SidecarEvent,
     SidecarHandle, DEFAULT_READY_TIMEOUT, PYTHON_ENV,
@@ -20,4 +20,4 @@ pub use protocol::{
     ChatMessage, Command, ErrorInfo, Event, Envelope, Expectation, Friend, ResumeItem, ScrapedJob,
     MAX_LINE_BYTES,
 };
-pub use session::{JobSink, ScrapeProgress, SessionUpdate, SidecarSession};
+pub use session::{IngestPort, JobSink, Ports, ScrapeProgress, SessionUpdate, SidecarSession};
