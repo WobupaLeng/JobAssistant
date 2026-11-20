@@ -1,0 +1,597 @@
+/* 分域样式：投递列表（页签 / 排序 / 批量条 / 三列卡片网格）与分数着色。 */
+
+/* ================================================================
+ * 一、投递列表：页签行
+ *
+ * 三个药丸（未投递 / 已投递 / 不投递）+ 一个「查看全部」开关 + 右侧排序。
+ * 药丸是「互斥的视图选择」，开关是「跨视图的补充条件」，两者视觉层级不同：
+ * 药丸实心、开关只是一行小字，避免用户把它们当成同一组单选。
+ * ================================================================ */
+
+.job-tabs-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.job-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.job-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 9px;
+  font-size: 11.5px;
+  font-weight: 520;
+  color: var(--text-2);
+  background: var(--glass-input);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.job-tab:hover {
+  color: var(--text-1);
+  border-color: var(--hairline-strong);
+}
+
+/* 选中态用实心主色：旧版待投递是绿色药丸，这里统一走 --primary，
+ * 深浅两套主题各自给 --primary 定过色，所以不能写死某一个绿。 */
+.job-tab.is-active {
+  color: var(--text-1);
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  box-shadow: inset 0 1px 0 var(--spec-top);
+}
+
+.job-tab-count {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.job-tab.is-active .job-tab-count {
+  color: var(--primary);
+}
+
+/* 「查看全部」开关：故意与药丸拉开距离（margin-left），
+ * 让人一眼看出它不是第四个页签。 */
+.job-all-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+  cursor: pointer;
+  user-select: none;
+}
+
+.job-all-toggle input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.job-all-toggle:hover {
+  color: var(--text-2);
+}
+
+/* ---------- 排序 ---------- */
+.job-sorts {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.job-sort-label {
+  margin-right: 4px;
+  font-size: 11px;
+}
+
+.job-sort {
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--text-3);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.job-sort:hover {
+  color: var(--text-1);
+  background: var(--glass-input);
+}
+
+.job-sort.is-active {
+  color: var(--text-1);
+  font-weight: 560;
+  background: var(--glass-input);
+}
+
+/* 箭头固定 10px 宽：不占位时按钮宽度会跳，三个排序键会左右抖动 */
+.job-sort-arrow {
+  display: inline-block;
+  width: 10px;
+  font-size: 10px;
+  color: var(--primary);
+}
+
+/* ================================================================
+ * 二、批量条
+ * ================================================================ */
+
+.job-batch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0 6px;
+  font-size: 11.5px;
+}
+
+.job-batch-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.job-batch-check input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.job-selected,
+.job-total {
+  font-variant-numeric: tabular-nums;
+}
+
+.job-batch-hint {
+  font-size: 10.5px;
+}
+
+/* ================================================================
+ * 三、卡片网格（旧版图 2）
+ *
+ * 旧版用的是 CSS 多列（`column-count: 3`），卡片按列从上往下排、高度不齐时
+ * 列高会像砖墙一样错落。这里保留同样的观感（列数 + 6px 列距 + 卡片下边距），
+ * 但用 grid 实现：grid 的行内对齐更可预测，且 `align-items: start` 就能让
+ * 每张卡片只占自己那一行的高度，不需要 `break-inside: avoid` 那种补丁。
+ * ================================================================ */
+
+.job-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  align-items: start;
+  min-width: 0;
+}
+
+/* 骨架与空态要横跨整行，否则会缩成三分之一宽的一条 */
+.job-grid > .empty-state,
+.job-grid.is-skeleton > .job-card {
+  grid-column: 1 / -1;
+}
+
+.job-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--glass-0);
+  box-shadow: inset 0 1px 0 var(--spec-top);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-glass),
+    border-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.job-card:hover {
+  background: var(--glass-input);
+  border-color: var(--hairline-strong);
+  transform: translateY(-1px);
+}
+
+.job-card.is-delivered {
+  border-color: var(--primary);
+}
+
+.job-card.is-rejected {
+  opacity: 0.72;
+}
+
+/* 骨架卡不需要交互反馈 */
+.job-card.is-skeleton {
+  cursor: default;
+  pointer-events: none;
+  gap: 6px;
+  min-height: 62px;
+}
+
+.job-card.is-skeleton:hover {
+  transform: none;
+  background: var(--glass-0);
+  border-color: var(--hairline);
+}
+
+/* ---------- 卡片内部的行 ---------- */
+.jc-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+/* 分数方块：旧版 `w-7`（28px）见方、加粗居中，是卡片里唯一的高饱和色块，
+ * 用来让用户扫视时先看到「这条值不值得点」。
+ * 着色档位由 Rust 的 `score_tier` 按**满分比例**算出（80%/60%/40%），
+ * 这里只负责把档位翻译成颜色，不做任何数值判断。 */
+.jc-score {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 20px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+  background: var(--glass-input);
+  border: 1px solid var(--hairline);
+}
+
+.jc-score.is-high {
+  color: #04170f;
+  background: var(--primary);
+  border-color: var(--primary-strong);
+}
+
+.jc-score.is-mid {
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+
+.jc-score.is-low {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: var(--warn);
+}
+
+.jc-score.is-bad {
+  color: var(--bad);
+  background: var(--bad-soft);
+  border-color: var(--bad);
+}
+
+/* 未打分 / 已投递：退成灰底，不再抢视线 */
+.jc-score.is-none,
+.jc-score.is-done {
+  color: var(--text-3);
+  background: var(--glass-input);
+  border-color: var(--hairline);
+}
+
+.jc-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 560;
+  color: var(--text-1);
+}
+
+/* 已投递的标题划掉：一眼区分「已经投过了」，不用读状态 chip */
+.jc-title.is-done {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-3);
+}
+
+/* 勾选 / 已投递按钮：平时是灰圈，已投递变实心绿 */
+.jc-check {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  font-size: 10px;
+  line-height: 1;
+  color: transparent;
+  background: transparent;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.jc-check:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.jc-check.is-on {
+  color: var(--text-1);
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.jc-sub {
+  font-size: 11px;
+}
+
+.jc-company {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+
+/* 薪资是卡片里第二重要的信息：加粗、用正文色 */
+.jc-salary {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 640;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}
+
+/* 平台与状态 chip 在卡片里要更小：卡片只有 1/3 屏宽，
+ * 20px 的 chip 会把公司名挤没 */
+.jc-sub .chip {
+  height: 16px;
+  padding: 0 5px;
+  font-size: 9.5px;
+}
+
+.jc-meta {
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+/* 元信息用中点分隔，比竖线更轻；不用 border-left 是为了让折行时不出现孤立竖线 */
+.jc-meta-items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.jc-meta-item + .jc-meta-item::before {
+  content: "｜";
+  margin: 0 3px;
+  color: var(--hairline-strong);
+}
+
+.jc-time {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.jc-foot {
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.jc-hint {
+  flex: 0 0 auto;
+}
+
+.jc-foot .chip.as-btn {
+  height: 16px;
+  padding: 0 6px;
+  font-size: 9.5px;
+}
+
+/* 地址是卡片里最长的自由文本：给它左弹性 + 省略号，
+ * 且不让它把「不投递」按钮挤到换行。 */
+.jc-addr {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 52%;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.jc-pin {
+  margin-right: 2px;
+}
+
+/* 窄窗降成两列 / 一列：三列在 900px 以下每张卡只剩 ~280px，
+ * 公司名与地址会全被省略号吃掉。 */
+@media (max-width: 1180px) {
+  .job-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  .job-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ================================================================
+ * 四、表格（保留给兼容表与其它页使用）
+ * ================================================================ */
+
+/* ---------- 表格容器 ----------
+ * `max-height` + overflow: 表头 sticky 才能生效。
+ * 表格用 `table-layout: fixed` 防止长公司名把整列撑开（列宽由 col 定义）。 */
+.table-wrap {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--glass-0);
+  overflow: auto;
+  max-height: 420px;
+  position: relative;
+}
+
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  font-size: 12.5px;
+}
+
+/* ---------- 表头 ----------
+ * sticky 表头必须不透明（或足够糊），否则滚动时会看到文字互相穿透。
+ * 这里用 glass-2 + blur，既挡住下面又保留玻璃质感。 */
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 560;
+  color: var(--text-3);
+  white-space: nowrap;
+  background: var(--glass-2);
+  backdrop-filter: blur(var(--blur-3)) saturate(var(--saturate-2));
+  -webkit-backdrop-filter: blur(var(--blur-3)) saturate(var(--saturate-2));
+  border-bottom: 1px solid var(--hairline);
+}
+
+.table tbody td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--hairline);
+  color: var(--text-2);
+  vertical-align: middle;
+}
+
+/* 最后一行不要下边线：容器已有圆角边框，多一条会显得底边加粗 */
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* 行悬停：只提亮底色，不做位移（表格里行高变化会引起整表重排） */
+.table tbody tr {
+  transition: background var(--dur-fast) var(--ease-glass);
+}
+
+.table tbody tr:hover {
+  background: var(--glass-input);
+}
+
+.table tbody tr.is-selected {
+  background: var(--primary-soft);
+}
+
+.table tbody tr.is-rejected td {
+  opacity: 0.72;
+}
+
+.table tbody tr {
+  cursor: pointer;
+}
+
+/* ---------- 列宽 ----------
+ * 分数固定窄列（数字恒定 2-3 位），岗位占最大权重，来源最短。 */
+.col-score {
+  width: 62px;
+  text-align: center !important;
+}
+
+.col-source {
+  width: 76px;
+  text-align: right !important;
+}
+
+.cell-title {
+  color: var(--text-1);
+  font-weight: 560;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 通用省略：必须配 title 属性，否则长公司名截断后无从查看 */
+.cell-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 选中行左侧的绿色标尺（旧版 `box-shadow: inset 3px 0 0 var(--primary)`）：
+ * 抽屉打开时，左侧列表里「看的是哪一条」要一眼可见。 */
+.table tbody tr.is-selected td:first-child {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+/* 骨架条是表头以下的占位行，不需要指针反馈 */
+.table tbody tr.skeleton-row {
+  cursor: default;
+  pointer-events: none;
+}
+
+/* 空态单元格：旧版 `.empty { padding: 36px 20px; text-align: center }`，
+ * 比 layout.css 里给 `.empty-state` 的 18px 更松，因为它是整张表里的唯一内容。 */
+.table tbody td.empty {
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.8;
+  white-space: normal;
+}
+
+/* ---------- 分数着色 ----------
+ * 三个状态：达门槛（绿）、低于门槛（红）、未打分（灰）。
+ * **门槛必须来自 Rust 下发的 score_min_default**，这里的颜色规则不做任何假设。 */
+.score-num {
+  display: inline-block;
+  min-width: 30px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 680;
+  font-size: 13px;
+  text-align: center;
+  letter-spacing: 0.2px;
+}
+
+.score-num.is-pass {
+  color: var(--primary);
+  text-shadow: 0 0 12px rgba(16, 185, 129, 0.35);
+}
+
+.score-num.is-fail {
+  color: var(--bad);
+  text-shadow: 0 0 12px rgba(248, 81, 73, 0.28);
+}
+
+.score-num.is-none {
+  color: var(--text-3);
+  font-weight: 500;
+}

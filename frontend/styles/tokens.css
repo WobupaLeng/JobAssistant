@@ -1,0 +1,251 @@
+/* ============================================================================
+ * Liquid Glass 设计令牌
+ *
+ * 设计语言：Apple「Liquid Glass」。玻璃不是「半透明色块」，而是三件事的合成：
+ *   1. 折射（refraction）—— 背景被弯曲，边缘位移最大、中心几乎不位移
+ *   2. 高光（specular）  —— 玻璃有厚度，迎光边缘出现 1px 亮线
+ *   3. 散射（scatter）   —— 光穿过玻璃后带上材质色，内部不是纯灰
+ *
+ * 三层实现分工（用户选定的方案 C）：
+ *   · 亚克力层：`window-vibrancy` 由 Rust 侧施加，负责「透出桌面」——本文件不参与
+ *   · CSS 层：本文件。`backdrop-filter` 模糊 + 渐变高光边框 + 内外阴影
+ *   · WebGL 层：`glass.js`。只渲染**卡片之间**的真折射（抽屉盖列表、气泡盖背景），
+ *     因为系统合成层在前端 `readPixels` 里读不到，桌面本身折射不了
+ *
+ * 深浅两套**不共用数值**，只共用变量名。理由：深色底上玻璃靠「边缘发光」立起来，
+ * 浅色底上玻璃靠「投影分层」立起来——同一组 alpha 在两种底上会得出完全不同的观感，
+ * 浅色下高光给多了会显脏。
+ * ========================================================================== */
+
+:root {
+  /* ---------- 玻璃底色 ----------
+   * 越靠前的层越亮（surface-0 是页面底板，最暗最透）。
+   * alpha 全部 < 0.8，否则亚克力透不出来，窗口会变成一块死色。 */
+  --glass-0: rgba(10, 15, 26, 0.30);
+  --glass-1: rgba(18, 24, 38, 0.52);
+  --glass-2: rgba(30, 39, 58, 0.58);
+  --glass-3: rgba(42, 53, 76, 0.70);
+  --glass-input: rgba(8, 12, 20, 0.40);
+
+  /* ---------- 模糊强度 ----------
+   * 分层递减：底板要糊得狠一点才藏得住桌面细节，越靠上的层越清晰（有层次）。
+   * 同一个 blur 值给所有层，玻璃会变成一片糊在一起的塑料。 */
+  --blur-0: 18px;
+  --blur-1: 24px;
+  --blur-2: 18px;
+  --blur-3: 12px;
+  --blur-pop: 30px; /* 抽屉 / 弹层：脱离页面，糊得更狠 */
+
+  /* ---------- 饱和度补偿 ----------
+   * backdrop-filter 模糊会把颜色往灰里带，饱和度要补回来，否则透出来的是「脏雾」。 */
+  --saturate-0: 1.4;
+  --saturate-1: 1.6;
+  --saturate-2: 1.5;
+
+  /* ---------- 折射位移 ----------
+   * WebGL 层与 SVG 滤镜共用。值 = 边缘最大像素位移。
+   * 深色下可以给大一点（暗部容得下形变），浅色下超过 8px 就开始发晕。 */
+  --refract-edge: 14px;
+  --refract-turbulence: 0.008;
+
+  /* ---------- 高光 ----------
+   * Liquid Glass 的辨识度主要来自这两条线：
+   * `--spec-top` 是迎光的上边缘（白），`--spec-bottom` 是背光的下边缘（几乎不可见）。
+   * 用 inset box-shadow 画而不是 border：border 会占位改变布局，inset shadow 不会。 */
+  --spec-top: rgba(255, 255, 255, 0.22);
+  --spec-bottom: rgba(255, 255, 255, 0.04);
+  --spec-side: rgba(255, 255, 255, 0.08);
+  --spec-strength: 1;
+
+  /* ---------- 材质散射色 ----------
+   * 光穿过主色玻璃后的染色。极淡的青绿，让玻璃「有材质」而不是纯灰。 */
+  --glass-tint: rgba(16, 185, 129, 0.05);
+  --glass-tint-strong: rgba(16, 185, 129, 0.10);
+
+  /* ---------- 描边 ---------- */
+  --hairline: rgba(255, 255, 255, 0.10);
+  --hairline-strong: rgba(255, 255, 255, 0.18);
+
+  /* ---------- 文字层级 ---------- */
+  --text-1: #e8eef7;
+  --text-2: rgba(232, 238, 247, 0.72);
+  --text-3: rgba(232, 238, 247, 0.48);
+
+  /* ---------- 配色 ----------
+   * 主色沿用 PRD 3.1 的翡翠绿，辅助色科技蓝。玻璃下这四色要更亮一档，
+   * 因为 backdrop 已经把对比度压掉了。 */
+  --primary: #10b981;
+  --primary-strong: #059669;
+  --primary-soft: rgba(16, 185, 129, 0.16);
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, 0.18);
+  --good: #3fb950;
+  --warn: #d29922;
+  --warn-soft: rgba(210, 153, 34, 0.16);
+  --bad: #f85149;
+  --bad-soft: rgba(248, 81, 73, 0.16);
+  --muted: #8b949e;
+
+  /* ---------- 圆角 ----------
+   * Liquid Glass 的圆角比常规 UI 大：玻璃边缘要留出高光宽度。
+   * 8px 圆角配 1px 高光等于没有玻璃厚度。 */
+  --radius-sm: 10px;
+  --radius: 16px;
+  --radius-lg: 22px;
+  --radius-pill: 999px;
+
+  /* ---------- 投影 ----------
+   * 两层：贴身的窄影定形（near），远处的宽影分层（far）。
+   * 只有一层会让玻璃像纸片贴在背景上。 */
+  --shadow-near: 0 2px 8px rgba(0, 0, 0, 0.22);
+  --shadow-far: 0 16px 48px rgba(0, 0, 0, 0.34);
+  --shadow-card: var(--shadow-near), var(--shadow-far);
+  --shadow-pop: 0 4px 16px rgba(0, 0, 0, 0.28), 0 32px 80px rgba(0, 0, 0, 0.5);
+
+  /* ---------- 内阴影 ----------
+   * 玻璃内部不是平的：上沿有一道向下的散射光，下沿有一道回光。
+   * 这两道是「厚度感」的来源，比高光边框更重要。 */
+  --inner-light: inset 0 1px 0 0 var(--spec-top),
+    inset 0 -1px 0 0 var(--spec-bottom);
+  --inner-scatter: inset 0 24px 48px -32px rgba(255, 255, 255, 0.10);
+
+  /* ---------- 动效 ----------
+   * Liquid Glass 的动画要「慢且带惯性」：苹果那套普遍 320-420ms、非线性。
+   * 低于 200ms 会显得像老式 UI 的瞬时跳变。 */
+  --ease-glass: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 160ms;
+  --dur: 320ms;
+  --dur-slow: 420ms;
+
+  --font-sans: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+}
+
+/* ============================================================================
+ * 浅色主题
+ *
+ * 与深色**不共用数值**。浅底上玻璃的立起来方式完全不同：
+ *   · 高光要减到几乎看不见（--spec-top 0.22 → 0.9 会显脏，正确做法是提高但不发白）
+ *   · 投影要加重（浅底没有暗部托住，全靠影子分层）
+ *   · 模糊要更强（浅底透出桌面细节更刺眼，糊不狠会眼晕）
+ *   · 折射位移要减小（浅底上形变容易看成「画面有脏点」）
+ * ========================================================================== */
+[data-theme='light'] {
+  --glass-0: rgba(255, 255, 255, 0.24);
+  --glass-1: rgba(255, 255, 255, 0.62);
+  --glass-2: rgba(255, 255, 255, 0.74);
+  --glass-3: rgba(255, 255, 255, 0.86);
+  --glass-input: rgba(255, 255, 255, 0.70);
+
+  /* 浅底更刺眼：模糊与饱和度都要更狠 */
+  --blur-0: 24px;
+  --blur-1: 30px;
+  --blur-2: 24px;
+  --blur-3: 16px;
+  --blur-pop: 36px;
+  --saturate-0: 1.7;
+  --saturate-1: 1.8;
+  --saturate-2: 1.7;
+
+  /* 浅底上形变看着像脏点，位移砍到 1/3 */
+  --refract-edge: 5px;
+  --refract-turbulence: 0.006;
+
+  /* 高光改色不改量：浅底用近白但不纯白，纯白高光在白卡上等于没有 */
+  --spec-top: rgba(255, 255, 255, 0.95);
+  --spec-bottom: rgba(15, 23, 42, 0.04);
+  --spec-side: rgba(15, 23, 42, 0.05);
+  --spec-strength: 0.7;
+
+  --glass-tint: rgba(16, 185, 129, 0.04);
+  --glass-tint-strong: rgba(16, 185, 129, 0.08);
+
+  --hairline: rgba(15, 23, 42, 0.10);
+  --hairline-strong: rgba(15, 23, 42, 0.16);
+
+  --text-1: #0f172a;
+  --text-2: rgba(15, 23, 42, 0.72);
+  --text-3: rgba(15, 23, 42, 0.50);
+
+  --primary-soft: rgba(16, 185, 129, 0.14);
+  --accent-soft: rgba(37, 99, 235, 0.12);
+  --warn-soft: rgba(210, 153, 34, 0.14);
+  --bad-soft: rgba(248, 81, 73, 0.12);
+
+  /* 浅底投影必须更重：没有暗部托住，轻影会让卡片「浮不起来」 */
+  --shadow-near: 0 1px 3px rgba(15, 23, 42, 0.10);
+  --shadow-far: 0 14px 40px rgba(15, 23, 42, 0.16);
+  --shadow-pop: 0 4px 14px rgba(15, 23, 42, 0.12), 0 28px 72px rgba(15, 23, 42, 0.24);
+
+  --inner-light: inset 0 1px 0 0 var(--spec-top),
+    inset 0 -1px 0 0 var(--spec-bottom);
+  --inner-scatter: inset 0 20px 40px -30px rgba(255, 255, 255, 0.9);
+}
+
+/* ============================================================================
+ * 基础重置
+ * ========================================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  /* 必须透明：窗口的亚克力由 Rust 侧合成，这里任何不透明底色都会把它吃掉 */
+  background: transparent;
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--primary-soft);
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--hairline-strong);
+  border-radius: var(--radius-pill);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
+}
+
+/* 无障碍：读屏可见、肉眼不可见。
+ * **必须用 clip 不能用 display:none**——后者会让 Playwright 的 inner_text 取不到，
+ * `tools/gui_e2e.py` 的 PROGRESS_RE 依赖这个连排摘要解析抓取计数。 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

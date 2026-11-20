@@ -1,0 +1,798 @@
+/* ============================================================================
+ * 页面级样式：Boss 消息 / 配置 / 决策记录
+ *
+ * 数值全部取自旧版 `skeleton-web/src/styles/chat.css` 与 `config.css`
+ * （逐项抄写，不重新设计）：.chat-grid 的 280px + 1fr、.bubble 的 76%、
+ * .config-card 的圆角与间距等。改数值前先去旧版对照，别凭观感调。
+ *
+ * 注意：本文件必须只用 `/* */` 注释——`//` 不是 CSS 注释，会让整份样式表失效。
+ * ========================================================================== */
+
+/* ============================================================================
+ * 1. Boss 消息
+ * ========================================================================== */
+
+.chat-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+/* 左栏固定 280px：比这更窄时「未读角标 + 时间」会换行 */
+.chat-grid {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 12px;
+  height: 520px;
+  min-height: 0;
+}
+
+.chat-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.chat-skeleton {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  padding-right: 2px;
+  min-height: 0;
+}
+
+.chat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 9px 11px;
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--glass-1);
+  color: var(--text-1);
+  transition:
+    background var(--dur-fast) var(--ease-glass),
+    border-color var(--dur-fast) var(--ease-glass);
+}
+
+.chat-item:hover {
+  background: var(--glass-2);
+  border-color: var(--hairline-strong);
+}
+
+.chat-item.is-active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+
+.chat-item-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.chat-item-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-item-time {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-item-sub {
+  font-size: 11.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.chat-item-company {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unread {
+  flex: 0 0 auto;
+  min-width: 17px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--bad);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.chat-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.chat-head-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chat-head-name {
+  font-size: 13.5px;
+  font-weight: 620;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-head-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-head-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-feed {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 4px 2px;
+  min-height: 0;
+}
+
+.bubble-row {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.bubble-row.is-me {
+  justify-content: flex-end;
+}
+
+.bubble-row.is-system {
+  justify-content: center;
+}
+
+.bubble {
+  max-width: 76%;
+  padding: 8px 11px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--glass-2);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bubble-row.is-me .bubble {
+  background: var(--primary-soft);
+  border-color: rgba(16, 185, 129, 0.42);
+}
+
+.bubble-row.is-system .bubble {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.bubble-time {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--text-3);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.bubble-recall {
+  font-style: italic;
+  color: var(--text-3);
+}
+
+/* 对方正在输入：居中的一句灰字，不做成气泡（它不是一个消息） */
+.bubble-typing {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 2px 0;
+}
+
+/* ---- 打招呼草稿 ---- */
+
+.greet-box {
+  border: 1px solid rgba(16, 185, 129, 0.34);
+  border-radius: var(--radius-sm);
+  background: var(--glass-1);
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.greet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-label {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.greet-text {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-1);
+  white-space: pre-wrap;
+}
+
+.greet-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---- 简历条 ---- */
+
+.resume-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--glass-1);
+}
+
+/* ---- 输入区 ---- */
+
+.chat-send {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.chat-input {
+  flex: 1 1 auto;
+  min-height: 52px;
+  max-height: 160px;
+  resize: vertical;
+}
+
+.chat-send .btn {
+  flex: 0 0 auto;
+  height: 32px;
+}
+
+.chat-wrap .error-bar {
+  margin-top: 8px;
+}
+
+/* 窄屏：左栏收窄，再到单列上下排布 */
+@media (max-width: 1180px) {
+  .chat-grid {
+    grid-template-columns: 220px 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .chat-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(140px, 30%) 1fr;
+    height: 620px;
+  }
+
+  .bubble {
+    max-width: 88%;
+  }
+}
+
+/* ============================================================================
+ * 2. 配置
+ * ========================================================================== */
+
+.config-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.config-tools {
+  padding: 9px 14px;
+}
+
+.config-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.config-card {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--glass-1);
+  overflow: hidden;
+}
+
+.config-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 13px;
+  cursor: pointer;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+}
+
+.config-head:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.config-title {
+  font-size: 12.5px;
+  font-weight: 620;
+}
+
+/* 旧版用 ▸ 旋转 90° 表示展开，不用字符替换，避免字体差异 */
+.chevron {
+  width: 0;
+  height: 0;
+  flex: 0 0 auto;
+  border-left: 5px solid var(--text-3);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform var(--dur-fast) var(--ease-glass);
+}
+
+.chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.config-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 13px 13px;
+  border-top: 1px solid var(--hairline);
+}
+
+.cfg-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.cfg-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.cfg-field {
+  min-width: 0;
+}
+
+.cfg-value {
+  font-size: 18px;
+  font-weight: 640;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.cfg-value-sm {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.cfg-hint {
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+@media (max-width: 900px) {
+  .cfg-grid,
+  .cfg-grid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ============================================================================
+ * 3. 决策记录
+ * ========================================================================== */
+
+.log-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.log-tools {
+  align-items: center;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.log-search {
+  width: 220px;
+  flex: 0 0 auto;
+}
+
+.log-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+
+.log-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 8px;
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 560;
+  color: var(--text-3);
+  letter-spacing: 0.03em;
+  background: var(--glass-2);
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+
+.log-table tbody td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: middle;
+}
+
+.log-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.log-row.is-rejected td {
+  color: var(--text-2);
+}
+
+.log-time {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.log-company {
+  font-size: 12px;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.log-title {
+  font-size: 10.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.log-score {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-old {
+  color: var(--text-3);
+}
+
+.log-arrow {
+  margin: 0 4px;
+  color: var(--text-3);
+}
+
+.score-num {
+  font-weight: 620;
+}
+
+.score-num.is-pass {
+  color: var(--primary);
+}
+
+.score-num.is-fail {
+  color: var(--bad);
+}
+
+.score-num.is-none {
+  color: var(--text-3);
+}
+
+.log-reason {
+  color: var(--text-2);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.log-table td.empty {
+  padding: 22px 8px;
+  text-align: center;
+  color: var(--text-3);
+}
+
+/* ============================================================================
+ * 4. 日志页：运行日志 + 决策日志双视图（用户裁决第 ⑦ 条）
+ *
+ * 只追加，不改上面既有规则。背景一律透明/半透明玻璃令牌——页面根容器
+ * 不得有不透明底色，否则 WebView 的亚克力层会被整块吃掉。
+ * 注意：本文件禁止 //! 与 /// 注释（Rust 语法会让整份样式表被静默丢弃）。
+ * ========================================================================== */
+
+.log-wrap {
+  /* 页面本体：透明，只有卡片自己是玻璃 */
+  background: transparent;
+  min-height: 0;
+}
+
+.log-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 10px;
+}
+
+.log-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  background: transparent;
+}
+
+.log-tools {
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.log-count {
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.log-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* 自动刷新开关：原生 checkbox 太小，套一层玻璃卡片给它一点体积 */
+.log-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: var(--glass-input);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color var(--dur) var(--ease-glass),
+    color var(--dur) var(--ease-glass);
+}
+
+.log-auto:hover {
+  color: var(--text-1);
+  border-color: var(--hairline-strong);
+}
+
+.log-auto input {
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+/* 清空二次确认：就地展开，不弹模态（模态会盖住用户正要看的日志上下文） */
+.log-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--bad);
+  background: var(--bad-soft);
+}
+
+.log-confirm-text {
+  font-size: 11.5px;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+
+.log-inline-error {
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bad);
+  background: var(--bad-soft);
+  color: var(--text-1);
+  font-size: 12px;
+}
+
+/* ---------- 运行日志 ---------- */
+
+.run-log-box {
+  display: flex;
+  flex-direction: column;
+  min-height: 260px;
+  max-height: 58vh;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--glass-input);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.65;
+  /* 等宽数字：时间列不会因为分钟位数抖动而左右跳 */
+  font-variant-numeric: tabular-nums;
+}
+
+.run-log-line {
+  display: grid;
+  grid-template-columns: 88px 46px minmax(0, 1fr);
+  gap: 8px;
+  padding: 1px 4px;
+  border-radius: 6px;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.run-log-line:hover {
+  background: var(--glass-3);
+}
+
+.run-log-time {
+  color: var(--text-3);
+}
+
+.run-log-level {
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.run-log-line.is-warn .run-log-level,
+.run-log-line.is-warn .run-log-msg {
+  color: var(--warn);
+}
+
+.run-log-line.is-error .run-log-level,
+.run-log-line.is-error .run-log-msg {
+  color: var(--bad);
+}
+
+.run-log-line.is-error {
+  background: var(--bad-soft);
+}
+
+.run-log-msg {
+  color: var(--text-1);
+}
+
+/* ---------- 决策日志 ---------- */
+
+.log-kind {
+  white-space: nowrap;
+}
+
+.log-job {
+  max-width: 240px;
+}
+
+.log-reason.is-empty {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.log-score-val {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.log-score-val.is-up {
+  color: var(--good);
+}
+
+.log-score-val.is-down {
+  color: var(--bad);
+}
+
+.log-score-val.is-same {
+  color: var(--text-2);
+}
+
+.log-score-val.is-none {
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+.log-row.is-bad td {
+  color: var(--text-2);
+}
+
+@media (max-width: 720px) {
+  .run-log-line {
+    grid-template-columns: 74px 40px minmax(0, 1fr);
+    font-size: 11px;
+  }
+}

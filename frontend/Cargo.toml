@@ -1,0 +1,42 @@
+[package]
+name = "aja-frontend"
+version = "0.1.0"
+edition = "2021"
+description = "AI 求职助手 · Leptos 前端（编译为 WASM，跑在 Tauri WebView 内）"
+
+# trunk 需要**可执行的 wasm 产物**才能生成 `index.html` 里的
+# `<link rel="modulepreload">` + `<script type="module">`。
+# 只声明 `[lib]` 时 cargo 产出 `aja_frontend.wasm`（库），trunk 报
+# `cargo artifacts not found for target crate` —— 它找的是 bin 的 wasm。
+# 因此入口放在 `src/main.rs`，由 manifest 显式声明为 bin。
+[[bin]]
+name = "aja-frontend"
+path = "src/main.rs"
+
+[dependencies]
+leptos = { version = "0.8", features = ["csr"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# JsValue <-> Rust 结构体的转换。参数一律传对象，因此只需要 map 支持，
+# 不需要序列化 enum 的复杂表示。
+serde-wasm-bindgen = "0.6"
+# Tauri 2 的 JS API 等价物。WASM 侧不能直接 `use tauri::`（那是 host 侧），
+# 必须走 `window.__TAURI_INTERNALS__.invoke`，这个 crate 把它包装成 Rust API。
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "HtmlElement",
+    "Storage",
+    "Location",
+    # `read_initial_theme()` 要用 `window.matchMedia("(prefers-color-scheme: light)")`
+    "MediaQueryList",
+] }
+console_error_panic_hook = "0.1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"

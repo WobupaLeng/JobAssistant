@@ -1,0 +1,295 @@
+/* 分域样式：敏感库右侧滑出抽屉。
+ *
+ * 中枢修正令（覆盖旧版图 1 的居中浮层）：宽度 `min(1040px, 72vw)`，
+ * 从右侧滑入，`translateX(100%) → 0` 过渡 220ms；遮罩点击关闭、Esc 关闭。
+ * 其余结构（标题行、工具行七个按钮、三列卡片网格、卡片四段、移出按钮）照旧。
+ *
+ * 颜色一律走 tokens.css 的变量；本文件里的字面值只有 rgba(0,0,0,·) 遮罩色。
+ *
+ * 结构：
+ *   .sensitive-backdrop  全屏遮罩（点击关闭）
+ *   .sensitive-panel     右侧抽屉（收起 = translateX(100%)，打开 = 0）
+ *   .sensitive-head      标题行
+ *   .sensitive-tools     工具行（搜索 / 筛选 / 全选 / 移出所选）
+ *   .sensitive-body      唯一滚动容器
+ *   .sensitive-grid      三列（窄屏递减）卡片网格
+ *   .sensitive-card      单张卡片
+ */
+
+.sensitive-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.32);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  opacity: 1;
+  transition: opacity 220ms var(--ease-glass);
+}
+
+/* 抽屉主体：贴右边缘、满高。
+ * z-index 51 > 遮罩 50 > 岗位详情抽屉 41——两者由页面层保证互斥，
+ * 万一动画尾帧重叠，后打开的（敏感库）压在上面更符合直觉。
+ * `will-change: transform` 让 220ms 的平移动画走合成层，不逐帧重排。 */
+.sensitive-panel {
+  position: fixed;
+  z-index: 51;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(1040px, 72vw);
+  max-width: 100vw;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  background: var(--glass-3);
+  border: 1px solid var(--hairline-strong);
+  border-right: none;
+  box-shadow: var(--shadow-pop);
+  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-2));
+  backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-2));
+  will-change: transform;
+  transform: translateX(100%);
+  transition: transform 220ms var(--ease-glass);
+}
+
+/* 打开态：滑入到 0。收起态由基础规则承担（translateX(100%)），
+ * 所以关闭时也会走同一条 220ms 回程，不需要额外的出场关键帧。 */
+.sensitive-panel.is-open {
+  transform: translateX(0);
+}
+
+/* 头部：左标题区可收缩，右侧「关闭」固定。 */
+.sensitive-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.sensitive-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sensitive-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text-1);
+}
+
+/* 副标题：一句话解释这块数据是干什么的，逐字照抄，不要精简。 */
+.sensitive-sub {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+/* 工具行：搜索框吃掉剩余宽度，按钮与筛选胶囊不换行。 */
+.sensitive-tools {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 18px 0;
+}
+
+.sensitive-tools-actions {
+  padding-top: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.sensitive-search {
+  flex: 1 1 260px;
+  min-width: 180px;
+  height: 28px;
+}
+
+/* 筛选胶囊的选中态：与 `.tab.is-active` 同一套视觉语言（主色底 + 主色描边）。 */
+.sensitive-filter {
+  height: 24px;
+  padding: 0 11px;
+  font-size: 12px;
+}
+
+.sensitive-filter.is-on {
+  border-color: rgba(16, 185, 129, 0.45);
+  background: var(--primary-soft);
+  color: var(--text-1);
+}
+
+.sensitive-hint {
+  font-size: 11.5px;
+}
+
+.sensitive-error {
+  flex: 0 0 auto;
+  padding: 8px 18px 0;
+}
+
+/* 正文：唯一滚动容器。`min-height: 0` 是 flex 子项能真正溢出的前提。 */
+.sensitive-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 18px 16px;
+}
+
+.sensitive-loading {
+  padding: 24px 0;
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* 网格：够宽三列，窄于 900px 退两列，再窄退一列。
+ * 用 auto-fill + minmax 而不是写死 repeat(3)：抽屉宽度是 min(1040px,72vw)，
+ * 小窗口下三列会把公司名压成竖排。 */
+.sensitive-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-auto-rows: min-content;
+  gap: 6px;
+}
+
+/* 卡片：比抽屉亮一档（--glass-2），让「卡片」与「面板」有层级差。 */
+.sensitive-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--glass-2);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-near);
+  transition: border-color var(--dur-fast) var(--ease-glass);
+}
+
+.sensitive-card:hover {
+  border-color: var(--hairline-strong);
+}
+
+.sensitive-card-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sensitive-card-foot {
+  gap: 8px;
+  margin-top: 2px;
+}
+
+/* 勾选框：系统控件只染强调色，不重画——重画会丢掉 WebView 的高对比度无障碍支持。 */
+.sensitive-check {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: rgb(244, 63, 94);
+  cursor: pointer;
+}
+
+.sensitive-chip-status {
+  flex: 0 0 auto;
+}
+
+/* 公司名：单行省略，完整名放 title。 */
+.sensitive-company {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* 薪资：右对齐加粗，等宽数字，避免相邻卡片数字宽度不一。 */
+.sensitive-salary {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sensitive-job {
+  font-size: 12px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* 已排除的岗位名加删除线：一眼看出「这条不会再去投」。 */
+.sensitive-job.is-rejected {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  color: var(--text-3);
+}
+
+.sensitive-note {
+  font-size: 11.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* 排除原因用红字：与「已入库」的灰字形成对比，扫视时先看到被排除的那批。 */
+.sensitive-note.is-rejected {
+  color: var(--bad);
+}
+
+.sensitive-time {
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 900px) {
+  .sensitive-panel {
+    width: min(1040px, 86vw);
+  }
+  .sensitive-grid {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .sensitive-panel {
+    width: 100vw;
+    border-radius: 0;
+  }
+  .sensitive-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sensitive-head,
+  .sensitive-tools,
+  .sensitive-body {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
+
+/* 系统要求减少动效：抽屉直接到位，不做平移。 */
+@media (prefers-reduced-motion: reduce) {
+  .sensitive-panel,
+  .sensitive-backdrop {
+    transition: none;
+  }
+}

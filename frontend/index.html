@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- color-scheme 让原生控件（滚动条、表单控件）跟随主题，
+         否则浅色主题下仍是深色滚动条，与 Liquid Glass 的材质冲突 -->
+    <meta name="color-scheme" content="dark light" />
+    <title>AI 求职助手</title>
+    <!-- Rust 侧注入 acrylic 前先用深色打底，避免首帧闪白 -->
+    <style>
+      html { background: transparent; }
+      body { margin: 0; }
+      /* trunk 构建完成前不要出现滚动条闪烁 */
+      body:not(:has(#root > *)) { overflow: hidden; }
+    </style>
+    <!-- 顺序有意义：tokens 定义变量，其余三份消费它们 -->
+    <link data-trunk rel="css" href="styles/tokens.css" />
+    <link data-trunk rel="css" href="styles/layout.css" />
+    <link data-trunk rel="css" href="styles/controls.css" />
+    <link data-trunk rel="css" href="styles/jobs.css" />
+    <link data-trunk rel="css" href="styles/drawer.css" />
+    <link data-trunk rel="css" href="styles/motion.css" />
+    <link data-trunk rel="css" href="styles/scrape.css" />
+    <link data-trunk rel="css" href="styles/pages.css" />
+    <!-- 批次 2（Lane I）：敏感库浮层 + 自动投递控制条。只消费 tokens/layout/controls，必须排在最后 -->
+    <link data-trunk rel="css" href="styles/sensitive.css" />
+    <link data-trunk rel="css" href="styles/auto.css" />
+    <!-- 批次 1（Lane H）：抓取筛选面板（图 3）展开体，只依赖 tokens/controls/scrape 的变量 -->
+    <link data-trunk rel="css" href="styles/filter.css" />
+  </head>
+  <body></body>
+</html>

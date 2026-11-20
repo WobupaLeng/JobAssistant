@@ -1,0 +1,175 @@
+/* 分域样式：抓取控制、事件流、求职期望、打分试算。 */
+
+/* ---------- 顶条（旧版图 3 的第一行）----------
+ *
+ * 从左到右：收起筛选 | 开始 | 停止 | 状态文案（吃掉剩余宽度）| 两个上限输入。
+ * 上限输入固定宽度（数字最多 4 位），状态文案弹性但带省略号——
+ * 抓取中的状态串会很长，撑开会把右侧两个输入挤出面板。
+ *
+ * 注意：这里不再是栅格。顶条里的控件宽度差异极大（按钮 60px、文案几百 px），
+ * 栅格会强行让它们等宽或按列对齐，反而不如 flex + spacer 自然。 */
+.scrape-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.scrape-toggle {
+  flex: 0 0 auto;
+}
+
+.scrape-brief {
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.scrape-lim {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.scrape-lim-input {
+  width: 52px;
+  flex: 0 0 auto;
+  padding: 2px 4px;
+  text-align: center;
+  font-size: 11px;
+}
+
+/* ---------- 事件流 ----------
+ * 等宽字体 + 固定高度 + 自动滚底。日志里对齐的分数列靠等宽才读得出来。 */
+.feed {
+  margin-top: 10px;
+  height: 150px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--glass-0);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.75;
+}
+
+.feed-line {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  animation: feed-in var(--dur-fast) var(--ease-out) both;
+}
+
+.feed-line > .tag {
+  flex: 0 0 auto;
+  min-width: 34px;
+  color: var(--text-3);
+  text-align: right;
+}
+
+.feed-line > .msg {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
+  color: var(--text-2);
+}
+
+/* 四种事件色：入库绿、跳过橙、错误红、其余灰。
+ * 这些是日志行的唯一视觉分类，颜色必须有足够对比度。 */
+.feed-line.is-ok .tag {
+  color: var(--primary);
+}
+.feed-line.is-ok .msg {
+  color: #8ee6c0;
+}
+
+.feed-line.is-skip .tag {
+  color: var(--warn);
+}
+
+.feed-line.is-bad .tag {
+  color: var(--bad);
+}
+.feed-line.is-bad .msg {
+  color: #ffa198;
+}
+
+.feed-line.is-info .tag {
+  color: var(--accent);
+}
+
+[data-theme='light'] .feed-line.is-ok .msg {
+  color: #047857;
+}
+[data-theme='light'] .feed-line.is-bad .msg {
+  color: #b91c1c;
+}
+
+@keyframes feed-in {
+  from {
+    opacity: 0;
+    transform: translateY(1px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------- 求职期望 ---------- */
+.expect-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ---------- 打分试算 ---------- */
+.demo-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.demo-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--glass-input);
+  box-shadow: inset 0 1px 0 var(--spec-top);
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.demo-result > .score-num {
+  font-size: 22px;
+  min-width: 44px;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 1180px) {
+  /* 窄窗：状态文案先断行，两个上限输入整体折到第二行 */
+  .scrape-brief {
+    flex-basis: 100%;
+    order: 9;
+  }
+
+  .demo-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
