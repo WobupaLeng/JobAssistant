@@ -13,6 +13,8 @@ node_modules/
 # ---------- 构建产物 ----------
 # 前端构建输出（vite build 生成；cargo tauri build 会重新生成）
 web/dist/
+# Rust 重写骨架的两处前端产物（见 SPEC-002）
+skeleton-web/dist/
 # PyInstaller 输出（backend/dist/aja-backend.exe）
 dist/
 build/
@@ -24,6 +26,9 @@ backend-sidecar/
 target/
 src-tauri/target/
 src-tauri/gen/schemas/
+# 新壳（app/src-tauri）的编译产物：实测单次全量构建 3.9 GB
+app/src-tauri/target/
+app/src-tauri/gen/schemas/
 
 # ---------- Python ----------
 __pycache__/
@@ -81,3 +86,8 @@ temp/
 .diag-page.png
 *.tsbuildinfo
 nohup.out
+
+# 测试临时目录（Low IL 下 %LOCALAPPDATA%\Temp 不可写，门禁把 TEMP 指到这里）
+.tmp-test/
+# 诊断取证产物（repro lane 的 runs/ logs/ 抓取快照，含本机路径与进程信息）
+.tmp-diag/

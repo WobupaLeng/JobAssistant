@@ -2,7 +2,7 @@
 """生成 Tauri 需要的应用图标（无外部素材依赖，只用 Pillow）。
 
 用法：python tools/make_icons.py
-产物：src-tauri/icons/{32x32,128x128,128x128@2x,256x256,512x512,1024x1024,icon}.png
+产物：app/src-tauri/icons/{32x32,128x128,128x128@2x,256x256,512x512,1024x1024,icon}.png
       src-tauri/icons/icon.ico
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ except ImportError:
     sys.exit("缺少 Pillow，请先执行：pip install pillow")
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "src-tauri" / "icons"
+OUT = ROOT / "app" / "src-tauri" / "icons"
 OUT.mkdir(parents=True, exist_ok=True)
 
 S = 1024

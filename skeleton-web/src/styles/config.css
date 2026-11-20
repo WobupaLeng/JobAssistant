@@ -1,0 +1,147 @@
+/* ---------- 配置 ---------- */
+
+.config-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.config-tools {
+  padding: 12px 16px;
+  flex-shrink: 0;
+}
+
+.config-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.config-card {
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* 分组标题整行可点：折叠展开都靠它，别改成只剩小三角可点 */
+.config-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.config-head:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.config-title {
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+}
+.chevron {
+  display: inline-block;
+  width: 12px;
+  color: var(--text-3);
+  transition: transform 0.16s ease;
+}
+.chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.config-body {
+  padding-top: 4px;
+  border-top: 1px solid var(--hairline);
+}
+
+.cfg-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+.cfg-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.cfg-span-2 {
+  grid-column: span 2;
+}
+.cfg-span-3 {
+  grid-column: span 3;
+}
+.cfg-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cfg-hint {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--text-3);
+  opacity: 0.85;
+}
+
+.demo-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.demo-result {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-input);
+  border: 1px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.demo-score {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.demo-score .big {
+  font-family: var(--font-mono);
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.demo-reason {
+  font-size: 12.5px;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 迁移横幅 */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  background: var(--warn-soft);
+  border: 1px solid rgba(210, 153, 34, 0.45);
+  font-size: 12.5px;
+  color: #f0c674;
+}
+
+.error-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--bad-soft);
+  border: 1px solid rgba(248, 81, 73, 0.45);
+  font-size: 12.5px;
+  color: #ffb3ae;
+}
+

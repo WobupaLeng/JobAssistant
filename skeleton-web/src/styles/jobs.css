@@ -1,0 +1,124 @@
+/* ---------- 岗位表 ---------- */
+
+.table-wrap {
+  overflow: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--hairline);
+  background: var(--surface-0);
+}
+
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-weight: 550;
+  font-size: 11.5px;
+  color: var(--text-3);
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.table tbody td {
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table tbody tr {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.table tbody tr.is-selected {
+  background: var(--primary-soft);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+.table tbody tr.is-rejected td {
+  opacity: 0.55;
+}
+
+.cell-title {
+  font-weight: 550;
+  color: var(--text-1);
+  max-width: 320px;
+}
+.cell-ellipsis {
+  max-width: 200px;
+}
+.col-score {
+  width: 64px;
+}
+.col-source {
+  width: 76px;
+}
+
+.score-num {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.score-num.is-pass {
+  color: var(--good);
+}
+.score-num.is-fail {
+  color: var(--bad);
+}
+.score-num.is-none {
+  color: var(--text-3);
+}
+
+.skeleton-row td {
+  color: transparent;
+}
+.skeleton-bar {
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
+  background-size: 200% 100%;
+  animation: shimmer 1.3s linear infinite;
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.empty {
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.8;
+}
+
+.list-fade {
+  animation: list-fade 0.24s ease-out both;
+}
+@keyframes list-fade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+

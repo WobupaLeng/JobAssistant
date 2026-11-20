@@ -1,0 +1,114 @@
+/* AI 求职助手 · 设计系统
+ *
+ * 视觉参照：现行版 web/ 已上线界面（毛玻璃深色外壳 + 翡翠绿主色 + 13px 密集排版），
+ * 在 skeleton-web 中以设计令牌 + 组件类重建。窗口由 Rust 侧做亚克力合成，
+ * 因此整页背景必须是**透明**的，任何不透明底色都会把毛玻璃吃掉。
+ */
+
+:root {
+  /* 表面：从小到大依次加亮，全部带 alpha，让系统合成透出来 */
+  --surface-0: rgba(10, 15, 26, 0.28);
+  --surface-1: rgba(18, 24, 38, 0.55);
+  --surface-2: rgba(30, 39, 58, 0.6);
+  --surface-3: rgba(42, 53, 76, 0.72);
+  --surface-input: rgba(8, 12, 20, 0.42);
+  --hairline: rgba(255, 255, 255, 0.1);
+  --hairline-strong: rgba(255, 255, 255, 0.18);
+
+  --text-1: #e8eef7;
+  --text-2: rgba(232, 238, 247, 0.72);
+  --text-3: rgba(232, 238, 247, 0.48);
+
+  /* 配色：主色沿用 PRD 3.1 的翡翠绿，辅助色科技蓝 */
+  --primary: #10b981;
+  --primary-strong: #059669;
+  --primary-soft: rgba(16, 185, 129, 0.16);
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, 0.18);
+  --good: #3fb950;
+  --warn: #d29922;
+  --warn-soft: rgba(210, 153, 34, 0.16);
+  --bad: #f85149;
+  --bad-soft: rgba(248, 81, 73, 0.16);
+  --muted: #8b949e;
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  --shadow-card: 0 12px 48px rgba(0, 0, 0, 0.3);
+  --shadow-pop: 0 24px 64px rgba(0, 0, 0, 0.45);
+  --font-sans: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+}
+
+/* 浅色主题：毛玻璃下用白雾面，文字转深色。深色为默认。 */
+[data-theme='light'] {
+  --surface-0: rgba(255, 255, 255, 0.22);
+  --surface-1: rgba(255, 255, 255, 0.68);
+  --surface-2: rgba(255, 255, 255, 0.78);
+  --surface-3: rgba(255, 255, 255, 0.9);
+  --surface-input: rgba(255, 255, 255, 0.72);
+  --hairline: rgba(15, 23, 42, 0.1);
+  --hairline-strong: rgba(15, 23, 42, 0.16);
+  --text-1: #0f172a;
+  --text-2: rgba(15, 23, 42, 0.72);
+  --text-3: rgba(15, 23, 42, 0.5);
+  --primary-soft: rgba(16, 185, 129, 0.14);
+  --accent-soft: rgba(37, 99, 235, 0.12);
+  --warn-soft: rgba(210, 153, 34, 0.14);
+  --bad-soft: rgba(248, 81, 73, 0.12);
+  --shadow-card: 0 12px 40px rgba(15, 23, 42, 0.12);
+  --shadow-pop: 0 24px 64px rgba(15, 23, 42, 0.2);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: transparent;
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: hidden;
+  /* 桌面应用不该有文本选区光标满屏乱选 */
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--primary-soft);
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--hairline-strong);
+  border-radius: var(--radius-pill);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
+}
+
