@@ -6,13 +6,14 @@
 ## 0. 工程状态看板（AI 每次动手前必读）
 
 - **当前阶段状态**：`FRONTEND_REBUILD_IN_PROGRESS`
+- 下表数字的取证基准：**提交 `6f9a76e`**（`app/` 与 `frontend/` 当前有未提交改动悬在磁盘上，编译结论以该提交为准）。
 
 | 层 | 状态 |
 |---|---|
-| `app/src-tauri/src/core/`（并入的 Rust 领域 + 存储 + 协议） | ✅ 可用，261 个单测通过 |
+| `app/src-tauri/src/core/`（并入的 Rust 领域 + 存储 + 协议） | ✅ 可用，300 个单测（`#[test]` 计数） |
 | `scraper/`（Python sidecar） | ⚠️ 抓取 / 登录 / 聊天 / 求职期望已通，**从 Tauri 子进程里拉起真实 Chrome 仍失败**（见 6.2） |
-| `app/src-tauri/`（Tauri 壳 + 命令层） | ✅ 27 个命令全部注册，`cargo test` **297 通过**（261 core + 36 命令层） |
-| `frontend/`（Leptos 0.8 WASM） | 🔨 **概览页已完成**；`chat` / `config` / `logs` 三页仍是占位符；抽屉、骨架条、过渡动画、Liquid Glass 第二三层未做 |
+| `app/src-tauri/`（Tauri 壳 + 命令层） | ✅ **48 条命令已注册**（`invoke_handler` 48 项，另有 1 条 `#[tauri::command]` 未注册）；`cargo test --lib` 实测 **367 通过** |
+| `frontend/`（Leptos 0.8 WASM） | ✅ 四页（概览 / 消息 / 配置 / 日志）全部实现，抽屉、骨架条、过渡动画已接线；🔨 Liquid Glass 第二三层（湍流折射 / WebGL 真折射）未做 |
 
 - **允许的并发形态**：`app/src-tauri/src/core/`（`[后端编码]`）与 `frontend/`（`[前端编码]`）目录完全隔离，可并发派发。
   **降级为单线程**：涉及 `app/src-tauri/src/core/domain/schema.rs`、`app/src-tauri/src/core/sidecar/protocol.rs`、`scraper/sidecar.py`、`app/src-tauri/src/lib.rs`、`app/src-tauri/Cargo.toml` 任一文件时（高冲突单点，同一时刻只允许一个写者）。
@@ -22,6 +23,7 @@
   - 2026-11-21：前端概览页打通（`cargo check` exit 0 / `trunk build` 成功 / 深浅双主题截图验收通过）。
   - 2026-11-21：`core/` 独立 crate **并入** `app/src-tauri/src/core/`（用户决策），`app` 的 `cargo test` 从 36 增至 297。分层改由模块边界 + code review 维持，`src/core/` 仍不得 `use tauri::`。
   - 2026-11-21：`app/src-tauri/tauri.conf.json` 的 `frontendDist` 改指 `../../frontend/dist`，Leptos 前端已能打进 exe（6.92 MB）。
+  - 2026-11-21：看板数字校准到提交 `6f9a76e`——命令 **27 → 48**（实测注册项），单测 **297 → 367**（`#[test]` 计数 368，其中 1 个 `#[ignore]`）。此前「27 个命令 / 297 个单测」是并入 `core/` 当天的中间态，之后三个提交又加了 21 条命令与 70 个用例。
 
 ## 1. 项目形态与核心技术栈
 
@@ -84,9 +86,13 @@ app/src-tauri/src/core/
     llm.rs                  HttpLlmClient（ureq）
   sidecar/
     protocol.rs             Envelope / Command / Event / ScrapedJob 等全部帧与结构
-    process.rs              spawn / 写 stdin / Ready 握手 / 回执路由 / 幂等 shutdown
+    process.rs              目录外壳（42 行）：只 re-export，对外路径 core::sidecar::process::* 不变
+    process/config.rs       SidecarConfig / locate_script_dir / PYTHON_ENV / DEFAULT_READY_TIMEOUT
+    process/handle.rs       SidecarError / SidecarEvent / SidecarHandle：spawn / 写 stdin / 关停
+    process/codec.rs        protocol_line / parse_line / LineParse / 回执路由 / 三条读线程
     session.rs              消费线程 + 进度记账 + SessionUpdate + request()
     ingest.rs               ScrapedJob → Job → 十条规则 → 打分 → 门槛（纯函数）
+  scrape.rs                 会话启停编排：resolve_script_dir / make_sink / restart_decision / plan_restart
 ```
 
 **分层铁律**：`domain` 不得依赖 `rusqlite` / `ureq` / `tauri`；`core` 不得依赖 `tauri`。存储走 trait 端口，`domain::job::JobStore` 定义签名，`infra::sqlite::SqliteStore` 提供实现。
@@ -94,14 +100,21 @@ app/src-tauri/src/core/
 ### 2.2 `app/src-tauri/src/`（桌面壳，跨进程单点，**严禁**与前端/核心并发派发）
 
 ```
-lib.rs              启动编排、单实例锁、毛玻璃、invoke_handler 注册（27 条命令）
-commands_db.rs      数据库与打分：list_jobs / get_job / db_overview / migrate_scores /
-                    score_job / passes_threshold / update_score / rescore_jobs / llm_status
-commands_scrape.rs  抓取与登录：scrape_start / scrape_stop / scrape_progress / scrape_drain /
-                    login_start / scrape_close / session_open + ensure_session_locked 编排
-commands_chat.rs    Boss 聊天：chat_friends / chat_messages / chat_send / chat_resumes /
+lib.rs              启动编排、单实例锁、毛玻璃、invoke_handler 注册（48 条命令）
+commands_db.rs      数据库与打分（14 条）：list_jobs / get_job / db_overview / migrate_scores /
+                    score_job / passes_threshold / update_score / rescore_jobs / llm_status /
+                    job_tab_counts / reject_jobs / allow_jobs / mark_delivered / list_decisions
+commands_scrape.rs  抓取与登录（10 条）：scrape_start / scrape_stop / scrape_progress / scrape_drain /
+                    scrape_close / session_open / login_start / login_status / login_save / logout
+                    （起停编排已下沉到 core/scrape.rs，本文件只剩收参数→转调）
+commands_chat.rs    Boss 聊天（7 条）：chat_friends / chat_messages / chat_send / chat_resumes /
                     chat_send_resume / chat_recall / list_expectations
-commands_greet.rs   打招呼：greet_draft（生成）/ greet_one（发送）——刻意拆两步
+commands_config.rs  配置与阈值（4 条）：get_app_config / set_app_config / set_limit / set_scrape_defaults
+commands_auto.rs    自动打招呼（已注册 5 条）：auto_greet_next / auto_greet_pause / auto_greet_resume /
+                    auto_greet_status / auto_greet_reset（另定义 auto_greet_gap 未注册，见 6.2）
+commands_sensitive.rs 敏感库（2 条）：sensitive_list / sensitive_remove
+commands_logs.rs    运行日志（2 条）：list_logs / clear_logs
+commands_greet.rs   打招呼（2 条）：greet_draft（生成）/ greet_one（发送）——刻意拆两步
 tauri.conf.json     frontendDist / devUrl / 窗口与 CSP
 ```
 
@@ -115,16 +128,16 @@ frontend/
   src/main.rs           bin 入口（trunk 要的是 bin 的 wasm，缺 [[bin]] 会报 artifacts not found）
   src/lib.rs            start()：panic hook + mount_to_body(App)
   src/api/{mod,types}.rs    契约类型 + invoke 封装；types.rs 无运行时代码
-  src/lib_ui/           nav / theme / job / session / text / time（纯函数 + 单测）
-  src/components/       shell（顶栏+页面分发）/ widgets（Card/Stat/Chip/StatusDot/SkeletonRows/Banner/ErrorBar/Field/Collapsible/EmptyState）
-  src/features/         jobs（state/list/drawer/rescore）/ scrape（panel/expectations）/ score（demo）
-  src/pages/            dashboard（已实现）/ chat / config / logs
+  src/lib_ui/           clock / job / logfmt / motion / nav / session / text / theme / time（纯函数 + 单测）
+  src/components/       shell（顶栏 + `dispatch` 插槽，**不含页面分发**）+ widgets（Card/Stat/Chip/StatusDot/SkeletonRows/Banner/ErrorBar/Field/Collapsible/EmptyState）
+  src/features/         auto / chat / config / jobs（state/list/cards/drawer/rescore）/ score / scrape（filter/options/panel/expectations）/ sensitive
+  src/pages/            mod.rs 的 `Page` 组件承担页面分发；dashboard / chat / config / logs 均为正式实现
   styles/               tokens（Liquid Glass 设计令牌）/ layout / controls / jobs / scrape
   .agents/skills/       liquid-glass / leptos / apple-design / leptos-component
   AGENTS.md             前端模块约定（分层、玻璃三层分工、装载的 skill）
 ```
 
-**依赖方向（单向，只能向下）**：`pages → features → components → lib_ui`；`api` 可被任意层引用，但 `lib_ui` 不得反向引用 `api`。
+**依赖方向（单向，只能向下）**：`pages → features → components → lib_ui`；`api` 可被任意层引用，但 `lib_ui` 不得反向引用 `api`。页面分发在 `pages/mod.rs::Page`，由 `frontend/src/lib.rs` 的 `App` 作为 `dispatch` 插槽传给 `AppShell`——这样 `components` 不需要反向依赖 `pages`。
 
 **前端红线**：
 - **禁止硬编码满分与门槛**（100 / 70 之类），一律由 `get_scoring_spec` 下发。
@@ -192,7 +205,7 @@ $env:CARGO_TARGET_DIR = "D:\jt"          # 短路径：避免 MSVC CL 命令行�
                                           # 且工作区内产物会继承 Low 完整性标签，启动必报 os error 5
 $env:TEMP = "$env:TEMP"; $env:TMP = $env:TEMP
 
-cd app/src-tauri;   cargo test               # 编译 + 297 个单测一次到位（核心 261 + 命令层 36）
+cd app/src-tauri;   cargo test               # 编译 + 367 个单测一次到位（核心 300 + 命令层 67）
 cd frontend;        cargo check --target wasm32-unknown-unknown
 cd frontend;        Remove-Item Env:\CARGO_TARGET_DIR -ErrorAction SilentlyContinue; trunk build
 python -m compileall -q scraper
@@ -200,16 +213,17 @@ python -m compileall -q scraper
 
 - **`trunk build` 必须清掉 `CARGO_TARGET_DIR`**：trunk 只在项目内找产物，指向工作区外会报 `cargo artifacts not found for target crate`；且它**不认** `--target-dir`。
 - `trunk` 需要 **bin** 的 wasm 产物，`frontend/Cargo.toml` 里的 `[[bin]]`（`path = "src/main.rs"`）不可删。
+- **每次门禁都要用独占的 `CARGO_TARGET_DIR`**：`D:\jt` 被上一次（其它 lane / 旧提交）的产物占着时，Cargo 可能直接重放陈旧二进制——实测重放过一份旧 exe，测试结果与当前源码无关。换一个干净目录（如 `D:\jt-check`）重跑，数字对得上再用。
 
 ### 槽位 B [单元测试]
 
-- **`src/core/`（261 个用例）**：打分五维权重、排除规则十条顺序、PUA 薪资解码、幂等迁移、SQLite 读写、schema 列数锚点、LLM 三级容错与初筛线、sidecar 协议（`ScrapedJob` 21 字段 / `login.state` / 聊天帧平铺 / `session.open` 的 `page`）、回执路由六例、入库判定与四路计数、无 JD 否决在 ingest 路径上生效、全量重算游标分页。
+- **`src/core/`（300 个用例）**：打分五维权重、排除规则十条顺序、PUA 薪资解码、幂等迁移、SQLite 读写、schema 列数锚点、LLM 三级容错与初筛线、sidecar 协议（`ScrapedJob` 21 字段 / `login.state` / 聊天帧平铺 / `session.open` 的 `page`）、回执路由六例、入库判定与四路计数、无 JD 否决在 ingest 路径上生效、全量重算游标分页。
   - **重算排序键铁律**：`JobStore::list_scored_ids` 必须按 `job_id` 升序。按 `match_score` 排序会被自己的写回推翻分页边界——同一岗位算两次、别的被跳过，**且没有任何报错**。
   - **无 JD 否决只能走 `RuleScore::passes()`**：无 JD 岗位降权后最高仍有 72 分，`score < min_score` 的写法在门槛 ≤70 时会放行。
   - **薪资排序的 NULL 语义**：SQLite 的 `ORDER BY x ASC` 把 NULL 排**最前**（与 MySQL/PG 相反）。`SALARY_UNKNOWN_RANK_EXPR`（面议/空=1，有值=0）必须**恒 ASC 且作为第一排序键**。
   - **Windows 必配 `$env:TEMP`**：否则 `core::infra::sqlite` 的临时库测试报 `create_dir_all` 权限拒绝（os error 5）。**不要改测试代码去绕**。
-- **命令层（36 个用例）**：排序字段注入防御、无 JD 否决、`ScoreArgs`/`ScrapeArgs` 驼峰与下划线双写、LLM 缺客户端回退规则、密钥只回尾 4 位、抓取增量转前端结构、未结束会话补结束原因、启动诊断报文、数据目录探测器。
-- **`frontend/`（6 个用例）**：`lib_ui/{session,text,time}` 的纯函数。**`pages/` 与 `features/` 目前零用例**，补齐是当前缺口。
+- **命令层 + 壳（67 个用例）**：排序字段注入防御、无 JD 否决、`ScoreArgs`/`ScrapeArgs` 驼峰与下划线双写、LLM 缺客户端回退规则、密钥只回尾 4 位、抓取增量转前端结构、未结束会话补结束原因、启动诊断报文、数据目录探测器。
+- **`frontend/`（61 个用例）**：`lib_ui/`（clock / logfmt / motion / session / text / time）与 `features/`（auto / jobs / scrape / sensitive）的纯函数；`pages/` 仍是零用例，补齐是当前缺口。
 - **sidecar 起停冒烟（默认忽略）**：`cd app/src-tauri && cargo test --test sidecar_smoke -- --ignored --nocapture`。只断言起得来 / 握手 / 关得掉，不断言抓多少条。
 
 ### 槽位 C [集成、E2E 与最终产物冒烟]
@@ -237,6 +251,7 @@ python -m compileall -q scraper
   - `<scope>` 对齐第 2 节目录：`core` / `desktop`（`app/`）/ `client`（`frontend/`）/ `sidecar`（`scraper/`）/ `contracts`（协议与命令签名）/ `release` / `arch`（`AGENTS.md` / `docs/`）
   - **提交门禁**：未通过槽位 A（及已落地的槽位 B）前禁止 `git commit`；每次只提交一个完整 Milestone，严禁混杂无关文件。
   - **用户本地改动保护**：提交前逐项检查 `git status`。非本人所做的改动（如用户手工调过的 `profile.rs`）**不得**擅自提交或还原，须先询问。
+- **多 lane 并发时禁止裸 `git commit`**：索引里可能有别的 lane 已经 `git add` 好的文件，裸提交会把它们一起卷进你的提交（本项目真实发生过一次：本想提交 4 个文档，实际带走了 12 个文件）。并发时必须写 `git commit --only -- <精确路径>`（或 `git commit -F <消息文件> --only -- <精确路径>`），提交前用 `git status --porcelain` 核对，提交后用 `git show --stat HEAD` 复核只包含自己的文件。消息文件放仓库内（如 `.git/COMMIT_MSG.txt`），放 `$env:TEMP` 会被 git 拒绝（`is outside repository`）。
 - **PowerShell 批量改源码铁律**：一律用 Python 的 `str.replace`（字面量），**禁止** PowerShell `-replace`（正则引擎会吃掉替换串里的字符，曾把四份源码所有 `i` 变成 `m`）。
 - **文档同步**：修 Bug 或完成可观察行为改动后，在 `DEVELOPMENT.md` 顶部按「日期 + 现象 / 根因 / 改动文件 / 验证」追加一条。
 
@@ -247,7 +262,8 @@ python -m compileall -q scraper
 | 议题 | 结论 |
 |---|---|
 | 启动报 `os error 5` / `0x800700AA` | 根因**不是代码**：工作区目录带 Low 完整性标签，里面的 exe 会被降为 `S-1-16-4096`，写不了 `%LOCALAPPDATA%`。**产物必须放工作区外**（`D:\jt\release\`）。取舍细节见 `app/src-tauri/src/lib.rs::not_writable_hint`。 |
-| 单实例锁 | `app.lock` 在 `%LOCALAPPDATA%\ai-job-assistant\`，独占打开失败即报「另一个实例正在运行」。同一台机器上两轨并存时会互相挡门。 |
+| 单实例锁 | **不是锁文件**：进程启动时创建 Windows 命名互斥体 `Local\com.ai.jobassistant.rust.single`（`app/src-tauri/src/lib.rs:340-385`，`CreateMutexW`，`ERROR_ALREADY_EXISTS` 即报「另一个实例正在运行」，句柄故意泄漏到进程退出）。**旧方案 `app.lock` 已作废**——实测 `share_mode(0)` 排他打开锁文件返回 `os error 5`（`lib.rs:335-339` 注释）。 |
+| 门禁会重放陈旧二进制 | 共享的 `CARGO_TARGET_DIR`（如 `D:\jt`）在其它 lane 或旧提交留下产物时，Cargo 可能直接复用而不重编——实测重放过 07:19:38 的旧 exe，测试照旧 abort，换成干净目录 `D:\jt-check` 后得 67 passed。**排查「改了代码但测试结果不变」先换独占 target 目录**。 |
 | 真实库迁移 | `migrate()` 必须整体事务（崩在中途会 ×100）；动真实库前先 `Copy-Item` 到 `data/backup/` 并核对 SHA256。 |
 | 卡片先查敏感库 | 三道预筛在详情页前完成，其中第 3 道是**空 JD 跑完整 `reject()`**，不要另写一套卡片规则；`SensitiveEntry` 的 `stored` / `rejected` 两种 kind 都要写。 |
 | 写库失败不计入 `inserted` | 判定只在 `app/src-tauri/src/core/sidecar/ingest.rs::handle_job`；sidecar 不打分不落库。 |
@@ -255,12 +271,14 @@ python -m compileall -q scraper
 ### 6.2 未决项
 
 1. **【阻塞】从 Tauri 子进程里拉起真实 Chrome 失败**。根因已定位：应用运行时 `msedgewebview2.exe` 会在本机创建 Chromium 单例命名对象，sidecar 启动的 Chrome 探测到后报「正在现有的浏览器会话中打开」并 `exitCode=0`，playwright 收到 CDP 管道关闭 → `TargetClosedError: BrowserType.launch_persistent_context: Target page, context or browser has been closed`。已排除：Job Object、环境变量（含 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`）、stdio/CREATE_NO_WINDOW、`--user-data-dir` 路径、profile 脏数据、Chrome 版本。**待定修法**：给 sidecar 的 Chrome 用与应用 WebView2 不再撞名的 user-data-dir，或分离 `--user-data-dir` 与 `--apps-user-data-dir`。
-2. **前端三页未做**：`frontend/src/pages/{chat,config,logs}.rs` 仍是「施工中」占位符。
-3. **三处交互未做**（用户明确要求「与 Web 版原样一致，不得降级」）：详情抽屉（`.drawer*` / `.kv` / `.jd-text` 样式未写）、骨架条（组件已有 `SkeletonRows`，未接线）、列表过渡动画（`row-in` / `list-fade` / `token-bump`）。
-4. **Liquid Glass 第二三层未做**：第二层 SVG `feTurbulence` + `feDisplacementMap` 湍流折射；第三层 WebGL 卡片间真折射（方案 C：亚克力继续透桌面，WebGL 只渲染抽屉盖列表、气泡盖背景）。第一层 CSS 玻璃已完成。
-5. **`tools/check_layers.py` 抓到 2 处真实违规未修**：`frontend/src/components/shell.rs:202`（`components` 反向依赖 `pages`）、`frontend/src/lib_ui/job.rs:3`（`lib_ui` 依赖 `api`）。修法：把页面分发从 `shell` 上移到 `pages/index.rs`；`Job` 类型下沉到 `lib_ui/job.rs` 或新建 `lib_ui/types.rs`。
-6. **`frontend/` 只有 6 个用例**，`pages/` 与 `features/` 零覆盖。
-7. **后端巨文件待拆**：`app/src-tauri/src/core/sidecar/process.rs`（约 750 行业务）、`app/src-tauri/src/commands_scrape.rs`（859 行，含 `ensure_session_locked` / `make_sink` / `make_lookup` 等编排逻辑，违反 2.2）、`app/src-tauri/src/core/infra/sqlite.rs`（2126 行）。
+2. **Liquid Glass 第二三层未做**（唯一剩下的前端设计项）：第二层 SVG `feTurbulence` + `feDisplacementMap` 湍流折射；第三层 WebGL 卡片间真折射（方案 C：亚克力继续透桌面，WebGL 只渲染抽屉盖列表、气泡盖背景）。第一层 CSS 玻璃已完成。**注**：`frontend/` 里除 `skills/liquid-glass/REFERENCE.md` 与 `skills/liquid-glass/scripts/generate_glass_map.js`（参考文档与工具）外，没有任何运行时代码引用 `feTurbulence` / `feDisplacementMap` / WebGL。
+3. **`pages/` 零单测**：`frontend/` 现有 61 个用例全部落在 `lib_ui/` 与 `features/`，`pages/{dashboard,chat,config,logs}.rs` 仍无覆盖。
+4. **`commands_auto::auto_greet_gap` 定义了但没注册**（`commands_auto.rs`，`#[tauri::command]` 共 6 个，`invoke_handler` 只列了 5 个 `auto_greet_*`）。前端若 `invoke("auto_greet_gap")` 会得到「命令不存在」。要么注册，要么删掉。
+5. **`IngestPort::record` 有默认空实现**（`app/src-tauri/src/core/sidecar/session.rs:157-162`）。注释自认「生产实现必须覆盖，否则决策日志恒空」——这是端口默认实现掩盖漏接的典型：测试桩不实现也编译通过。建议改成必需方法。
+6. **`tests/sidecar_smoke.rs` 的跑法注释残留旧路径**（`:6-11` 写 `cd core`，但 `core/` 已并入 `app/src-tauri`），照抄会报错。另 `:63-77` 在 `SidecarError::Spawn` 时只 `eprintln` 就 `return`，进程起不来时测试仍然绿——机器没装 python 和真正坏了长得一样。
+7. **`schema.rs` 无任何外键约束**（全仓搜不到 `FOREIGN KEY` / `REFERENCES` / `PRAGMA foreign_keys`）。父子表（如 `job_queue` ↔ `jd_decisions`）靠应用层维护，`rusqlite 0.32` 的 `bundled` SQLite 默认 `foreign_keys=OFF`，真去加约束前要先补 `conn.pragma_update(None, "foreign_keys", "ON")`。
 8. **`docs/` 需重整**：`SPEC-001` / `ADR-001` / `ADR-002` / `ARCH-002` 描述的是已被取代的实现，`SPEC-002` 第 4 节蓝图与代码不符（写的 `storage/ ports/` 实际是 `infra/`，端口 token 放在 `domain/`）。**新文档落地前，本文件的第 2 节就是唯一有效的目录边界。**
-9. **`tools/gui_e2e.py` 的 16 项 `REQUIRED_TESTIDS` 与 Leptos 概览页尚未对齐**（缺 `app-root` / `score-spec` / `scrape-status` 等），`run --ui-only` 会失败；需补锚点或按新结构改脚本。
+9. **`tools/gui_e2e.py` 与 Leptos 版未对齐**：`REQUIRED_TESTIDS`（`:69` / `:89` / `:346` / `:366` / `:582-584`）里仍含旧结构锚点，`run --ui-only` 是否全过需在 UI 定型后重跑一次核对。
 10. **旧版只读目录 `backend-exe/` 已丢失**：误删时它未被 git 跟踪，无法用 `git checkout` 恢复。要恢复只有重跑旧版 `build.bat`（`backend/` 已恢复，产物可重建）。
+11. **`app/src-tauri/Cargo.toml:13` 的 `tauri-build = { version = "2", features = [] }` 是冗余写法**：`features = []` 可删（不影响行为，纯清理）。
+12. **`app/src-tauri/src/core/scrape.rs` 已 583 行**，是当前 `core/` 里最大的单文件（含会话启停、sink/lookup 构造、重启判定、进度收尾）。第 2.2 节要求编排逻辑不得留在 `commands_scrape.rs`，它确实已下沉，但下沉目标本身现在偏大，下一轮可考虑按 `launch` / `restart` / `sink` 拆目录。
