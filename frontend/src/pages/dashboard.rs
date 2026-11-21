@@ -15,6 +15,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
+use crate::api::types::Job;
 use crate::components::shell::Boot;
 use crate::components::widgets::{Banner, Stat, StatSkeleton};
 use crate::features::auto::AutoBar;
@@ -31,6 +32,35 @@ use crate::lib_ui::text::merge_keywords;
 /// 页签计数的轮询周期。旧版就是 5 秒，用户已经习惯这个刷新节奏；
 /// 改快没有意义（计数只有抓取时才会动），改慢会让「已投递」的即时反馈变钝。
 const TAB_POLL_MS: i32 = 5000;
+
+/// 「当前列表」胶囊的数字：本次 `list_jobs` 回来的行数。
+///
+/// 与「已排除」不是互补关系——胶囊同时展示两者，用户要能一眼看出
+/// 「这一屏里有几条是被规则挡掉的」，所以这里**不**扣掉 `rejected`。
+fn listed_count(jobs: &[Job]) -> usize {
+    jobs.len()
+}
+
+/// 「已排除」胶囊的数字：`rejected != 0` 的行数。
+fn rejected_count(jobs: &[Job]) -> usize {
+    jobs.iter().filter(|j| j.is_rejected()).count()
+}
+
+/// 触发列表重拉的键：**排序字段 + 页签 + 方向**三者的快照。
+///
+/// 三样必须同时在键里。少了页签，切页签时这个 Effect 不认为发生了变化，
+/// 界面上的页签高亮变了、列表却还是旧的，看起来像「筛选没生效」——
+/// 这正是本页历史上踩过的坑。少了排序字段，点「薪资」不会重排。
+///
+/// 页签用 `slug()` 而不是 `ListTab` 本身：键要能跨版本比较，
+/// `slug` 同时也是 `list_jobs` 的 `tab` 参数，两者同源。
+fn refresh_key(list: &JobListState) -> (String, String, bool) {
+    (
+        list.sort.get().as_str().to_string(),
+        list.tab.get().slug().to_string(),
+        list.ascending.get(),
+    )
+}
 
 #[component]
 pub fn DashboardPage(on_notice: Callback<String>) -> impl IntoView {
@@ -64,14 +94,7 @@ pub fn DashboardPage(on_notice: Callback<String>) -> impl IntoView {
     // 界面上页签高亮变了、列表却是旧的，看起来像"筛选没生效"。
     let last_key = RwSignal::new((String::new(), String::new(), false));
     Effect::new(move |_| {
-        let key = (
-            list.sort.get().as_str().to_string(),
-            list.tab
-                .get()
-                .slug()
-                .to_string(),
-            list.ascending.get(),
-        );
+        let key = refresh_key(&list);
         let prev = last_key.get_untracked();
         if prev == key {
             return;
@@ -122,12 +145,12 @@ pub fn DashboardPage(on_notice: Callback<String>) -> impl IntoView {
         });
     }
 
-    let excluded = move || list.jobs.get().iter().filter(|j| j.is_rejected()).count() as u32;
+    let excluded = move || rejected_count(&list.jobs.get());
 
     // `Stat::value` 收 `ReadSignal<String>`：计数来自 `RwSignal<usize>`，
     // 在这里一次性映射成文本，组件本身保持纯展示。
     let total_text = Signal::derive(move || list.total.get().to_string());
-    let listed_text = Signal::derive(move || list.jobs.get().len().to_string());
+    let listed_text = Signal::derive(move || listed_count(&list.jobs.get()).to_string());
     let excluded_text = Signal::derive(move || excluded().to_string());
 
     let score_max = move || boot.spec.get().map(|s| s.score_max);
@@ -284,5 +307,107 @@ pub fn DashboardPage(on_notice: Callback<String>) -> impl IntoView {
                 }
             })
         }}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::types::JobTabCounts;
+    use crate::features::jobs::state::{ListTab, SortField};
+
+    fn job(id: &str, status: &str, rejected: i64) -> Job {
+        Job {
+            job_id: id.to_string(),
+            status: status.to_string(),
+            rejected,
+            ..Default::default()
+        }
+    }
+
+    /// 三个胶囊里，只有「岗位总数」来自 `db_overview`。
+    /// 另外两个必须从**当前这一屏列表**现算：把它们接到 `total` 上会让
+    /// 「已排除」永远显示全库总数，翻页时数字纹丝不动。
+    #[test]
+    fn overview_counts_come_from_the_current_page_not_the_db() {
+        let rows = vec![
+            job("p1", "pending", 0),
+            job("p2", "pending", 0),
+            job("r1", "pending", 1),
+        ];
+        // 「当前列表」是所有行，包含被排除的
+        assert_eq!(listed_count(&rows), 3);
+        // 「已排除」只数 rejected != 0
+        assert_eq!(rejected_count(&rows), 1);
+        // 空列表两个都是 0，不是「未知」也不是某个默认值
+        assert_eq!(listed_count(&[]), 0);
+        assert_eq!(rejected_count(&[]), 0);
+    }
+
+    /// `rejected` 是 i64 的历史遗留列，非 0 即否决。写成 `== 1` 会让
+    /// 那些被规则反复加一的岗位（值可能是 2、3）从「已排除」里消失。
+    #[test]
+    fn rejected_count_accepts_any_non_zero_marker() {
+        let rows = vec![job("a", "pending", 2), job("b", "pending", -1), job("c", "pending", 0)];
+        assert_eq!(rejected_count(&rows), 2);
+    }
+
+    #[test]
+    fn refresh_key_changes_when_tab_changes_even_if_sort_is_unchanged() {
+        let list = JobListState::new();
+        list.sort.set(SortField::Created);
+        list.ascending.set(false);
+        let before = refresh_key(&list);
+
+        list.tab.set(ListTab::Delivered);
+        let after = refresh_key(&list);
+
+        assert_ne!(
+            before, after,
+            "切页签必须让重拉键变化，否则列表停在旧数据上、页签却已高亮"
+        );
+        assert_eq!(after.1, "delivered");
+    }
+
+    #[test]
+    fn refresh_key_changes_when_sort_field_changes() {
+        let list = JobListState::new();
+        list.tab.set(ListTab::Pending);
+        let before = refresh_key(&list);
+        list.sort.set(SortField::Salary);
+        assert_ne!(before, refresh_key(&list));
+    }
+
+    #[test]
+    fn refresh_key_changes_when_direction_flips() {
+        let list = JobListState::new();
+        list.sort.set(SortField::Score);
+        list.ascending.set(false);
+        let before = refresh_key(&list);
+        list.ascending.set(true);
+        assert_ne!(before, refresh_key(&list));
+    }
+
+    /// 键是快照不是引用：其他信号（列表内容、勾选、计数）变化**不该**
+    /// 触发重拉，否则 5 秒一次的计数轮询会连带把整张列表重来一遍。
+    #[test]
+    fn refresh_key_ignores_signals_that_do_not_change_the_query() {
+        let list = JobListState::new();
+        list.sort.set(SortField::Created);
+        list.tab.set(ListTab::Pending);
+        list.ascending.set(true);
+        let before = refresh_key(&list);
+
+        list.jobs.set(vec![job("x", "pending", 0)]);
+        list.checked.set(vec!["x".to_string()]);
+        list.counts.set(JobTabCounts {
+            pending: 9,
+            delivered: 3,
+            rejected: 1,
+        });
+        list.total.set(99);
+        list.show_all.set(true);
+
+        assert_eq!(before, refresh_key(&list));
     }
 }
