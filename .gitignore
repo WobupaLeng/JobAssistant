@@ -56,7 +56,9 @@ browser-profile/
 
 # ---------- 日志 ----------
 *.log
-logs/
+# 只忽略仓库根的运行时日志目录。必须带前导 `/`：
+# 不带的 `logs/` 会匹配任意层级的 logs 目录，把 frontend/src/features/logs/（源码）一起吞掉。
+/logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
