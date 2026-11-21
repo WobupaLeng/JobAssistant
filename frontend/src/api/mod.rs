@@ -330,16 +330,21 @@ pub async fn logout(platform: &str) -> Result<LogoutReply, String> {
 
 // ---------- 日志 ----------
 
-/// 取 `since`（Unix 毫秒）之后的日志。首次调用传 `None`（= 全量）。
-/// 回执的 `now` 是**本次游标**，下次必须带回来，否则每次都会拉全量。
-pub async fn list_logs(since: Option<u64>) -> Result<LogsReply, String> {
+/// 取 `timestamp >= since`（Unix 毫秒）的日志。首次 / 手动刷新传 `None`（= 从头取）。
+///
+/// 回执的 `now` 是**本次游标**（= 当前最后一条的时间戳），下次必须原样带回来。
+/// 后端按**闭区间**比较，所以游标那一毫秒的条目会重送一次；界面按
+/// `(ts, level, message)` 多重集去重消化它——这是有意的取舍：重送可见可修，
+/// 漏送（开区间会导致同毫秒的后几条永久丢失）不可修。
+pub async fn list_logs(since: Option<i64>) -> Result<LogsReply, String> {
     match since {
         Some(s) => invoke("list_logs", serde_json::json!({ "since": s })).await,
         None => invoke("list_logs", serde_json::json!({})).await,
     }
 }
 
-pub async fn clear_logs() -> Result<bool, String> {
+/// 清空运行日志缓冲。
+pub async fn clear_logs() -> Result<(), String> {
     invoke("clear_logs", serde_json::json!({})).await
 }
 

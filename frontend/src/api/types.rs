@@ -456,16 +456,20 @@ pub struct DecisionRecord {
 pub struct LogRow {
     /// Unix 毫秒
     pub ts: u64,
+    /// 后端分配的单调序号（从 1 开始）。同一毫秒多条时靠它区分列表 key。
+    #[serde(default)]
+    pub seq: u64,
     #[serde(default)]
     pub level: String,
     #[serde(default)]
     pub message: String,
 }
 
-/// `list_logs(since)` 的回执：增量条目 + **本次游标**。
+/// `list_logs(since)` 的回执：条目 + **本次游标**。
 ///
 /// 调用方必须把 `now` 存下来，下次带 `since = now`；
-/// 否则每次都会把整段历史重新拉一遍。
+/// 否则每次都会把整段历史重新拉一遍。后端按 `>=` 比较，
+/// 游标那一毫秒的条目会重送一次，由界面多重集去重消化。
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct LogsReply {
     pub items: Vec<LogRow>,
