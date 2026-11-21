@@ -19,6 +19,13 @@
 //! 前端若维护一份「我以为在跑」的本地状态机，就会出现「后端因连续失败已暂停、
 //! 前端还在每秒发一条、每条都被拒」的刷屏。所以这里每个 tick 都用
 //! `auto_greet_status` 覆盖本地快照，本地布尔量仅用于按钮的忙碌态。
+//!
+//! # 为什么不再自己渲染 `.auto-bar`
+//!
+//! 用户裁决：自动投递的「开始」按钮要贴在抓取条的「开始抓取」右边（图 2）。
+//! 因此本组件只产出**扁平的按钮 + 状态节点**，由 `ScrapePanel` 的
+//! `.scrape-bar` 作父容器排布（`div.scrape-bar > button[data-testid=auto-toggle]`）；
+//! 数据契约与 `data-testid` 一个都没变，只是父节点换了。
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -109,49 +116,42 @@ pub fn AutoBar(
         });
     };
 
+    let status_line = move || status_text(&status.get(), phase.get(), sending.get(), &sending_label.get());
+
+    // 父容器是 `ScrapePanel` 的 `.scrape-bar`：四个节点平铺进去，
+    // 顺序即「开始」→ 状态 → 重置 → 行内错误。
     view! {
-        <div class="auto-bar" data-testid="auto-bar">
-            <button
-                class="auto-toggle"
-                class:is-on=move || matches!(phase.get(), Phase::Running)
-                class:is-warn=move || matches!(phase.get(), Phase::Paused)
-                data-testid="auto-toggle"
-                prop:disabled=move || busy.get()
-                on:click=on_toggle
-            >
-                {move || phase.get().toggle_label()}
-            </button>
-            <div
-                class="auto-status"
-                data-testid="auto-status"
-                title=move || status_text(&status.get(), phase.get(), sending.get(), &sending_label.get())
-            >
-                <StatusDot
-                    state=dot_state.get()
-                    label=String::new()
-                />
-                <span class="auto-status-text">
-                    {move || status_text(&status.get(), phase.get(), sending.get(), &sending_label.get())}
-                </span>
-            </div>
-            <span class="spacer"></span>
-            <button
-                class="btn btn-sm btn-ghost"
-                data-testid="auto-reset"
-                prop:disabled=move || busy.get()
-                title="清零本轮计数并退出自动投递"
-                on:click=on_reset
-            >
-                "重置"
-            </button>
-            {move || {
-                let err = error.get();
-                (!err.is_empty()).then(|| view! {
-                    <div class="auto-error">
-                        <ErrorBar message=err test_id="auto-error" />
-                    </div>
-                })
-            }}
+        <button
+            class="auto-toggle"
+            class:is-on=move || matches!(phase.get(), Phase::Running)
+            class:is-warn=move || matches!(phase.get(), Phase::Paused)
+            data-testid="auto-toggle"
+            title="自动投递：按后端下发的随机间隔逐条打招呼"
+            prop:disabled=move || busy.get()
+            on:click=on_toggle
+        >
+            {move || phase.get().toggle_label()}
+        </button>
+        <div class="auto-status" data-testid="auto-status" title=status_line>
+            <StatusDot state=dot_state.get() label=String::new() />
+            <span class="auto-status-text">{status_line}</span>
         </div>
+        <button
+            class="btn btn-sm btn-ghost"
+            data-testid="auto-reset"
+            prop:disabled=move || busy.get()
+            title="清零本轮计数并退出自动投递"
+            on:click=on_reset
+        >
+            "重置"
+        </button>
+        {move || {
+            let err = error.get();
+            (!err.is_empty()).then(|| view! {
+                <div class="auto-error">
+                    <ErrorBar message=err test_id="auto-error" />
+                </div>
+            })
+        }}
     }
 }

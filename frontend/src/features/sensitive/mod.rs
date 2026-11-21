@@ -14,6 +14,6 @@ mod list;
 mod panel;
 mod state;
 
-pub use drawer_entry::SensitiveDrawer;
+pub use drawer_entry::{SensitiveDrawer, SensitiveEntry, SensitiveOverlay};
 pub use panel::SensitivePanel;
 pub use state::{Filter, SensitiveState};

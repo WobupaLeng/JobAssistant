@@ -706,6 +706,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 紧凑态：概览页把运行日志作为投递列表下方的独立卡片，高度按内容给，
+ * 不再用 260px / 58vh 撑开——那一组数值是为整页的日志视图定的。 */
+.log-wrap.is-compact .run-log-box {
+  min-height: 132px;
+  max-height: 34vh;
+}
+
 .run-log-line {
   display: grid;
   grid-template-columns: 88px 46px minmax(0, 1fr);

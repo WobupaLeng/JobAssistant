@@ -181,6 +181,41 @@
   min-width: 0;
 }
 
+/* ---------- 投递列表撑满剩余空间 ----------
+ * 用户裁决「投递列表默认撑满下发的空间」：卡片占满概览页剩余高度，
+ * 页签行 / 批处理行固定在上方，只有卡片网格自己滚。
+ *
+ * 用 flex 逐级传递 `min-height: 0`：任何一层漏掉，`flex: 1` 的子项都会被
+ * 内容高度顶开，滚动条就跑到页面外层去了（表现为「撑满」不生效）。 */
+.job-body.is-fill {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.job-body.is-fill > .job-tabs-row,
+.job-body.is-fill > .job-batch {
+  flex: 0 0 auto;
+}
+
+.job-body.is-fill > .job-grid {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow-y: auto;
+  /* 滚动条贴着网格内边，不压住卡片右边缘的描边 */
+  padding-right: 4px;
+  /* 网格本身不再是「内容高度即全部」：多出来的部分在这里滚 */
+  align-content: start;
+  scrollbar-gutter: stable;
+}
+
+/* 卡片的骨架与空态都横跨整行，撑满时它们应居中而不是贴在顶部 */
+.job-body.is-fill > .job-grid > .empty-state {
+  align-self: center;
+  margin: auto 0;
+}
+
 /* 骨架与空态要横跨整行，否则会缩成三分之一宽的一条 */
 .job-grid > .empty-state,
 .job-grid.is-skeleton > .job-card {

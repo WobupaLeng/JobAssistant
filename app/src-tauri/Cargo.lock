@@ -1837,7 +1837,6 @@ dependencies = [
  "tauri-plugin-shell",
  "thiserror 2.0.21",
  "ureq",
- "window-vibrancy",
  "windows-sys 0.59.0",
 ]
 

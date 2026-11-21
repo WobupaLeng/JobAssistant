@@ -112,7 +112,9 @@ pub fn JobList(
                 </button>
             </header>
 
-            <div class="card-body">
+            // `is-fill`：卡片顶满父容器剩余高度，只有网格区自己滚
+            // （用户裁决「投递列表默认撑满下发的空间」）。
+            <div class="card-body job-body is-fill">
                 // ---------- 页签行 ----------
                 <div class="job-tabs-row">
                     <div class="job-tabs" role="tablist">

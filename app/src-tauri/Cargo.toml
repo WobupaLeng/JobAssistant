@@ -10,7 +10,7 @@ name = "jobassistant_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -28,13 +28,13 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # 不必引入 tokio/hyper 整棵异步运行时依赖树（体积硬指标 ≤20MB）。
 # rustls 而非 native-tls：不依赖系统 OpenSSL，单文件分发更省心。
 ureq = { version = "2", default-features = false, features = ["json", "tls"] }
-# 毛玻璃：Windows 用 acrylic / mica，失败时优雅降级
-window-vibrancy = "0.8"
-
 [target.'cfg(windows)'.dependencies]
-# 仅用于 AJA_DIAG_WINDOW 诊断读数与 SetWindowCompositionAttribute 的动态加载
+# 毛玻璃与 AJA_DIAG_WINDOW 诊断读数。窗口特效全部走这里：
+# SetWindowCompositionAttribute 动态加载 + DwmSetWindowAttribute（不引 window-vibrancy，
+# 它在 Win11 上只调 SYSTEMBACKDROP_TYPE 且丢掉颜色参数，见 src/lib.rs::apply_blur）
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Dwm",
     "Win32_System_LibraryLoader",
     "Win32_UI_WindowsAndMessaging",
 ] }

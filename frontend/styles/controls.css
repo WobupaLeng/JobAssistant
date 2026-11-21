@@ -150,6 +150,26 @@
   opacity: 0.5;
 }
 
+/* 只读输入（aria-readonly="true"）：派生值 —— 数据目录、岗位总数这类由库或
+ * 应用路径算出来的读数。虚线边框 + 去掉凹陷内阴影，是「这不是表单项」的信号；
+ * 同时 cursor 回到默认箭头，避免用户以为能点进去打字。
+ * 与 :disabled 的区别：只读框内容仍可选中复制，所以不降整体不透明度。 */
+.input[aria-readonly="true"],
+.textarea[aria-readonly="true"] {
+  border-style: dashed;
+  border-color: var(--hairline-strong, var(--hairline));
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-2);
+  cursor: default;
+}
+
+.input[aria-readonly="true"]:focus,
+.textarea[aria-readonly="true"]:focus {
+  border-color: var(--hairline-strong, var(--hairline));
+  box-shadow: none;
+}
+
 .input::placeholder,
 .textarea::placeholder {
   color: var(--text-3);
@@ -294,6 +314,26 @@
   height: 26px;
   padding: 0 12px;
   font-size: 12.5px;
+}
+
+/* 顶栏导航块：页签 + 敏感库入口捆在一起。
+ * `display: contents` 让这层包裹盒不产生新的 flex 容器——页签与入口仍然
+ * 是 `.topbar` 的直接 flex 子项，间距、垂直居中、换行行为全部不变，
+ * 只是「决策记录」与敏感库按钮之间不再隔着 `.spacer` 的半个顶栏。 */
+.nav {
+  display: contents;
+}
+
+/* 敏感库入口住在顶栏导航里（用户裁决：放在「决策记录」旁边）。
+ * 它的按钮是 `.btn.btn-sm`，而顶栏页签是 26px 的胶囊；两者混排时
+ * 高度与圆角会打架，所以这里把它对齐成页签的尺寸。
+ * 限制在 `.nav` 后代上：万一别处再挂一颗同名按钮，不该被顶栏的尺寸绑住。 */
+.nav button[data-testid='sensitive-open'] {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 /* ---------- 胶囊 ---------- */

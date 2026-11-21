@@ -39,3 +39,11 @@ pub const NAV: &[NavItem] = &[
     NavItem { key: Nav::Config, name: "配置" },
     NavItem { key: Nav::Logs, name: "决策记录" },
 ];
+
+/// 顶栏导航块的 class 名。
+///
+/// `AppShell` 把「导航页签 + 敏感库入口」一起包进 `.nav`：敏感库入口要**紧挨着**
+/// 「决策记录」（用户裁决），而 `.spacer` 会把它们推成隔着半个顶栏的两个孤岛。
+/// 高度由 CSS 的 `.nav { display: contents }` 决定，仍然和 `.topbar` 的其余项
+/// 处在同一个 flex 行上。
+pub const NAV_BLOCK_CLASS: &str = "nav";

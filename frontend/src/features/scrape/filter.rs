@@ -824,7 +824,11 @@ fn KeywordBox(keywords: RwSignal<String>, fail: Callback<String>) -> impl IntoVi
                         }
                     }
                 />
-                <button class="btn btn-sm btn-ghost" on:click=move |_| commit()>
+                <button
+                    class="btn btn-sm btn-ghost"
+                    data-testid="scrape-filter-kw-add-btn"
+                    on:click=move |_| commit()
+                >
                     "添加"
                 </button>
             </div>
@@ -1196,6 +1200,7 @@ pub fn ScrapeFilterPanel(
                         {move || salaries.get().into_iter().filter(|c| is_custom_salary(c)).map(|c| {
                             let label = salary_label(&c);
                             let tid = format!("scrape-filter-salary-{}", tid_safe(&c));
+                            let del_tid = format!("scrape-filter-salary-del-{}", tid_safe(&c));
                             let del = c.clone();
                             view! {
                                 <span class="chip is-on" data-testid=tid>
@@ -1203,6 +1208,8 @@ pub fn ScrapeFilterPanel(
                                     <button
                                         type="button"
                                         class="chip-x"
+                                        data-testid=del_tid
+                                        title="删除这个自定义薪资档"
                                         on:click=move |_| {
                                             salaries.update(|v| v.retain(|x| *x != del));
                                             save.run(());

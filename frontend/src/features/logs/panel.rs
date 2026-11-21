@@ -101,6 +101,9 @@ pub fn start_auto_refresh(state: LogState) -> KillToken {
 pub fn LogPanel(
     state: LogState,
     #[prop(optional)] on_refresh: Option<Callback<()>>,
+    /// 紧凑模式：卡片不再顶满页面，交给父容器（概览页把它挂在投递列表下面）。
+    /// 只影响样式类，不动任何数据流。
+    #[prop(optional)] compact: bool,
 ) -> impl IntoView {
     let view = state.view;
     let auto = state.run_auto;
@@ -131,8 +134,10 @@ pub fn LogPanel(
 
     let refreshing = Signal::derive(move || state.run_loading.get() || state.dec_loading.get());
 
+    let wrap_class = if compact { "card log-wrap is-compact" } else { "card log-wrap" };
+
     view! {
-        <section class="card log-wrap" data-testid="logs-panel">
+        <section class=wrap_class data-testid="logs-panel">
             <header class="card-head">
                 <h2 class="card-title" data-testid="logs-title">"日志"</h2>
                 <div class="tabs" role="tablist" aria-label="日志视图">

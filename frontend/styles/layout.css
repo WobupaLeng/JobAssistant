@@ -88,6 +88,42 @@
   padding-bottom: 2px;
 }
 
+/* ---------- 概览页：投递列表撑满剩余空间 ----------
+ * 用户裁决「投递列表默认撑满下发的空间」。
+ *
+ * 本页滚动交给列表内部的网格（`.job-body.is-fill`），页面自身不再滚：
+ * 列表以上的横幅、以下的运行日志/抓取/期望/试算全是固定高度，页面一旦
+ * 还能滚，列表的「撑满」就没有可参照的高度，永远是内容高度。
+ * 窄窗口（< 1100px）退回页面滚动：那里一行放不下四列，硬撑会把卡片压扁。 */
+.dashboard.is-fill-page {
+  overflow: hidden;
+}
+
+.dashboard.is-fill-page > .app-error,
+.dashboard.is-fill-page > .app-notice {
+  flex: 0 0 auto;
+}
+
+.dashboard.is-fill-page > .job-list {
+  flex: 1 1 auto;
+  min-height: 220px;
+}
+
+.dashboard.is-fill-page > .log-wrap,
+.dashboard.is-fill-page > .scrape-card,
+.dashboard.is-fill-page > .empty-state {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 1100px) {
+  .dashboard.is-fill-page {
+    overflow-y: auto;
+  }
+  .dashboard.is-fill-page > .job-list {
+    flex: 0 0 auto;
+  }
+}
+
 /* ---------- 卡片 ----------
  * Liquid Glass 的核心形状：半透底 + 模糊 + 渐变高光边 + 内外阴影。
  * 【不许改成 border + 纯色】：那会退化成普通的半透明面板。 */

@@ -20,6 +20,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::api::{self, types::*};
 use crate::components::widgets::{Card, Stat, StatusDot};
+use crate::features::auto::AutoBar;
 use crate::lib_ui::text::split_list;
 
 use super::filter::ScrapeFilterPanel;
@@ -128,8 +129,16 @@ pub fn ScrapePanel(
     score_max: Option<u8>,
     min_score_default: Option<u8>,
     on_inserted: Callback<()>,
+    /// 自动投递每发出一条后回调（页面层据此刷新列表与敏感库条数）。
+    /// 与 `on_inserted` 分开：抓取入库和自动投递是两条不同的刷新触发源。
+    #[prop(optional)] on_auto_sent: Option<Callback<()>>,
     notify: Callback<String>,
     fail: Callback<String>,
+    /// 概览页把「重新打分」也挂进这条顶栏（原位是已被移除的统计胶囊行）。
+    /// 只对概览页传：日志页等其它装配点没有这个面板，`None` 时整块不渲染。
+    #[prop(optional)] rescore: Option<ViewFn>,
+    /// 「重新打分」用的已入库岗位数（`db_overview.total`）。
+    #[prop(optional)] rescore_total: Option<Signal<usize>>,
 ) -> impl IntoView {
     let progress = RwSignal::new(ScrapeProgress::default());
     let feed = RwSignal::new(Vec::<FeedLine>::new());
@@ -306,10 +315,31 @@ pub fn ScrapePanel(
         )
     };
 
+    // ---------- 行尾动作区：「重新打分」 ----------
+    //
+    // 统计胶囊行（岗位总数 / 当前列表 / 已排除）被移除后，那一行右侧的
+    // `RescorePanel` 需要一个新家：放在这里，与「已入库 N 条」同一条工具带，
+    // 语义上也对得上（重算的对象正是已入库的岗位）。
+    let tail = rescore.map(|panel| {
+        let total = rescore_total.unwrap_or_else(|| Signal::derive(|| 0usize));
+        move || {
+            view! {
+                <span class="scrape-tool">
+                    <span class="scrape-total" data-testid="scrape-total" title="库里已入库的岗位数">
+                        "已入库 " <b>{move || total.get().to_string()}</b> " 条"
+                    </span>
+                    {panel.run()}
+                </span>
+            }
+            .into_any()
+        }
+    });
+
     view! {
         <Card
             test_id="scrape-panel"
             title="抓取"
+            class="scrape-card"
             subtitle=Signal::derive(move || status_label.get())
             actions=Box::new(move || {
                 view! {
@@ -327,6 +357,8 @@ pub fn ScrapePanel(
             }) as Children
         >
             // ---------- 顶条 ----------
+            // 顺序刻意固定（用户裁决）：筛选开关 → 开始抓取 → 开始/暂停（自动投递）
+            // → 停止抓取 → 进度摘要 → 两个上限输入。「开始」必须紧贴「开始抓取」右边。
             <div class="scrape-bar">
                 <button
                     class="chip as-btn scrape-toggle"
@@ -343,6 +375,16 @@ pub fn ScrapePanel(
                 >
                     {move || if starting.get() { "启动中…" } else { "开始抓取" }}
                 </button>
+                // 自动投递：按钮贴在「开始抓取」右边（用户裁决 图 2）。
+                // `AutoBar` 这个版本只产出扁平节点，数据流与 data-testid 不变。
+                <AutoBar
+                    on_sent=Callback::new(move |_| {
+                        if let Some(cb) = on_auto_sent {
+                            cb.run(());
+                        }
+                    })
+                    on_error=fail
+                />
                 <button
                     class="btn btn-danger btn-sm"
                     data-testid="scrape-stop-btn"
@@ -351,10 +393,6 @@ pub fn ScrapePanel(
                 >
                     "停止抓取"
                 </button>
-                <span class="scrape-brief" title="抓取进程当前状态">
-                    {move || progress_text()}
-                </span>
-                <span class="spacer"></span>
                 <label class="scrape-lim" title="一次抓取最多落库多少条有效 JD">
                     <span class="dim">"有效 JD 上限"</span>
                     <input
@@ -382,6 +420,11 @@ pub fn ScrapePanel(
                     />
                     <span class="dim">"分（低于不入库）"</span>
                 </label>
+                <span class="scrape-brief" title="抓取进程当前状态">
+                    {move || progress_text()}
+                </span>
+                <span class="spacer"></span>
+                {tail.map(|t| t())}
             </div>
 
             // ---------- 展开体：九类筛选条件（本地留档） ----------

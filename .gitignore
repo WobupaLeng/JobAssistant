@@ -11,24 +11,16 @@ node_modules/
 .yarn/
 
 # ---------- 构建产物 ----------
-# 前端构建输出（vite build 生成；cargo tauri build 会重新生成）
-web/dist/
-# Rust 重写骨架的两处前端产物（见 SPEC-002）
-skeleton-web/dist/
-# PyInstaller 输出（backend/dist/aja-backend.exe）
+# 前端构建输出（trunk / vite build 生成；tauri build 会重新生成）
+frontend/dist/
 dist/
-build/
-# 内嵌用后端副本（build.bat 从 backend/dist 复制，约 63 MB）
-backend-exe/
-# Tauri sidecar 目录（旧方案残留）
-backend-sidecar/
-# Rust 编译产物（含 64 MB 的 exe，整个目录 2 GB+）
+# Rust 编译产物（单次全量构建 3.9 GB+）
 target/
-src-tauri/target/
-src-tauri/gen/schemas/
-# 新壳（app/src-tauri）的编译产物：实测单次全量构建 3.9 GB
 app/src-tauri/target/
 app/src-tauri/gen/schemas/
+# Tauri CLI 依赖（构建走 npx tauri，不能删但也不入库）
+app/node_modules/
+frontend/node_modules/
 
 # ---------- Python ----------
 __pycache__/

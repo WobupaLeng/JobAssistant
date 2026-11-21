@@ -160,8 +160,15 @@ pub fn ErrorBar(
     #[prop(optional, into)] on_dismiss: Option<Callback<()>>,
     #[prop(optional, into)] test_id: Option<String>,
 ) -> impl IntoView {
+    // 概览页的页容器是定高的（投递列表要撑满），非列表子项一律 `flex: 0 0 auto`
+    // （见 layout.css `.dashboard.is-fill-page > .app-error`）。类名只是挂钩子，
+    // 样式本体仍在样式表里，不在这里写内联样式。
+    let cls = match test_id.as_deref() {
+        Some("app-error") => "error-bar app-error",
+        _ => "error-bar",
+    };
     view! {
-        <div class="error-bar" data-testid=test_id>
+        <div class=cls data-testid=test_id>
             <b style="flex-shrink:0">"错误"</b>
             <span style="flex:1;word-break:break-word">{message}</span>
             {on_dismiss.map(|cb| view! {
@@ -184,8 +191,12 @@ pub fn Banner(
     #[prop(optional, into)] test_id: Option<String>,
     children: Children,
 ) -> impl IntoView {
+    let cls = match test_id.as_deref() {
+        Some("app-notice") => "banner app-notice",
+        _ => "banner",
+    };
     view! {
-        <div class="banner" data-testid=test_id>
+        <div class=cls data-testid=test_id>
             <span style="flex:1">{children()}</span>
             {action.map(|a| a())}
         </div>
@@ -230,10 +241,11 @@ pub fn Collapsible(
     let body = move || children.with_value(|f| f());
     let caret = move || if open.get() { "caret is-open" } else { "caret" };
     view! {
-        <div class="config-group" data-testid=test_id>
+        <div class="config-group" data-testid=test_id.clone()>
             <button
                 class="section-label"
                 type="button"
+                data-testid=test_id.as_ref().map(|t| format!("{t}-toggle"))
                 aria-expanded=move || if open.get() { "true" } else { "false" }
                 on:click=move |_| on_toggle.run(())
             >

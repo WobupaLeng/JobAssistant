@@ -7,10 +7,21 @@
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
+
+use wasm_bindgen::prelude::Closure;
+use wasm_bindgen::JsCast;
 
 use crate::api::{self, types::*};
 use crate::components::widgets::{Banner, Chip, ErrorBar};
-use crate::lib_ui::nav::{Nav, NAV};
+use crate::lib_ui::nav::{Nav, NAV, NAV_BLOCK_CLASS};
+
+/// 错误条存活时长：10 秒后自动销毁。
+///
+/// 与提示条（4 秒）分开：错误要留够时间读完，但不能一直挂在页面顶部吃掉
+/// 一条高度——用户看完即走，真有持久故障由下一次操作再次触发。
+const ERROR_AUTO_DISMISS_MS: u32 = 10_000;
 
 /// 全局引导状态：三份一次性数据 + 错误/提示。
 ///
@@ -53,6 +64,12 @@ pub fn AppShell(
     nav: RwSignal<Nav>,
     page_tick: RwSignal<u32>,
     dispatch: ViewFn,
+    /// 顶栏导航区末尾的附加插槽（敏感库入口）。
+    ///
+    /// 外壳不自己造这个组件：它住在 `features/`，而 `components/` 不得依赖
+    /// `features/`（`tools/check_layers.py` R2）。由 `lib.rs::App` 组装后传入。
+    #[prop(optional)]
+    nav_extra: Option<ViewFn>,
 ) -> impl IntoView {
     let boot = Boot::new();
     provide_context(boot.clone());
@@ -104,6 +121,45 @@ pub fn AppShell(
         );
     });
 
+    // 错误条 10 秒后自动销毁（用户：图 1 那种错误信息）。
+    // 每次错误出现时重新计时；`on_cleanup` 撤掉上一个计时器，
+    // 否则「报错 → 点忽略 → 再报错」会让前一个计时器提前清掉新的错误。
+    // 计时器句柄放在 `Arc<AtomicI32>` 里：`on_cleanup` 的回调要求 `Send + Sync`，
+    // 而 `RwSignal` 不能直接住进那个闭包；句柄本身是 `Copy` 的 `i32`，
+    // 用原子量让「效果回调写句柄」与「清理回调读句柄」共享同一个槽位。
+    let error_timer: Arc<AtomicI32> = Arc::new(AtomicI32::new(0));
+    let error_timer_effect = error_timer.clone();
+    let boot_dismiss = boot.clone();
+    Effect::new(move |_| {
+        if boot_dismiss.error.get().is_none() {
+            return;
+        }
+        let boot2 = boot_dismiss.clone();
+        let cb = Closure::once_into_js(move || boot2.error.set(None));
+        if let Some(w) = web_sys::window() {
+            let prev = error_timer_effect.swap(0, Ordering::Relaxed);
+            if prev != 0 {
+                w.clear_timeout_with_handle(prev);
+            }
+            if let Ok(h) = w.set_timeout_with_callback_and_timeout_and_arguments_0(
+                cb.unchecked_ref(),
+                ERROR_AUTO_DISMISS_MS as i32,
+            ) {
+                error_timer_effect.store(h, Ordering::Relaxed);
+            }
+        }
+    });
+
+    let error_timer_cleanup = error_timer.clone();
+    on_cleanup(move || {
+        let h = error_timer_cleanup.swap(0, Ordering::Relaxed);
+        if h != 0 {
+            if let Some(w) = web_sys::window() {
+                w.clear_timeout_with_handle(h);
+            }
+        }
+    });
+
     let go = move |k: Nav| {
         nav.set(k);
         if k.enters_side_effect() {
@@ -143,7 +199,15 @@ pub fn AppShell(
         view! { <Chip tone=tone.to_string()>{text}</Chip> }
     };
 
-    let page_cls = move || format!("dashboard");
+    // 概览页启用「投递列表撑满剩余空间」：该页只有一份列表，其余面板都可折叠/定高，
+    // 所以让列表吃掉页面剩下的高度、自己内部滚动（样式见 layout.css `.is-fill-page`）。
+    let page_cls = move || {
+        if nav.get() == Nav::Dashboard {
+            "dashboard is-fill-page".to_string()
+        } else {
+            "dashboard".to_string()
+        }
+    };
 
     // 页面树由调用方传进来：`nav` / `page_tick` 是外壳自己的状态，
     // 所以这里先把它们绑进 `dispatch` 再演进 `view!`——`Callback` 克隆即用。
@@ -157,30 +221,37 @@ pub fn AppShell(
                     "AI 求职助手"
                 </div>
                 <span class="build-tag" data-testid="app-build">{build_tag}</span>
-                <nav class="tabs nav-tabs" role="tablist" aria-label="主导航">
-                    {NAV
-                        .iter()
-                        .map(|t| {
-                            let key = t.key;
-                            let name = t.name;
-                            view! {
-                                <button
-                                    role="tab"
-                                    class=move || {
-                                        if nav.get() == key { "tab is-active" } else { "tab" }
-                                    }
-                                    aria-selected=move || {
-                                        if nav.get() == key { "true" } else { "false" }
-                                    }
-                                    data-testid=format!("nav-{}", key.slug())
-                                    on:click=move |_| go(key)
-                                >
-                                    {name}
-                                </button>
-                            }
-                        })
-                        .collect_view()}
-                </nav>
+                // 导航页签与敏感库入口包成一块：入口要紧挨「决策记录」，
+                // 中间不能有 `.spacer`。`.nav` 是 `display: contents`，
+                // 子项仍是 `.topbar` 的直接 flex 项，排布一点没变。
+                <div class=NAV_BLOCK_CLASS>
+                    <nav class="tabs nav-tabs" role="tablist" aria-label="主导航">
+                        {NAV
+                            .iter()
+                            .map(|t| {
+                                let key = t.key;
+                                let name = t.name;
+                                view! {
+                                    <button
+                                        role="tab"
+                                        class=move || {
+                                            if nav.get() == key { "tab is-active" } else { "tab" }
+                                        }
+                                        aria-selected=move || {
+                                            if nav.get() == key { "true" } else { "false" }
+                                        }
+                                        data-testid=format!("nav-{}", key.slug())
+                                        on:click=move |_| go(key)
+                                    >
+                                        {name}
+                                    </button>
+                                }
+                            })
+                            .collect_view()}
+                    </nav>
+                    // 顶栏附加插槽（敏感库入口由 `lib.rs::App` 组装后传入）。
+                    {nav_extra.map(|f| f.run())}
+                </div>
                 <span class="spacer"></span>
                 <span class="card-sub" data-testid="score-spec">{spec_text}</span>
                 {llm_chip}

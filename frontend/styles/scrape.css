@@ -2,7 +2,8 @@
 
 /* ---------- 顶条（旧版图 3 的第一行）----------
  *
- * 从左到右：收起筛选 | 开始 | 停止 | 状态文案（吃掉剩余宽度）| 两个上限输入。
+ * 从左到右：收起筛选 | 开始抓取 | 开始/暂停（自动投递）| 停止抓取 |
+ * 两个上限输入 | 状态文案（吃掉剩余宽度）| 已入库 N 条 + 重新打分。
  * 上限输入固定宽度（数字最多 4 位），状态文案弹性但带省略号——
  * 抓取中的状态串会很长，撑开会把右侧两个输入挤出面板。
  *
@@ -21,7 +22,9 @@
 }
 
 .scrape-brief {
-  flex: 1 1 200px;
+  /* 先让两个上限输入和「已入库」站住，进度摘要吃剩下的宽度。
+   * basis 降到 120px：与自动投递的状态胶囊同排时，200px 会把输入挤到第二行。 */
+  flex: 1 1 120px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -46,6 +49,31 @@
   padding: 2px 4px;
   text-align: center;
   font-size: 11px;
+}
+
+/* 行尾「已入库 N 条」：重算的规模一眼可见，不至于对着一个按钮盲点。
+ * 等宽数字 + 不让换行，免得数字变化时整条工具带抖动。 */
+.scrape-total {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.scrape-total b {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+/* 行尾工具带：「已入库 N 条」+ 重算按钮捆成一个不换行的 flex 项，
+ * 免得窄窗口里它和 `.scrape-brief` 抢同一行、把数字压成省略号。 */
+.scrape-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 /* ---------- 事件流 ----------
@@ -163,10 +191,11 @@
 }
 
 @media (max-width: 1180px) {
-  /* 窄窗：状态文案先断行，两个上限输入整体折到第二行 */
+  /* 窄窗：状态摘要在按钮那一行已经没地方了，让它自己独占最后一行。
+   * 不参与换行排序（去掉 order），只是被 `flex-basis: 100%` 顶下去——
+   * 顺序仍然是「… → 已入库/重算 → 进度摘要」，读起来是一条尾巴。 */
   .scrape-brief {
     flex-basis: 100%;
-    order: 9;
   }
 
   .demo-grid {

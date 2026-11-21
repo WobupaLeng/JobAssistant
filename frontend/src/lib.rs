@@ -43,11 +43,27 @@ fn App() -> impl IntoView {
     // 页面要读它们，而 `ViewFn` 是 `'static`，捕获不到外壳内部创建的信号。
     let nav = RwSignal::new(crate::lib_ui::nav::Nav::Dashboard);
     let page_tick = RwSignal::new(0u32);
+    // 敏感库浮层的开关：入口按钮在顶栏（`nav_extra` 插槽），浮层在页面树里，
+    // 两处都要这个信号，所以提到组装层持有。`features/` 同样不得依赖 `components/`。
+    let sensitive_open = RwSignal::new(false);
+    let nav_extra = ViewFn::from(move || {
+        view! { <features::sensitive::SensitiveEntry open=sensitive_open /> }
+    });
     let dispatch = ViewFn::from(move || {
         let nav = use_context::<RwSignal<Nav>>().expect("AppShell 必须注入 nav");
         let page_tick = use_context::<RwSignal<u32>>().expect("AppShell 必须注入 page_tick");
         let on_notice = use_context::<Callback<String>>().expect("AppShell 必须注入 on_notice");
-        view! { <pages::Page nav=nav page_tick=page_tick on_notice=on_notice /> }
+        view! {
+            <pages::Page nav=nav page_tick=page_tick on_notice=on_notice />
+            <features::sensitive::SensitiveOverlay open=sensitive_open />
+        }
     });
-    view! { <components::shell::AppShell nav=nav page_tick=page_tick dispatch=dispatch /> }
+    view! {
+        <components::shell::AppShell
+            nav=nav
+            page_tick=page_tick
+            dispatch=dispatch
+            nav_extra=nav_extra
+        />
+    }
 }

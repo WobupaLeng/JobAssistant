@@ -60,7 +60,7 @@ fn app_info(paths: tauri::State<'_, commands_config::AppPaths>) -> serde_json::V
 
 /// 应用毛玻璃效果。
 ///
-/// **为什么不用 `window_vibrancy::apply_acrylic`（2026-11-21 实测）**：
+/// **为什么不用 `window_vibrancy::apply_acrylic`**：
 /// `window-vibrancy-0.8.1/src/windows.rs:62` 在 Windows 11 上只调
 /// `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE, DWMSBT_TRANSIENTWINDOW)`，
 /// **完全不碰 `ACCENT_POLICY`，且把 `color` 参数丢掉**。该后景类型要客户区透明才可见，
@@ -68,51 +68,74 @@ fn app_info(paths: tauri::State<'_, commands_config::AppPaths>) -> serde_json::V
 /// （`wry-0.57.3/src/webview2/mod.rs:2016`），WebView2 客户区永远不透明。
 /// 结果就是「`apply_acrylic` 返回 Ok、`apply_mica` 也返回 Ok、屏幕上却什么都没有」。
 ///
-/// **可行路径**：Win10 那条 `SetWindowCompositionAttribute(ACCENT_ENABLE_ACRYLICBLURBEHIND)`
-/// ——它让 DWM 自己模糊窗口**背后**的内容，不要求客户区透明，是 WebView2 应用里唯一
-/// 能看到效果的亚克力实现。该函数未文档化，`windows-sys` 不导出，所以按
-/// `window-vibrancy` 的同样做法用 `GetProcAddress` 取指针。
-///
-/// 降级链：亚克力 → Mica（仅标题栏可见）→ 纯色。**任何一步失败都不报错**，
-/// 绝不能白屏或透明穿透（SPEC-002 V5）。
+/// 该函数未文档化，`windows-sys` 不导出，所以按 `window-vibrancy` 的同样做法用
+/// `GetProcAddress` 取指针。降级链：系统亚克力 → Win11 亚克力材质 → 纯色。
+/// **任何一步失败都不报错**，绝不能白屏或透明穿透（SPEC-002 V5）。
 fn apply_blur(window: &tauri::WebviewWindow) {
-    #[cfg(target_os = "windows")]
-    {
-        use window_vibrancy::{apply_acrylic, apply_mica};
-        if apply_accent_acrylic(window, ACRYLIC_TINT) {
-            return;
-        }
-        eprintln!("[window] SWCA 亚克力不可用，回退 window-vibrancy");
-        if apply_acrylic(window, Some(ACRYLIC_TINT)).is_ok() {
-            return;
-        }
-        if apply_mica(window, None).is_ok() {
-            return;
-        }
-        eprintln!("[window] 亚克力/Mica 均不可用，降级为纯色背景");
+    if apply_system_glass(window) {
+        return;
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = window;
-    }
+    eprintln!("[window] 系统玻璃不可用，降级为纯色背景");
 }
 
 /// 亚克力底色：深蓝黑，alpha 越低桌面越透。`SetWindowCompositionAttribute` 的
 /// `GradientColor` 是 **AABBGGRR**（不是 RGBA），所以这里按字节序拼。
 const ACRYLIC_TINT: (u8, u8, u8, u8) = (18, 24, 38, 125);
 
-/// 用未文档化的 `SetWindowCompositionAttribute` 开启真正的亚克力模糊。
+/// 给高斯模糊的底色。`ACCENT_ENABLE_BLURBEHIND` 在 Win11 上做**纯模糊、不加色调**
+/// （Win10 才是白雾），所以底色交给它的 `TintColor`：alpha 越低桌面越透。
+const BLUR_TINT: (u8, u8, u8, u8) = (12, 16, 26, 115);
+
+/// 开系统「磨砂玻璃」。
 ///
-/// 返回 `false` 表示「本机没有这个 API」，交给调用方走降级链，**不是错误**。
-fn apply_accent_acrylic(window: &tauri::WebviewWindow, tint: (u8, u8, u8, u8)) -> bool {
+/// 顺序有讲究：
+/// 1. **`ACCENT_ENABLE_ACRYLICBLURBEHIND` 在这台机器上不出效果**（2026-11-21 实测：
+///    `SetWindowCompositionAttribute` 返回成功、`WS_EX_LAYERED` 也为真，屏幕上却什么都没有），
+///    所以它不能排第一——排第一就等于把「返回成功但无效」当成了成功。
+/// 2. `ACCENT_ENABLE_BLURBEHIND` 是 Win7 起就有的高斯模糊，不依赖透明客户区；
+///    Win11 去掉了 Win10 的白雾，并**自动叠加系统设置里的「透明效果」色**。
+/// 3. 都不行时用 Win11 的 `DWMWA_SYSTEMBACKDROP_TYPE = DWMSBT_TRANSIENTWINDOW`（亚克力材质）
+///    兜底；它只保证非客户区，属于最后手段。
+///
+/// 返回 `false` 表示三条都不成立，**不是错误**（调用方降级为纯色）。
+fn apply_system_glass(window: &tauri::WebviewWindow) -> bool {
+    if apply_accent_effect(window, ACCENT_ENABLE_BLURBEHIND, BLUR_TINT) {
+        return true;
+    }
+    if apply_accent_effect(window, ACCENT_ENABLE_ACRYLICBLURBEHIND, ACRYLIC_TINT) {
+        return true;
+    }
+    apply_material_backdrop(window)
+}
+
+/// `ACCENT_ENABLE_ACRYLICBLURBEHIND`：Win10 1803+ 的亚克力。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const ACCENT_ENABLE_ACRYLICBLURBEHIND: u32 = 4;
+/// `ACCENT_ENABLE_BLURBEHIND`：Win7+ 的高斯模糊，Win11 上是无色调的真模糊。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const ACCENT_ENABLE_BLURBEHIND: u32 = 3;
+/// `WCA_ACCENT_POLICY`：唯一的 composition attribute。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const WCA_ACCENT_POLICY: u32 = 19;
+
+/// `DWMWA_SYSTEMBACKDROP_TYPE`（Win11 22H2+）与亚克力材质的取值。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DWMWA_SYSTEMBACKDROP_TYPE: u32 = 38;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DWMSBT_TRANSIENTWINDOW: i32 = 3;
+
+/// 用未文档化的 `SetWindowCompositionAttribute` 写入 `WCA_ACCENT_POLICY`。
+/// `accent_state` 取 `ACCENT_ENABLE_BLURBEHIND` 或 `ACCENT_ENABLE_ACRYLICBLURBEHIND`。
+///
+/// 返回 `false` 表示「本机没有这个 API 或调用失败」，交给调用方走降级链，**不是错误**。
+fn apply_accent_effect(
+    window: &tauri::WebviewWindow,
+    accent_state: u32,
+    tint: (u8, u8, u8, u8),
+) -> bool {
     #[cfg(target_os = "windows")]
     {
         use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
-
-        /// `ACCENT_ENABLE_ACRYLICBLURBEHIND`：Win10 1803+ 的亚克力。
-        const ACCENT_ENABLE_ACRYLICBLURBEHIND: u32 = 4;
-        /// `WCA_ACCENT_POLICY`：唯一的 composition attribute。
-        const WCA_ACCENT_POLICY: u32 = 19;
 
         #[repr(C)]
         struct AccentPolicy {
@@ -156,7 +179,7 @@ fn apply_accent_acrylic(window: &tauri::WebviewWindow, tint: (u8, u8, u8, u8)) -
             | (u32::from(g) << 8)
             | u32::from(r);
         let mut policy = AccentPolicy {
-            accent_state: ACCENT_ENABLE_ACRYLICBLURBEHIND,
+            accent_state,
             // 2 = 在窗口边框上绘制，避免圆角处出现硬边
             accent_flags: 2,
             gradient_color: gradient,
@@ -168,15 +191,41 @@ fn apply_accent_acrylic(window: &tauri::WebviewWindow, tint: (u8, u8, u8, u8)) -
             size: std::mem::size_of::<AccentPolicy>(),
         };
         let ok = unsafe { set_attr(raw, &mut data) } != 0;
-        if !ok {
-            eprintln!("[window] SetWindowCompositionAttribute 返回失败");
-        }
         ok
     }
     #[cfg(not(target_os = "windows"))]
     {
         let _ = window;
+        let _ = accent_state;
         let _ = tint;
+        false
+    }
+}
+
+/// Win11 的 `DWMWA_SYSTEMBACKDROP_TYPE = DWMSBT_TRANSIENTWINDOW`（亚克力材质）。
+/// 只保证非客户区可见，作最后兜底。
+fn apply_material_backdrop(window: &tauri::WebviewWindow) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
+
+        let Ok(hwnd) = window.hwnd() else {
+            return false;
+        };
+        let value = DWMSBT_TRANSIENTWINDOW;
+        let hr = unsafe {
+            DwmSetWindowAttribute(
+                hwnd.0,
+                DWMWA_SYSTEMBACKDROP_TYPE,
+                &value as *const i32 as *const std::ffi::c_void,
+                std::mem::size_of::<i32>() as u32,
+            )
+        };
+        hr == 0
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
         false
     }
 }
@@ -205,16 +254,16 @@ fn window_diag(window: &tauri::WebviewWindow) {
                 ex & 0x0008_0000 != 0, // WS_EX_LAYERED，亚克力生效必须为 true
             );
         }
-        // 亚克力/Mica 的调用结果也要打出来，否则「没效果」分不清是没调用还是被挡
-        use window_vibrancy::{apply_acrylic, apply_mica};
-        match apply_acrylic(window, Some((18, 24, 38, 125))) {
-            Ok(()) => eprintln!("[diag] apply_acrylic = Ok"),
-            Err(e) => eprintln!("[diag] apply_acrylic = Err({e:?})"),
-        }
-        match apply_mica(window, None) {
-            Ok(()) => eprintln!("[diag] apply_mica = Ok"),
-            Err(e) => eprintln!("[diag] apply_mica = Err({e:?})"),
-        }
+        // 三种效果的调用结果都打出来，否则「没效果」分不清是没调用还是被挡
+        eprintln!(
+            "[diag] blur = {}",
+            apply_accent_effect(window, ACCENT_ENABLE_BLURBEHIND, BLUR_TINT)
+        );
+        eprintln!(
+            "[diag] acrylic = {}",
+            apply_accent_effect(window, ACCENT_ENABLE_ACRYLICBLURBEHIND, ACRYLIC_TINT)
+        );
+        eprintln!("[diag] material = {}", apply_material_backdrop(window));
     }
     #[cfg(not(target_os = "windows"))]
     {

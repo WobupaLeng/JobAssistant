@@ -64,7 +64,41 @@ no_args! {
 }
 
 pub async fn list_jobs(args: ListJobsArgs) -> Result<Vec<Job>, String> {
-    invoke("list_jobs", args).await
+    // 命令层签名是 `list_jobs(state, args: ListJobsArgs)`：Tauri 按参数名找键，
+    // 所以载荷必须包一层 `{ "args": {...} }`（与 `rescore_jobs` / `auto_greet_next` 同一写法）。
+    //
+    // 且 `null` 要先变成 `undefined`：命令层的 `Option<T>` 字段**没有** `#[serde(default)]`，
+    // 显式 null 会被判成「缺 key」而报
+    // `invalid args \`args\` for command \`list_jobs\`: command list_jobs missing required key args`。
+    invoke("list_jobs", serde_json::json!({ "args": list_args_value(&args) })).await
+}
+
+/// `ListJobsArgs` 里为 `None` 的字段在 JS 侧是 `undefined`（键被丢掉），不是 `null`。
+fn list_args_value(args: &ListJobsArgs) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    let mut put_str = |k: &str, v: &Option<String>| {
+        if let Some(v) = v {
+            map.insert(k.to_string(), serde_json::Value::String(v.clone()));
+        }
+    };
+    put_str("status", &args.status);
+    put_str("platform", &args.platform);
+    put_str("sort", &args.sort);
+    put_str("tab", &args.tab);
+    put_str("order", &args.order);
+    if let Some(v) = args.min_score {
+        map.insert("min_score".into(), v.into());
+    }
+    if let Some(v) = args.limit {
+        map.insert("limit".into(), v.into());
+    }
+    if let Some(v) = args.offset {
+        map.insert("offset".into(), v.into());
+    }
+    map.insert("include_rejected".into(), args.include_rejected.into());
+    map.insert("rejected_only".into(), args.rejected_only.into());
+    map.insert("ascending".into(), args.ascending.into());
+    serde_json::Value::Object(map)
 }
 
 pub async fn get_job(job_id: &str) -> Result<Job, String> {
