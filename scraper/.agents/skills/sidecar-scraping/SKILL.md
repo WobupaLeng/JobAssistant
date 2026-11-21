@@ -36,7 +36,7 @@ description: Python 抓取 sidecar（scraper/）的职责边界与抓取铁律�
 
 | 你要干的事 | 先读 |
 |---|---|
-| 加一条命令 / 改分发 | `sidecar.py:521-572`（`handle`）、协议对端 `app/src-tauri/src/core/sidecar/protocol.rs:69-129` |
+| 加一条命令 / 改分发 | `sidecar.py:521-572`（`handle`）、协议对端 `backend-tauri/src/core/sidecar/protocol.rs:69-129` |
 | 改卡片解析 | `boss.py:442-527`（`_parse_dom_cards`）、`boss.py:431-439`（容器选择器） |
 | 改翻页 | `boss.py:361-384`（`_load_more_by_scroll`） |
 | 详情页字段 | `boss.py:565-751`（`_parse_detail_dom`），HR 活跃度在 `:621-637` |
@@ -220,5 +220,5 @@ Rust 侧 `ScrapedJob`（`protocol.rs:209-236`）全部字段可缺，只有 `job
 10. 不打分、不落库、不读配置、不持业务状态（`sidecar.py:1-16`）。
 11. `emit()` 必须 flush，且总行不超过 1 MB（`sidecar.py:47-57` 超限改成一条 error 日志）。
 12. stdout 只走协议：`print()` 一行调试就会污染协议流，被 Rust 判成 `Malformed`
-    （`app/src-tauri/src/core/sidecar/process/codec.rs:38-43`：Python traceback 混进 stdout
+    （`backend-tauri/src/core/sidecar/process/codec.rs:38-43`：Python traceback 混进 stdout
     就是该模块存在的理由）。日志请走 `emit` 的 `log` 事件。

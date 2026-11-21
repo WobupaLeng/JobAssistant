@@ -5,40 +5,40 @@
 
 | 模块 | 模块约定 | 交接 |
 |---|---|---|
-| `app/`（Tauri 2 壳 + 内嵌 Rust 核心） | [app/AGENTS.md](app/AGENTS.md) | [app/HANDOFF.md](app/HANDOFF.md) |
-| `frontend/`（WebView 内的界面） | [frontend/AGENTS.md](frontend/AGENTS.md) | [frontend/HANDOFF.md](frontend/HANDOFF.md) |
+| `backend-tauri/`（Tauri 2 壳 + 内嵌 Rust 核心） | [backend-tauri/AGENTS.md](backend-tauri/AGENTS.md) | [backend-tauri/HANDOFF.md](backend-tauri/HANDOFF.md) |
+| `frontend-vue/`（WebView 内的界面） | [frontend-vue/AGENTS.md](frontend-vue/AGENTS.md) | [frontend-vue/HANDOFF.md](frontend-vue/HANDOFF.md) |
 | `scraper/`（Python 抓取 sidecar） | [scraper/AGENTS.md](scraper/AGENTS.md) | [scraper/HANDOFF.md](scraper/HANDOFF.md) |
 
 ---
 
 ## 0. 状态看板（动手前必读）
 
-**当前阶段**：`FRONTEND_REBUILD_IN_PROGRESS` —— 界面从 Leptos 0.8 WASM 原地重写为 Vue 3 + Vite + TypeScript，后端 `app/` 不动。
+**当前阶段**：`FRONTEND_REBUILD_IN_PROGRESS` —— 界面从 Leptos 0.8 WASM 原地重写为 Vue 3 + Vite + TypeScript，后端 `backend-tauri/` 不动。
 
 | 层 | 状态 |
 |---|---|
-| `app/` | ✅ 可用。命令全部定义且全部注册；CSP 已显式声明 `script-src`（缺失即白屏，见 §3.1） |
+| `backend-tauri/` | ✅ 可用。命令全部定义且全部注册；CSP 已显式声明 `script-src`（缺失即白屏，见 §3.1） |
 | `scraper/` | ⚠️ 抓取 / 登录 / 聊天 / 求职期望已通；**从 Tauri 子进程拉起真实 Chrome 仍失败**（见 §6.2） |
-| `frontend/` | ✅ Leptos 版四页全部实现、配置页已接读写。🔨 重写为 Vue 3 未开工 |
+| `frontend-vue/` | ✅ Leptos 版四页全部实现、配置页已接读写。🔨 重写为 Vue 3 未开工 |
 
 - **状态只升不降**，推进时原地替换整表。
 - **不写用例数与版本号**（每轮必过期）。要数字现场跑，`#[test]` 静态计数 **≠** 通过数，两者不许混引。
-- **并发依据**：`app/` 与 `frontend/` 目录完全隔离时可并发；涉及 §4 任一文件时降为单线程。
+- **并发依据**：`backend-tauri/` 与 `frontend-vue/` 目录完全隔离时可并发；涉及 §4 任一文件时降为单线程。
 
 ---
 
 ## 1. 项目形态
 
 ```
-frontend/ ──invoke()──▶ app/ 命令层 ──直接调用──▶ app/src-tauri/src/core/ (领域)
+frontend-vue/ ──invoke()──▶ backend-tauri/ 命令层 ──直接调用──▶ backend-tauri/src/core/ (领域)
                             │
                             └──stdin/stdout JSON Lines──▶ scraper/ (Python sidecar)
 ```
 
 | 目录 | 不可妥协的边界 |
 |---|---|
-| `app/` | 命令层不得写领域规则；`src/core/` 不得 `use tauri::` |
-| `frontend/` | **不碰系统 API、不起子进程**，一切经 `invoke` |
+| `backend-tauri/` | 命令层不得写领域规则；`src/core/` 不得 `use tauri::` |
+| `frontend-vue/` | **不碰系统 API、不起子进程**，一切经 `invoke` |
 | `scraper/` | **不打分、不落库、不持有业务状态** |
 
 **产品约束**：单文件分发，用户无需安装任何运行环境（Python / Node / SQLite 均不进用户机器）。SQLite 编进二进制。
@@ -53,9 +53,9 @@ frontend/ ──invoke()──▶ app/ 命令层 ──直接调用──▶ app
 
 | 契约 | 真源 | 对端 |
 |---|---|---|
-| Tauri 命令签名 | `app/src-tauri/src/commands_*.rs` + `lib.rs` 的 `invoke_handler` | `frontend/src/api/` |
-| sidecar 协议 | `app/src-tauri/src/core/sidecar/protocol.rs` | `scraper/sidecar.py` 的 `handle()` / `emit()` |
-| 数据库结构 | `app/src-tauri/src/core/domain/schema.rs` | `app/src-tauri/src/core/infra/sqlite*` |
+| Tauri 命令签名 | `backend-tauri/src/commands_*.rs` + `lib.rs` 的 `invoke_handler` | `frontend-vue/src/api/` |
+| sidecar 协议 | `backend-tauri/src/core/sidecar/protocol.rs` | `scraper/sidecar.py` 的 `handle()` / `emit()` |
+| 数据库结构 | `backend-tauri/src/core/domain/schema.rs` | `backend-tauri/src/core/infra/sqlite*` |
 
 **三条静默失效**：
 
@@ -69,13 +69,13 @@ frontend/ ──invoke()──▶ app/ 命令层 ──直接调用──▶ app
 
 1. **严禁**在视图层或命令层写业务规则（打分 / 排除 / 入库判定 / 投放节奏）。外部入参必须严格校验。
 2. **API Key、登录 cookie 只落 `app_config` 表**。严禁写进源码、日志、`localStorage` 明文或提交记录。回显只给尾 4 位掩码，**掩码值不得回写**。
-3. **渲染进程严禁**直接调系统 API 或起子进程。sidecar 是 `app` 的子进程，前端不直接接触。
+3. **渲染进程严禁**直接调系统 API 或起子进程。sidecar 是 `backend-tauri` 的子进程，前端不直接接触。
 4. **反爬**：严禁设 `AJA_NO_STEALTH=1` 跑真实抓取，严禁把随机延时（1.5~9.8 秒）改小。调试抓取必须用独立 profile。
 5. **数据安全**：严禁对 `data/*.db` 真实库做破坏性验证。迁移 / 写入验证必须在副本或临时目录进行，验完删除。
 
 ### 3.1 CSP 铁律
 
-`app/src-tauri/tauri.conf.json` 的 `security.csp`：
+`backend-tauri/tauri.conf.json` 的 `security.csp`：
 
 - **必须显式写 `script-src`**。Tauri 把内联引导脚本的 sha256 追加进 `script-src`，**该指令不存在时哈希无处落地 → 整页脚本被丢弃 → 白屏只剩背景色**。`beforeDevCommand` / `beforeBuildCommand` 为空串，这份 csp 是唯一来源。
 - **不加 `'unsafe-inline'`**：效果相同却让 `script-src` 对任何内联脚本失效，白丢 XSS 防护。
@@ -87,7 +87,7 @@ frontend/ ──invoke()──▶ app/ 命令层 ──直接调用──▶ app
 
 ## 4. 高冲突单点（同一时刻只允许一个写者，降为单线程）
 
-`app/src-tauri/src/lib.rs`、`app/src-tauri/tauri.conf.json`、`app/src-tauri/Cargo.toml`、`app/src-tauri/src/core/domain/schema.rs`、`app/src-tauri/src/core/sidecar/protocol.rs`、`scraper/sidecar.py`。
+`backend-tauri/src/lib.rs`、`backend-tauri/tauri.conf.json`、`backend-tauri/Cargo.toml`、`backend-tauri/src/core/domain/schema.rs`、`backend-tauri/src/core/sidecar/protocol.rs`、`scraper/sidecar.py`。
 
 ---
 
@@ -100,8 +100,8 @@ $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 $env:CARGO_TARGET_DIR = "$env:TEMP\jt-<lane>"   # 独占目录，防陈旧产物重放
 $env:TEMP = "$env:TEMP"; $env:TMP = $env:TEMP
 
-cd app/src-tauri;   cargo test
-cd frontend;        <静态检查见 frontend/AGENTS.md>
+cd backend-tauri;   cargo test
+cd frontend-vue;        <静态检查见 frontend-vue/AGENTS.md>
 python -m compileall -q scraper
 ```
 
@@ -113,7 +113,7 @@ python -m compileall -q scraper
 
 ### 5.3 槽位 C · 集成与产物冒烟
 
-- **构建**：`cd app && npx tauri build --no-bundle`。**必须**用 `tauri build`——`cargo build --release` 不内嵌前端 → 白屏。
+- **构建**：`cd backend-tauri && npx tauri build --no-bundle`。**必须**用 `tauri build`——`cargo build --release` 不内嵌前端 → 白屏。
 - **启动冒烟必须用工作区外的产物**。工作区内的 exe 一律跑不起来（§6.1）。
 - `tools/*.py` 门禁脚本已随旧版实现删除，不再需要。端到端验证按模块 `HANDOFF.md` 手工进行。
 
@@ -129,7 +129,7 @@ python -m compileall -q scraper
 ## 6. Git 洁净
 
 - **契约熔断**：`core/` 与 `scraper/` 协议不一致、命令层与前端类型不一致、或文档与实际行为冲突时，**立即停止修改业务代码**，`git status` 汇报未提交范围，由用户决定保留或回滚。
-- **禁止污染版本库**：不提交密钥、编译产物（`app/src-tauri/target/`、`frontend/target/`、`frontend/dist/`、`frontend/node_modules/`）、临时截图与日志。`data/` 含 cookie 与 Chrome profile，已忽略，**不得** `git add -f`。
+- **禁止污染版本库**：不提交密钥、编译产物（`backend-tauri/target/`、`frontend-vue/target/`、`frontend-vue/dist/`、`frontend-vue/node_modules/`）、临时截图与日志。`data/` 含 cookie 与 Chrome profile，已忽略，**不得** `git add -f`。
 - **提交信息** `<type>(<scope>): <subject>`：`<type>` ∈ `feat` / `fix` / `docs` / `style` / `test` / `refactor` / `chore`；`<scope>` ∈ `core` / `desktop` / `client` / `sidecar` / `contracts` / `release` / `arch`。
 - **提交门禁**：未通过槽位 A 前禁止 `git commit`。每次只提交一个完整 Milestone。
 - **用户本地改动保护**：非本人所做的改动不得擅自提交或还原，须先询问。
@@ -147,7 +147,7 @@ python -m compileall -q scraper
 | 启动报 `os error 5` / `0x800700AA` | 根因不是代码：工作区目录带 Low 完整性标签，里面的 exe 被降为 `S-1-16-4096`，写不了 `%LOCALAPPDATA%`。**产物必须放工作区外**。 |
 | 单实例锁 | **不是锁文件**，是 Windows 命名互斥体 `Local\com.ai.jobassistant.rust.single`（`ERROR_ALREADY_EXISTS` 即报重复实例，句柄故意泄漏到进程退出）。旧 `app.lock` 方案已作废。 |
 | 真实库迁移 | `migrate()` 必须整体事务。动真实库前先 `Copy-Item` 到 `data/backup/` 并核对 SHA256。 |
-| 写库失败不计入 `inserted` | 判定只在 `app/src-tauri/src/core/sidecar/ingest.rs`；sidecar 不打分不落库。 |
+| 写库失败不计入 `inserted` | 判定只在 `backend-tauri/src/core/sidecar/ingest.rs`；sidecar 不打分不落库。 |
 | 日志游标 | `LogRing::since` 是**闭区间**（`ts_ms >= since`），边界那一毫秒会重送一条，前端按 `(ts, level, message)` 多重集去重。需要恰好一次语义用 `since_seq(after_seq)`。**不要改回开区间**——同毫秒多条日志会永久取不到。 |
 | `schema.rs` 无外键 | 父子表靠应用层维护。`rusqlite` 的 `bundled` 默认 `foreign_keys=OFF`，加约束前先 `conn.pragma_update(None, "foreign_keys", "ON")`。 |
 | `core/` 禁 `use tauri::` | **是 code review 约定，不是编译期门禁**（`core/` 已不是独立 crate）。同类：`domain` 禁依赖 `rusqlite` / `ureq`。 |
@@ -155,7 +155,7 @@ python -m compileall -q scraper
 ### 7.2 未决项
 
 1. **【阻塞】Tauri 子进程拉不起真实 Chrome**：`msedgewebview2.exe` 创建的 Chromium 单例命名对象让 sidecar 的 Chrome 报「正在现有的浏览器会话中打开」并退出 → `TargetClosedError`。已排除 Job Object、环境变量、stdio、`--user-data-dir` 路径、profile 脏数据、Chrome 版本。待试：给 sidecar 的 Chrome 换不撞名的 user-data-dir。
-2. **前端 Vue 3 原地重写未开工**：方案 [ARCH-003](docs/architecture/ARCH-003-vue-frontend-migration.md)，决策 [ADR-003](docs/adr/ADR-003-frontend-leptos-to-vue.md)，进度写 `frontend/HANDOFF.md`。
+2. **前端 Vue 3 原地重写未开工**：方案 [ARCH-003](docs/architecture/ARCH-003-vue-frontend-migration.md)，决策 [ADR-003](docs/adr/ADR-003-frontend-leptos-to-vue.md)，进度写 `frontend-vue/HANDOFF.md`。
 3. **Liquid Glass 第二三层未做**：第二层 SVG 湍流折射，第三层 WebGL 卡片间真折射。第一层 CSS 玻璃已完成。规格原文从提交 `d39bae4` 的 `docs/ui/UI-SPEC-liquid-glass-l2-l3.md` 取回。
 4. **预筛否决的 `rule` 字段恒写 `"prescan"`**，丢失具体命中规则。需给 `ingest::PreScan::Rule` 加承载字段（纯后端，不动前端契约）。
 5. **`set_limit` 夹值语义未定**：`max_jd > 500` 时返回错误而非静默夹住，表现为「保存失败但上限已生效」。

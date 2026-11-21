@@ -2,14 +2,14 @@
 
 > 状态：`DESIGN_ACCEPTED`（2026-11-22 用户裁决）· 版本 2 · 2026-11-22
 > 决策记录：[`ADR-003`](../adr/ADR-003-frontend-leptos-to-vue.md)
-> 契约真源：[`frontend/AGENTS.md`](../../frontend/AGENTS.md)（17 条迁移契约 C1–C17）
-> 开工前置条件：[`frontend/HANDOFF.md`](../../frontend/HANDOFF.md) 第 1 节
+> 契约真源：[`frontend-vue/AGENTS.md`](../../frontend-vue/AGENTS.md)（17 条迁移契约 C1–C17）
+> 开工前置条件：[`frontend-vue/HANDOFF.md`](../../frontend-vue/HANDOFF.md) 第 1 节
 
 ---
 
 ## 0. 一句话结论
 
-**`frontend/` 原地重写为 Vue 3 + Vite + TypeScript，`app/`（含 `core/`）与 `scraper/` 一行不用改。** 48 条命令的契约、CSP 铁律、11 份 CSS 设计令牌、`data-testid` 锚点全部原样保留。
+**`frontend-vue/` 原地重写为 Vue 3 + Vite + TypeScript，`backend-tauri/`（含 `core/`）与 `scraper/` 一行不用改。** 48 条命令的契约、CSP 铁律、11 份 CSS 设计令牌、`data-testid` 锚点全部原样保留。
 
 真正的成本不在「换框架」，而在**把约 11,500 行 Leptos 里非 UI 的那部分重新实现一遍**——其中约 2,400 行与渲染无关的纯逻辑（格式化、筛选、草稿 diff、日志合并）必须逐一对齐，否则会出现「界面一样但行为不一样」的静默回归。
 
@@ -23,17 +23,17 @@
 
 | 层 | 文件数 | 行数 | 说明 |
 |---|---|---|---|
-| `frontend/src/**/*.rs` | 61 | 11,551 | 含 `#[test]` 96 个 |
+| `frontend-vue/src/**/*.rs` | 61 | 11,551 | 含 `#[test]` 96 个 |
 | 其中 `api/` | 2 | 971 | `mod.rs` 380 行（39 手写 + 8 宏展开 = 47 个函数）、`types.rs` 591 行（37 struct + 1 enum） |
 | 其中 `features/` | 39 | 8,369 | 最大 `features/scrape/filter.rs` 1,445 行 |
 | 其中 `lib_ui/` | 10 | 约 1,000 | 纯函数层 |
 | 其中 `components/` | 2 | 550 | `shell.rs` 287 + `widgets.rs` 263 |
 | 其中 `pages/` | 5 | 634 | `dashboard.rs` 323 最大 |
-| `frontend/styles/*.css` | 11 | 3,197 | 纯 CSS，**零框架依赖，可 1:1 搬走** |
+| `frontend-vue/styles/*.css` | 11 | 3,197 | 纯 CSS，**零框架依赖，可 1:1 搬走** |
 
 ### 1.2 契约面（保持不变）
 
-- **48 条 Tauri 命令**：`app/src-tauri/src/lib.rs` 的 `generate_handler!` 注册项（46 条来自 `commands_*.rs` + 2 条 `lib.rs` 内联的 `get_scoring_spec` / `app_info`）。
+- **48 条 Tauri 命令**：`backend-tauri/src/lib.rs` 的 `generate_handler!` 注册项（46 条来自 `commands_*.rs` + 2 条 `lib.rs` 内联的 `get_scoring_spec` / `app_info`）。
 - **前端已封装 46 / 48**：缺 `passes_threshold`（`commands_db.rs:410`）与 `update_score`（`commands_db.rs:424`）。Vue 版可以补齐，也可以保持现状——**补齐是加分项，不是迁移门槛**。
 - **调用约定**：`window.__TAURI_INTERNALS__.invoke(cmd, args)`。
 - **两种载荷形状**（最容易在迁移中出错，见第 5 节）：
@@ -73,10 +73,10 @@ tokens → layout → controls → jobs → drawer → motion → scrape → pag
 
 ## 2. 目标架构
 
-### 2.1 物理目录（原地重写 `frontend/`）
+### 2.1 物理目录（原地重写 `frontend-vue/`）
 
 ```
-frontend/
+frontend-vue/
   index.html                     Vite 入口（<div id="app">）
   package.json                   vue 3 / vite / typescript / vitest；不放 Tauri 运行时依赖
   vite.config.ts                 ESM only，defineConfig 包一层；客户端变量只用 import.meta.env 的 VITE_ 前缀
@@ -124,14 +124,14 @@ features 下不同领域不得互相 import
 
 | 契约 | 真源 | Vue 版对端 | 改后端？ |
 |---|---|---|---|
-| Tauri 命令签名 | `app/src-tauri/src/commands_*.rs` + `lib.rs` 的 `generate_handler!` | `frontend/src/api/**` | **否** |
+| Tauri 命令签名 | `backend-tauri/src/commands_*.rs` + `lib.rs` 的 `generate_handler!` | `frontend-vue/src/api/**` | **否** |
 | sidecar 协议 | `core/sidecar/protocol.rs` | 不接触（前端看不见 sidecar） | **否** |
 | 数据库结构 | `core/domain/schema.rs` | 不接触 | **否** |
 
-**只需改 `app/src-tauri/tauri.conf.json` 一处**：
+**只需改 `backend-tauri/tauri.conf.json` 一处**：
 
 ```jsonc
-"frontendDist": "../../frontend/dist",   // 原地重写，路径不变
+"frontendDist": "../frontend-vue/dist",   // 原地重写，路径不变
 "devUrl": "http://localhost:5173"        // 从 8080（trunk）改为 5173（Vite 默认）
 ```
 
@@ -142,7 +142,7 @@ features 下不同领域不得互相 import
 ### 2.4 进程与渲染模型（不变）
 
 ```
-Vue 3 (WebView2)  ──invoke()──►  app/ 命令层  ──直接调用──►  core/ 领域
+Vue 3 (WebView2)  ──invoke()──►  backend-tauri/ 命令层  ──直接调用──►  core/ 领域
                                      │
                                      └──stdin/stdout JSON Lines──►  scraper/ (Python)
 ```
@@ -246,14 +246,14 @@ Vue 版仍然是**纯 CSR 单页**，不引入 SSR / Nuxt。原因：`tauri://lo
 
 - 删 Leptos 残留（`Cargo.toml` / `src/**/*.rs` / `trunk` 配置）
 - 删 CSP 里不再需要的 `'wasm-unsafe-eval'`
-- 更新根 `AGENTS.md` §5 门禁命令、`frontend/AGENTS.md`、`frontend/HANDOFF.md`
+- 更新根 `AGENTS.md` §5 门禁命令、`frontend-vue/AGENTS.md`、`frontend-vue/HANDOFF.md`
 - **验收**：全套门禁 A/B/C + 启动冒烟。
 
 合计 **约 9 个工作日**（单人，不含并行）。
 
 ### 回滚
 
-原地重写没有「改一行配置回滚」这条路。唯一安全网是阶段 0 那个 Leptos 收尾提交：`git checkout <该提交> -- frontend/` 即可整体还原。
+原地重写没有「改一行配置回滚」这条路。唯一安全网是阶段 0 那个 Leptos 收尾提交：`git checkout <该提交> -- frontend-vue/` 即可整体还原。
 
 ---
 

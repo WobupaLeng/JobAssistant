@@ -9,7 +9,7 @@
 打包产物是单个 exe，用户无需安装 Python、Node 或 SQLite（`rusqlite` 的 `bundled` 已把 SQLite 编进二进制）。
 
 工程约定见 [`AGENTS.md`](AGENTS.md)（**动代码前必读第 0 节状态看板**），各模块的目录结构与红线见
-[`app/AGENTS.md`](app/AGENTS.md)、[`frontend/AGENTS.md`](frontend/AGENTS.md)、[`scraper/AGENTS.md`](scraper/AGENTS.md)，
+[`backend-tauri/AGENTS.md`](backend-tauri/AGENTS.md)、[`frontend-vue/AGENTS.md`](frontend-vue/AGENTS.md)、[`scraper/AGENTS.md`](scraper/AGENTS.md)，
 现状与坑见各模块的 `HANDOFF.md`。
 
 ---
@@ -17,7 +17,7 @@
 ## 架构
 
 ```
-frontend/  ──invoke()──▶  app/ (Tauri 2 壳)  ──直接调用──▶  app/src-tauri/src/core/ (领域规则)
+frontend-vue/  ──invoke()──▶  backend-tauri/ (Tauri 2 壳)  ──直接调用──▶  backend-tauri/src/core/ (领域规则)
    WebView                   命令层                          存储 · 打分 · 协议
                                 │
                                 └──stdin/stdout JSON Lines──▶  scraper/ (Python sidecar)
@@ -25,8 +25,8 @@ frontend/  ──invoke()──▶  app/ (Tauri 2 壳)  ──直接调用──
 
 | 目录 | 职责 | 边界 |
 |---|---|---|
-| `frontend/` | 界面：页面、组件、设计系统 | 不碰系统 API、不起子进程，一切经 `invoke` |
-| `app/src-tauri/` | 窗口、单实例锁、毛玻璃、命令注册 + **内嵌核心 `src/core/`** | 命令层不得写领域规则 |
+| `frontend-vue/` | 界面：页面、组件、设计系统 | 不碰系统 API、不起子进程，一切经 `invoke` |
+| `backend-tauri/` | 窗口、单实例锁、毛玻璃、命令注册 + **内嵌核心 `src/core/`** | 命令层不得写领域规则 |
 | `scraper/` | patchright 浏览器自动化：抓取、登录、聊天、求职期望 | 不打分、不落库、不持有业务状态 |
 
 前端与 Rust **同进程**，没有 HTTP、没有端口。sidecar 是 `app` 的子进程，协议是 stdin/stdout 上的 JSON Lines。
@@ -79,10 +79,10 @@ Rust 侧没有等价物。
 ### 前置
 
 - **Rust 工具链**（`cargo` 不在 PATH 时用 `%USERPROFILE%\.cargo\bin\cargo.exe`）
-- **Node.js + Tauri CLI**（`app/node_modules` 已含，构建走 `npx tauri`）
+- **Node.js + Tauri CLI**（`backend-tauri/node_modules` 或全局 `npx tauri`）
 - Python 3.14 + `pip install patchright`
 - 本机安装的 Chrome
-- 界面重写为 Vue 3 + Vite + TypeScript 时另需 Node 的包管理器（见 [`frontend/HANDOFF.md`](frontend/HANDOFF.md)）
+- 界面重写为 Vue 3 + Vite + TypeScript 时另需 Node 的包管理器（见 [`frontend-vue/HANDOFF.md`](frontend-vue/HANDOFF.md)）
 
 ### 必配的环境变量
 
@@ -95,12 +95,12 @@ $env:TEMP = "$env:TEMP"; $env:TMP = $env:TEMP # 临时库测试依赖它，不�
 ### 构建与运行
 
 ```powershell
-# 桌面端（内嵌当前 frontend/dist）
-cd app
+# 桌面端（内嵌当前 frontend-vue/dist）
+cd backend-tauri
 npx tauri build --no-bundle
 
 # 把产物拷到工作区外再启动
-Copy-Item app/src-tauri/target/release/jobassistant-app.exe "$env:TEMP\jobassistant-app.exe"
+Copy-Item backend-tauri/target/release/jobassistant-app.exe "$env:TEMP\jobassistant-app.exe"
 & "$env:TEMP\jobassistant-app.exe"
 ```
 
@@ -114,7 +114,7 @@ Copy-Item app/src-tauri/target/release/jobassistant-app.exe "$env:TEMP\jobassist
 `beforeBuildCommand` 为空串，所以必须先单独构建前端再打壳：
 
 ```powershell
-cd frontend && trunk build    # Leptos 版；清掉 CARGO_TARGET_DIR 再跑，trunk 不认 --target-dir
+cd frontend-vue && trunk build    # Leptos 版；清掉 CARGO_TARGET_DIR 再跑，trunk 不认 --target-dir
 cd ../app && npx tauri build --no-bundle
 ```
 
@@ -166,25 +166,25 @@ SQLite 单文件（开发态在项目根 `data/`，打包态在 `%LOCALAPPDATA%\
 
 ## 界面开发约定
 
-细节见 [`frontend/AGENTS.md`](frontend/AGENTS.md)，这里只列最容易踩的几条：
+细节见 [`frontend-vue/AGENTS.md`](frontend-vue/AGENTS.md)，这里只列最容易踩的几条：
 
 - 依赖方向单向：`pages → features → components → lib_ui`，`api` 可被任意层引用，`lib_ui` 不得反向引用
 - **禁止硬编码满分与门槛**，一律由 `get_scoring_spec` 下发
 - **页面背景必须透明**，否则毛玻璃失效
 - 可交互控件必须带 `data-testid`，命名 `<页面/模块>-<功能>-<控件类型>`
 - **CSS 文件不许用 `//!` / `///` 注释**——CSS 解析器会判整份样式表非法并静默丢弃
-- 设计语言：Liquid Glass，令牌在 `frontend/styles/tokens.css`，深/浅双主题各自调优；
-  装载的技能在 `frontend/.agents/skills/`，来源记录在 `SOURCES.md`
+- 设计语言：Liquid Glass，令牌在 `frontend-vue/styles/tokens.css`，深/浅双主题各自调优；
+  装载的技能在 `frontend-vue/.agents/skills/`，来源记录在 `SOURCES.md`
 
 ---
 
 ## 验证门禁
 
 ```powershell
-cd app/src-tauri && cargo test                          # 后端单测
-cd frontend && cargo check --target wasm32-unknown-unknown   # 前端静态检查（Leptos 版）
+cd backend-tauri && cargo test                          # 后端单测
+cd frontend-vue && cargo check --target wasm32-unknown-unknown   # 前端静态检查（Leptos 版）
 python -m compileall -q scraper                         # sidecar 语法检查
-cd app && npx tauri build --no-bundle                   # 产物构建（必须用 tauri build）
+cd backend-tauri && npx tauri build --no-bundle                   # 产物构建（必须用 tauri build）
 ```
 
 门禁不通过的提交不允许 `git commit`。用例数、构建体积这类会变动的数字不写进文档，现场跑。
@@ -199,11 +199,11 @@ cd app && npx tauri build --no-bundle                   # 产物构建（必须�
 - 不含简历上传（在线简历通过 Boss 既有的简历卡片发送）
 - **从 Tauri 子进程拉起真实 Chrome 仍会失败**（WebView2 与 sidecar 的 Chrome 撞 Chromium 单例命名对象），单独运行 `scraper/sidecar.py` 时正常。详见 [`scraper/HANDOFF.md`](scraper/HANDOFF.md)
 - **登录入口尚未接线**：三条登录命令后端已就绪，界面还没有调用点
-- **界面正在从 Leptos 重写为 Vue 3**：`frontend/` 当前是 Leptos 版，重写方案见 [`ARCH-003`](docs/architecture/ARCH-003-vue-frontend-migration.md)
+- **界面正在从 Leptos 重写为 Vue 3**：`frontend-vue/` 当前是 Leptos 版，重写方案见 [`ARCH-003`](docs/architecture/ARCH-003-vue-frontend-migration.md)
 - Liquid Glass 第二层（SVG 湍流折射）与第三层（WebGL 卡片间真折射）未做，只有第一层 CSS 玻璃
 
 ---
 
 ## 许可
 
-第三方前端技能的许可与来源见 [`frontend/.agents/skills/SOURCES.md`](frontend/.agents/skills/SOURCES.md) 与同目录 `LICENSE`。
+第三方前端技能的许可与来源见 [`frontend-vue/.agents/skills/SOURCES.md`](frontend-vue/.agents/skills/SOURCES.md) 与同目录 `LICENSE`。

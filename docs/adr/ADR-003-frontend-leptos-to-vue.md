@@ -3,13 +3,13 @@
 > 状态：**Accepted**（2026-11-22 用户裁决）
 > 日期：2026-11-21 提案 / 2026-11-22 批准
 > 决策者：用户
-> 相关：[`ARCH-003`](ARCH-003-vue-frontend-migration.md)（实施方案）、[`frontend/AGENTS.md`](../../frontend/AGENTS.md)（迁移契约）、[`frontend/HANDOFF.md`](../../frontend/HANDOFF.md)（开工前置条件）
+> 相关：[`ARCH-003`](ARCH-003-vue-frontend-migration.md)（实施方案）、[`frontend-vue/AGENTS.md`](../../frontend-vue/AGENTS.md)（迁移契约）、[`frontend-vue/HANDOFF.md`](../../frontend-vue/HANDOFF.md)（开工前置条件）
 
 ---
 
 ## 1. 背景
 
-`frontend/` 于 2026-11-21 从 TS/React 改为 Leptos 0.8 CSR（WASM），目标是「界面用 Rust 写，同时保留毛玻璃」。该版本已达成部分目标：四页（概览 / 消息 / 配置 / 日志）全部正式实现、11 份 CSS 设计令牌与深浅双主题可用、启动白屏已修复。
+`frontend-vue/` 于 2026-11-21 从 TS/React 改为 Leptos 0.8 CSR（WASM），目标是「界面用 Rust 写，同时保留毛玻璃」。该版本已达成部分目标：四页（概览 / 消息 / 配置 / 日志）全部正式实现、11 份 CSS 设计令牌与深浅双主题可用、启动白屏已修复。
 
 但已实测出三类结构性成本：
 
@@ -19,16 +19,16 @@
 
 ## 2. 决策
 
-**将 `frontend/` 原地重写为 Vue 3 + Vite + TypeScript；`app/`（含 `core/`）与 `scraper/` 完全不动。**
+**将 `frontend-vue/` 原地重写为 Vue 3 + Vite + TypeScript；`backend-tauri/`（含 `core/`）与 `scraper/` 完全不动。**
 
 | 项 | 裁决 |
 |---|---|
-| 目录策略 | **原地重写 `frontend/`**，不新建 `frontend-vue/` 并存 |
-| 后端改动 | 只需改 `app/src-tauri/tauri.conf.json` 的 `frontendDist` 与 `devUrl` 两处路径 |
+| 目录策略 | **原地重写 `frontend-vue/`**，不新建 `frontend-vue/` 并存 |
+| 后端改动 | 只需改 `backend-tauri/tauri.conf.json` 的 `frontendDist` 与 `devUrl` 两处路径 |
 | 命令签名 / sidecar 协议 / 数据库结构 | **均不改** |
-| 11 份 CSS 与全部 `data-testid` | **原样保留**（见 `frontend/AGENTS.md` C4 / C8） |
+| 11 份 CSS 与全部 `data-testid` | **原样保留**（见 `frontend-vue/AGENTS.md` C4 / C8） |
 
-**否决「并存」方案的理由**：并存期两套前端都要维护，`frontendDist` 需要来回切换，且无法保证 17 条迁移契约（`frontend/AGENTS.md` §4）在切换点上被逐条验证。原地重写的代价是回滚只能靠 git——因此**开工前必须先落一个 Leptos 收尾提交**（`frontend/HANDOFF.md` §1）。
+**否决「并存」方案的理由**：并存期两套前端都要维护，`frontendDist` 需要来回切换，且无法保证 17 条迁移契约（`frontend-vue/AGENTS.md` §4）在切换点上被逐条验证。原地重写的代价是回滚只能靠 git——因此**开工前必须先落一个 Leptos 收尾提交**（`frontend-vue/HANDOFF.md` §1）。
 
 ## 3. 后果
 
@@ -48,9 +48,9 @@
 | 项 | 代价 |
 |---|---|
 | **约 11,500 行 Rust 重写** | 其中约 2,400 行是与渲染无关的纯逻辑（格式化、筛选、草稿 diff、日志合并），**必须逐一对齐**，否则出现「界面一样但行为不一样」的静默回归 |
-| **96 个既有单测要重新实现** | Rust `#[test]` → Vitest，断言必须一条不少（分布见 `frontend/AGENTS.md` §6） |
+| **96 个既有单测要重新实现** | Rust `#[test]` → Vitest，断言必须一条不少（分布见 `frontend-vue/AGENTS.md` §6） |
 | **运行时类型校验能力下降** | Rust 靠 `serde` 在反序列化时校验字段；TS 类型编译期即擦除。后端字段改名后前端只会静默拿到 `undefined`。缓解：首屏关键数据加运行时守卫 |
-| **载荷形状两类且有例外** | `args` 包一层 / 平铺驼峰，编译期无法发现抄错（见 `frontend/AGENTS.md` C2） |
+| **载荷形状两类且有例外** | `args` 包一层 / 平铺驼峰，编译期无法发现抄错（见 `frontend-vue/AGENTS.md` C2） |
 | **失去 WASM 的强类型跨端校验** | 前端不再是「同一个 Rust 生态」，契约同步退化为人工纪律 |
 | **工具链回到 Node 依赖** | 需要 `npm install`，`node_modules` 须进 `.gitignore` |
 | **`'wasm-unsafe-eval'` 变冗余** | CSP 里这条在 Vue 版是死代码，但**不能立刻删**——中途回滚到 Leptos 版会白屏复发。留到退役提交时一起删 |
@@ -60,7 +60,7 @@
 | `AGENTS.md` 条款 | 影响 |
 |---|---|
 | §0 状态看板 | 阶段名保持 `FRONTEND_REBUILD_IN_PROGRESS` 直到 Vue 版验收通过 |
-| §2.3 前端目录与红线 | 已整节重写为 Vue 版，见 [`frontend/AGENTS.md`](../../frontend/AGENTS.md) |
+| §2.3 前端目录与红线 | 已整节重写为 Vue 版，见 [`frontend-vue/AGENTS.md`](../../frontend-vue/AGENTS.md) |
 | §3.4 CSP 铁律 | `script-src` 显式声明**仍然必须**；`'wasm-unsafe-eval'` 标注为「Leptos 遗留，暂不删」 |
 | §5 槽位 A | `trunk build` → `vite build`；`cargo check --target wasm32` → `vue-tsc --noEmit` |
 | §5 槽位 B | `cargo test --lib`（宿主目标）→ `vitest run` |
@@ -69,4 +69,4 @@
 ## 4. 实施与回滚
 
 - 实施路径见 [`ARCH-003`](ARCH-003-vue-frontend-migration.md) 第 4 节。
-- **回滚**：原地重写没有「改一行配置回滚」这条路。唯一的安全网是开工前那个 Leptos 收尾提交——`git checkout <该提交> -- frontend/` 即可整体还原。
+- **回滚**：原地重写没有「改一行配置回滚」这条路。唯一的安全网是开工前那个 Leptos 收尾提交——`git checkout <该提交> -- frontend-vue/` 即可整体还原。

@@ -26,7 +26,7 @@
 
 ## 2. 协议（JSON Lines over stdin/stdout）
 
-真源是 `app/src-tauri/src/core/sidecar/protocol.rs`，这里的 `handle()` 与 `emit()` 是它的对端。**改任一端必须同一次提交改另一端。**
+真源是 `backend-tauri/src/core/sidecar/protocol.rs`，这里的 `handle()` 与 `emit()` 是它的对端。**改任一端必须同一次提交改另一端。**
 
 **三种帧，同一个 `Envelope{id, event, ok, data, error}`**：命令（含 `cmd`，Rust → stdin）／回执（含 `id`、**无** `event`，由 Rust `route_reply` 投递）／事件（含 `event`，主动推送）。
 
@@ -138,4 +138,4 @@ _pw/_ctx                     patchright 实例与 context，只在工作线程�
 
 `scraper/.agents/skills/sidecar-scraping/SKILL.md`（224 行）：职责边界、五条抓取铁律（每条附真实事故）、反爬不许动的两个东西、单车道、注入层边界、命令检查表、12 条 Non-Negotiables。
 
-**改 `scraper/*.py` 前先读它。** 参考映射已核对、行号准确；两处路径以现有写法为准：`restart_decision` 在 `app/src-tauri/src/core/scrape.rs:28`（不是子目录），`chat.py:9-12` 讲线程铁律、`:16-24` 才是监听器铁律。
+**改 `scraper/*.py` 前先读它。** 参考映射已核对、行号准确；两处路径以现有写法为准：`restart_decision` 在 `backend-tauri/src/core/scrape.rs:28`（不是子目录），`chat.py:9-12` 讲线程铁律、`:16-24` 才是监听器铁律。
