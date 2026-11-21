@@ -9,7 +9,7 @@
 
 use crate::core::domain::job::Job;
 use crate::core::domain::profile::Profile;
-use crate::core::domain::rules::{reject, ExcludeRules, JobInput};
+use crate::core::domain::rules::{reject_labeled, ExcludeRules, JobInput};
 use crate::core::domain::scoring::{rule_score_all, RuleScore};
 use crate::core::sidecar::protocol::ScrapedJob;
 
@@ -21,7 +21,11 @@ use crate::core::sidecar::protocol::ScrapedJob;
 pub enum IngestVerdict {
     /// 达到门槛，应当入库（是否真的写进去由调用方调 `insert_job` 决定）
     Accepted(IngestDetail),
-    /// 被硬规则否决
+    /// 被硬规则否决。
+    ///
+    /// `rule` 是**稳定的规则标识**（`weekend` / `outsource` / `prescan:salary_floor`
+    /// / `sensitive:stored` …），不是给用户看的文案：决策日志靠它回答「到底被
+    /// 哪条规则否掉」，文案改了也不该让统计分档漂移。
     Rejected { rule: String, reason: String },
     /// 低于分数门槛，或缺少必要字段
     BelowThreshold {
@@ -170,9 +174,9 @@ pub fn prepare(s: &ScrapedJob, profile: &Profile, cfg: &IngestConfig) -> IngestV
         founded_years: job.founded_years.map(|v| v.clamp(0, u32::MAX as i64) as u32),
         hr_active_status: job.hr_active_status.as_deref(),
     };
-    if let Some(why) = reject(&input, &cfg.rules) {
+    if let Some((rule, why)) = reject_labeled(&input, &cfg.rules) {
         return IngestVerdict::Rejected {
-            rule: "exclude".to_string(),
+            rule: rule.to_string(),
             reason: format!("{why}（规则分 {score}）"),
         };
     }
@@ -256,6 +260,11 @@ pub struct DecisionNote {
     pub company_job: String,
     /// `accept` / `reject` / `skip`
     pub decision: &'static str,
+    /// 稳定的规则标识（`weekend` / `outsource` / `sensitive` / …），用于回答
+    /// 「到底被哪条规则否掉」。**不是**从 `reason` 文本反推的——那会在改一次
+    /// 文案时静默失配。不入库（`DecisionRecord` 字段零变化），只进 `reason`。
+    pub rule: &'static str,
+    /// 给人看的一句话
     pub reason: String,
     /// 入库时是入库分；被规则否决时是规则分；其余为 `None`
     pub new_score: Option<u8>,
@@ -283,6 +292,10 @@ impl DecisionNote {
 ///
 /// 用 `skip` 而不是把门槛不足也记成 `reject`：用户点「排除」筛选时想看的是
 /// **规则判死的**岗位，把分数不够的混进去会让「为什么这个岗位被排除」更难回答。
+///
+/// `rule` 是 `IngestVerdict::Rejected` 里的规则标识，由调用方在构造否决结论时
+/// 就给准（规则否决 / 卡片规则 / 敏感库 / 空 JD …）。这里只负责把它并进 `reason`
+/// 的第一段。
 pub fn decision_note(s: &ScrapedJob, verdict: &IngestVerdict) -> DecisionNote {
     // 被否决时 `IngestVerdict` 里不带 Job（规则否决发生在打分成功之前），
     // 所以平台与公司/岗位取自原始抓取结果，走与 `prepare` 同一套归一化。
@@ -296,6 +309,7 @@ pub fn decision_note(s: &ScrapedJob, verdict: &IngestVerdict) -> DecisionNote {
             platform: job.platform.clone(),
             company_job: DecisionNote::company_job_of(&d.job),
             decision: "accept",
+            rule: "score",
             reason: format!("{} 分：{}", d.score, d.reason),
             new_score: Some(d.score),
         },
@@ -303,6 +317,8 @@ pub fn decision_note(s: &ScrapedJob, verdict: &IngestVerdict) -> DecisionNote {
             platform: job.platform.clone(),
             company_job: DecisionNote::company_job_of(&job),
             decision: "reject",
+            // 规则标识必须是 `'static`：中文文案随规则改，中文标识会让统计漂移
+            rule: rule_ident(rule),
             reason: format!("{rule}：{reason}"),
             // 规则分从 reason 里读不到数值就不写，宁可空着也不猜
             new_score: None,
@@ -317,8 +333,37 @@ pub fn decision_note(s: &ScrapedJob, verdict: &IngestVerdict) -> DecisionNote {
             decision: "skip",
             reason: format!("{score} 分未达门槛 {min_score}：{reason}"),
             new_score: None,
+            rule: "threshold",
         },
     }
+}
+
+/// `IngestVerdict::Rejected.rule` 里可能带参数（`prescan:weekend`、`sensitive:stored`），
+/// 决策日志只需要前半段的规则标识。
+///
+/// 认不出来的规则名（调用方自造的）一律落到 `"rule"`：宁可粗一档，也不能让
+/// 某个未来的否决结论在决策日志里静默变成空标识。
+fn rule_ident(rule: &str) -> &'static str {
+    const KNOWN: &[&str] = &[
+        "weekend",
+        "name_word",
+        "short_term",
+        "outsource",
+        "degree",
+        "degree_985",
+        "experience",
+        "hr_active_unknown",
+        "hr_inactive",
+        "founded",
+        "salary_floor",
+        "salary_ceiling",
+        "prescan",
+        "sensitive",
+        "duplicate",
+        "exclude",
+    ];
+    let head = rule.split(':').next().unwrap_or(rule);
+    KNOWN.iter().copied().find(|k| *k == head).unwrap_or("rule")
 }
 
 /// 卡片阶段就做出结论的预筛结果。
@@ -336,7 +381,7 @@ pub enum PreScan {
     /// 敏感库命中（之前抓过/排除过）
     Sensitive { reason: String, stored: bool },
     /// 不依赖 JD 的硬规则命中
-    Rule { reason: String },
+    Rule { rule: &'static str, reason: String },
 }
 
 impl PreScan {
@@ -348,7 +393,20 @@ impl PreScan {
                 format!("已在库中，跳过详情（{reason}）")
             }
             PreScan::Sensitive { reason, .. } => format!("命中敏感库，跳过详情（{reason}）"),
-            PreScan::Rule { reason } => format!("卡片阶段即被规则排除：{reason}"),
+            PreScan::Rule { reason, .. } => format!("卡片阶段即被规则排除：{reason}"),
+        }
+    }
+
+    /// 写进 `IngestVerdict::Rejected.rule` 的标识。
+    ///
+    /// 敏感库与卡片规则必须是**两个不同的口径**（用户裁决里它们分别统计），
+    /// 卡片规则再带上具体规则名——否则决策日志里只会剩一个笼统的「被预筛否掉」。
+    pub fn rule_ident(&self) -> String {
+        match self {
+            PreScan::Duplicate => "duplicate".to_string(),
+            PreScan::Sensitive { stored: true, .. } => "sensitive:stored".to_string(),
+            PreScan::Sensitive { .. } => "sensitive:rejected".to_string(),
+            PreScan::Rule { rule, .. } => format!("prescan:{rule}"),
         }
     }
 }
@@ -393,8 +451,8 @@ where
         founded_years: job.founded_years.map(|v| v.clamp(0, u32::MAX as i64) as u32),
         hr_active_status: job.hr_active_status.as_deref(),
     };
-    if let Some(reason) = reject(&input, &cfg.rules) {
-        return Some(PreScan::Rule { reason });
+    if let Some((rule, reason)) = reject_labeled(&input, &cfg.rules) {
+        return Some(PreScan::Rule { rule, reason });
     }
 
     None

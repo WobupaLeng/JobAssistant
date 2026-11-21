@@ -177,11 +177,25 @@ pub fn outsource_hit(company: Option<&str>, title: Option<&str>, jd: Option<&str
 ///
 /// 判断顺序与 `scorer.py:228` 严格一致，**不可重排**。
 pub fn reject(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<String> {
+    reject_labeled(job, rules).map(|(_, detail)| detail)
+}
+
+/// 硬性排除（带规则名）：返回 `(规则名, 给用户看的原因)`，`None` 表示通过。
+///
+/// 与 [`reject`] 是同一份判定的两个出口，**顺序与分支完全同步**：`reject` 只是
+/// 丢掉规则名。决策日志需要知道「被哪条规则否掉」，而规则名不是从原因文本里
+/// 反推出来的——反推会在改一次文案时静默失配。
+///
+/// 规则名是稳定的英文标识（`weekend` / `name_word` / …），原因文本给人看。
+pub fn reject_labeled(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<(&'static str, String)> {
     // 1. 双休规则
     if rules.require_double_weekend() {
         let probe = format!("{} {}", job.title.unwrap_or(""), job.jd.unwrap_or(""));
         if let Some(bad) = weekend_bad(&probe) {
-            return Some(format!("非双休（JD/岗位名出现「{bad}」）"));
+            return Some((
+                "weekend",
+                format!("非双休（JD/岗位名出现「{bad}」）"),
+            ));
         }
     }
 
@@ -189,14 +203,17 @@ pub fn reject(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<String> {
     let name_text = format!("{} {}", job.company.unwrap_or(""), job.title.unwrap_or(""));
     for w in &rules.name_words {
         if !w.is_empty() && name_text.contains(w.as_str()) {
-            return Some(format!("公司/岗位名命中排除词「{w}」"));
+            return Some((
+                "name_word",
+                format!("公司/岗位名命中排除词「{w}」"),
+            ));
         }
     }
 
     // 3. 岗位名显示短期
     if let Some(title) = job.title {
         if is_short_term(title) {
-            return Some("岗位名显示短期项目/项目制".into());
+            return Some(("short_term", "岗位名显示短期项目/项目制".into()));
         }
     }
 
@@ -205,7 +222,10 @@ pub fn reject(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<String> {
         let cleaned = outsource_neg_re().replace_all(jd, "${1}__NEG__").to_string();
         for w in OUTSOURCE_WORDS {
             if cleaned.contains(w) {
-                return Some(format!("JD 命中外包/驻场类表述「{w}」"));
+                return Some((
+                    "outsource",
+                    format!("JD 命中外包/驻场类表述「{w}」"),
+                ));
             }
         }
 
@@ -220,14 +240,14 @@ pub fn reject(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<String> {
             );
             if let Ok(re) = Regex::new(&pattern) {
                 if re.is_match(jd) {
-                    return Some(format!("JD 要求{lv}学历"));
+                    return Some(("degree", format!("JD 要求{lv}学历")));
                 }
             }
         }
 
         // 6. 985/211
         if degree_985_re().is_match(jd) {
-            return Some("JD 硬卡 985/211".into());
+            return Some(("degree_985", "JD 硬卡 985/211".into()));
         }
 
         // 7. 经验门槛（默认不限制）
@@ -235,7 +255,10 @@ pub fn reject(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<String> {
             if let Some(c) = exp_required_re().captures(jd) {
                 if let Some(need) = c.get(1).and_then(|m| m.as_str().parse::<u32>().ok()) {
                     if need > max_years {
-                        return Some(format!("JD 要求 {need} 年以上经验（上限 {max_years} 年）"));
+                        return Some((
+                            "experience",
+                            format!("JD 要求 {need} 年以上经验（上限 {max_years} 年）"),
+                        ));
                     }
                 }
             }
@@ -246,13 +269,19 @@ pub fn reject(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<String> {
     if let Some(limit) = rules.exclude_hr_active_days {
         match hr_active_days(job.hr_active_status) {
             None => {
-                return Some(format!("HR 活跃度未知（要求 {limit} 天内活跃）"));
+                return Some((
+                    "hr_active_unknown",
+                    format!("HR 活跃度未知（要求 {limit} 天内活跃）"),
+                ));
             }
             Some(days) if days > limit => {
-                return Some(format!(
-                    "HR 最近活跃 {}，超过 {} 天门槛",
-                    job.hr_active_status.unwrap_or(""),
-                    limit
+                return Some((
+                    "hr_inactive",
+                    format!(
+                        "HR 最近活跃 {}，超过 {} 天门槛",
+                        job.hr_active_status.unwrap_or(""),
+                        limit
+                    ),
                 ));
             }
             _ => {}
@@ -263,7 +292,10 @@ pub fn reject(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<String> {
     if let Some(floor) = rules.exclude_founded_below {
         if let Some(years) = job.founded_years {
             if years < floor {
-                return Some(format!("公司成立 {years} 年，不足 {floor} 年"));
+                return Some((
+                    "founded",
+                    format!("公司成立 {years} 年，不足 {floor} 年"),
+                ));
             }
         }
     }
@@ -273,12 +305,18 @@ pub fn reject(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<String> {
         if let Some((low, high)) = parse_salary(job.salary) {
             if let Some(min) = rules.exclude_salary_min {
                 if high < min {
-                    return Some(format!("薪资 {low}-{high}K 低于下限 {min}K"));
+                    return Some((
+                        "salary_floor",
+                        format!("薪资 {low}-{high}K 低于下限 {min}K"),
+                    ));
                 }
             }
             if let Some(max) = rules.exclude_salary_max {
                 if low > max {
-                    return Some(format!("薪资 {low}-{high}K 高于上限 {max}K"));
+                    return Some((
+                        "salary_ceiling",
+                        format!("薪资 {low}-{high}K 高于上限 {max}K"),
+                    ));
                 }
             }
         }

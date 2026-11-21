@@ -526,7 +526,10 @@ pub fn handle_job(
             }
         }
         let verdict = IngestVerdict::Rejected {
-            rule: if is_dup { "duplicate".into() } else { "prescan".into() },
+            // 规则标识由 `PreScan` 自己给出：敏感库（`sensitive:*`）与卡片规则
+            // （`prescan:<规则名>`）是两个不同的口径，用户裁决里分开统计。
+            // 曾经这里一律写死 `"prescan"`，决策日志里看不出命中的是哪条规则。
+            rule: pre.rule_ident(),
             reason: summary.clone(),
         };
         // 卡在预筛的岗位同样要留决策记录：用户点「排除」筛选时，命中的
@@ -625,6 +628,7 @@ pub fn handle_job(
 mod tests {
     use super::*;
     use crate::core::domain::profile::DEFAULT_PROFILE;
+    use crate::core::domain::rules::ExcludeRules;
 
     fn high_score_job(id: &str) -> ScrapedJob {
         ScrapedJob {
@@ -983,8 +987,106 @@ mod tests {
         let n = &notes[0];
         assert_eq!(n.decision, "reject");
         assert_eq!(n.company_job, "某某信息科技有限公司/Java 后端开发");
-        assert!(n.reason.contains("exclude"), "reason 必须带规则名：{}", n.reason);
+        // 规则名必须是**具体那条**（JD 命中外包），不是笼统的 "exclude"
+        assert_eq!(n.rule, "outsource", "reason 必须带具体规则名：{}", n.reason);
+        assert!(n.reason.starts_with("outsource："), "{}", n.reason);
         assert_eq!(notes[0].new_score, None, "被否决的岗位没有入库分");
+    }
+
+    /// 卡片阶段被硬规则否决 → 决策日志里要能看出**具体是哪条卡片规则**。
+    ///
+    /// 回归：这里原先一律写死 `rule = "prescan"`，决策日志只说得清「被预筛拒了」，
+    /// 说不清被哪条规则拒了——用户问「为什么这个岗位被排除」仍然答不上来。
+    #[test]
+    fn prescan_rule_records_the_concrete_card_rule() {
+        let notes = Arc::new(Mutex::new(Vec::<DecisionNote>::new()));
+        let mut sink = {
+            let notes = Arc::clone(&notes);
+            Ports {
+                put: |_: &Job| Ok(true),
+                remember: |_: &SensitiveEntry<'_>| {},
+                record: move |n: &DecisionNote| notes.lock().unwrap().push(n.clone()),
+            }
+        };
+        // 薪资上限 20K：卡片字段就够判，不必开详情页
+        let cfg = IngestConfig {
+            min_score: 0,
+            rules: ExcludeRules {
+                exclude_salary_max: Some(20),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let progress = Arc::new(Mutex::new(ScrapeProgress::new()));
+        let (tx, _rx) = mpsc::channel();
+        handle_job(
+            &progress,
+            &tx,
+            &DEFAULT_PROFILE,
+            &cfg,
+            &mut sink,
+            &mut NoSensitive,
+            high_score_job("boss:prescan-rule"),
+        );
+        let notes = notes.lock().unwrap();
+        assert_eq!(notes.len(), 1, "卡片规则否决也要留决策记录");
+        let n = &notes[0];
+        assert_eq!(n.decision, "reject", "规则否决是排除，不是 skip");
+        // 稳定标识只到「预筛」这一档（要落库、要能稳定匹配）；
+        // 具体哪条卡片规则必须能在 reason 里读到。
+        assert_eq!(n.rule, "prescan", "{}", n.reason);
+        assert!(
+            n.reason.starts_with("prescan:salary_ceiling："),
+            "{}",
+            n.reason
+        );
+        assert!(n.reason.contains("高于上限"), "{}", n.reason);
+        assert_eq!(
+            progress.lock().unwrap().rejected,
+            1,
+            "卡片规则否决计入「规则否决」，方案口径见 ScrapeProgress"
+        );
+    }
+
+    /// 敏感库命中与卡片规则否决是**两个口径**，决策日志里必须能分开。
+    #[test]
+    fn prescan_sensitive_keeps_its_own_rule_ident() {
+        struct Hit;
+        impl SensitiveLookup for Hit {
+            fn hit(&mut self, _p: &str, _c: Option<&str>, _t: Option<&str>) -> Option<(String, bool)> {
+                Some(("之前被排除过".into(), false))
+            }
+        }
+
+        let notes = Arc::new(Mutex::new(Vec::<DecisionNote>::new()));
+        let mut sink = {
+            let notes = Arc::clone(&notes);
+            Ports {
+                put: |_: &Job| Ok(true),
+                remember: |_e: &SensitiveEntry<'_>| {},
+                record: move |n: &DecisionNote| notes.lock().unwrap().push(n.clone()),
+            }
+        };
+        let progress = Arc::new(Mutex::new(ScrapeProgress::new()));
+        let (tx, _rx) = mpsc::channel();
+        handle_job(
+            &progress,
+            &tx,
+            &DEFAULT_PROFILE,
+            &IngestConfig::default(),
+            &mut sink,
+            &mut Hit,
+            high_score_job("boss:sensitive"),
+        );
+        let notes = notes.lock().unwrap();
+        assert_eq!(notes.len(), 1);
+        let n = &notes[0];
+        assert_eq!(n.rule, "sensitive", "{}", n.reason);
+        assert!(
+            !n.rule.starts_with("prescan"),
+            "敏感库不能被归成卡片规则"
+        );
+        assert!(n.reason.contains("敏感库"), "{}", n.reason);
     }
 
     /// 门槛不足 → 一条 `skip`（前端归到「其它」档），不能记成 reject。

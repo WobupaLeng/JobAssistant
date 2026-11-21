@@ -571,6 +571,7 @@ mod tests {
             platform: "boss".into(),
             company_job: "某公司/Java 后端".into(),
             decision: "reject",
+            rule: "outsource",
             reason: "exclude：外包".into(),
             new_score: None,
         });
