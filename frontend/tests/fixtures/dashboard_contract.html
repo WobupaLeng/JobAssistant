@@ -19,6 +19,7 @@
       </header>
 
       <section>
+        <div class="job-list" data-testid="job-list">
         <button data-testid="job-refresh">刷新</button>
         <table>
           <tbody>
@@ -27,17 +28,21 @@
             <tr data-testid="job-row-3"><td><span data-testid="score-3">0</span></td></tr>
           </tbody>
         </table>
+        </div>
       </section>
 
       <section data-testid="rescore-panel">
         <input type="checkbox" data-testid="rescore-llm-toggle" />
-        <span data-testid="rescore-note">尚未重算</span>
+        <!-- 进度行形态取自 features/jobs/rescore.rs：`已扫描 N 条，改写 M 条` -->
+        <span data-testid="rescore-note">已扫描 3 条，改写 1 条</span>
         <button data-testid="rescore-btn">全量重算</button>
       </section>
 
       <section data-testid="scrape-panel">
         <span data-testid="scrape-status">未在抓取 · 登录态 已登录</span>
         <button data-testid="scrape-login-btn">扫码登录</button>
+        <!-- 折叠区：`scrape-keywords` 展开后才进 DOM（与 panel.rs 的 <Show when=expanded> 同构） -->
+        <button class="chip as-btn scrape-toggle" data-testid="scrape-filter-toggle">筛选条件 ▼</button>
         <input data-testid="scrape-keywords" />
         <input data-testid="scrape-min-score" />
         <button data-testid="scrape-start-btn">开始抓取</button>
@@ -74,6 +79,17 @@
           <span>技能匹配良好</span>
         </div>
       </section>
+
+      <section class="auto-bar" data-testid="auto-bar">
+        <button data-testid="auto-toggle">开始自动投递</button>
+        <div class="auto-status" data-testid="auto-status">
+          <span class="auto-status-text">空闲 · 本轮 0 次 · 间隔 20s</span>
+        </div>
+        <button data-testid="auto-reset">重置</button>
+      </section>
+
+      <!-- 敏感库：入口常驻，抽屉点开后才进 DOM（`sensitive-panel` 不在这里，故意如此） -->
+      <button class="btn btn-sm" data-testid="sensitive-open">敏感库（3）</button>
     </div>
   </body>
 </html>

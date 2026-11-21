@@ -72,18 +72,32 @@ REQUIRED_TESTIDS: list[str | tuple[str, ...]] = [
     "job-refresh",
     "scrape-status",
     "scrape-login-btn",
+    # 2026-11-21 迁移：关键词输入框从 panel.rs 迁进 filter.rs，且**折叠在**
+    # 「筛选条件 ▼」之后才渲染。所以除了锚点本身，还要一个展开入口：
+    # 脚本先点 `scrape-filter-toggle` 再填关键词，否则 input 根本不在 DOM 里。
     "scrape-keywords",
+    "scrape-filter-toggle",
     "scrape-min-score",
     "scrape-start-btn",
     "scrape-stop-btn",
     "scrape-progress",
     "scrape-feed",
+    # 读库见证：区分「库为空」与「列表压根没渲染」。不做可点击前提，只用于报告。
+    "job-list",
     # SPEC-002 第 3.3 节：全量重算入口必须可见可点
     "rescore-panel",
     "rescore-btn",
     "rescore-llm-toggle",
     "rescore-note",
     "demo-score-btn",
+]
+
+# 只做**点击门禁**的锚点：不是「界面必须具备的东西」，但缺了后面的点击会挂得莫名其妙。
+# 它们不进 `REQUIRED_TESTIDS`，单独一条汇总检查（`_missing_testids` 同样不短路）。
+FLOW_TESTIDS: list[str | tuple[str, ...]] = [
+    "sensitive-open",   # 敏感库入口（`sensitive-panel` 是点开后才进 DOM 的）
+    "auto-bar",         # 自动投递状态条（20 秒间隔，只验存在与初始态，绝不真等）
+    "demo-panel",       # 试算卡片容器（非 ui-only 分支才点）
 ]
 
 # 试算表单的输入锚点，与 REQUIRED_TESTIDS 同等地位（漏一个整段试算就点不动）
@@ -109,6 +123,28 @@ def _first_present(page, spec: str | tuple[str, ...]) -> str | None:
         if page.query_selector(f'[data-testid="{t}"]') is not None:
             return t
     return None
+
+
+def _expand_scrape_filters(page, *, timeout_ms: int = 3_000) -> bool:
+    """展开抓取面板的「筛选条件」折叠区；返回 `scrape-keywords` 是否可见。
+
+    存在理由：关键词输入框是折叠体，**未展开时不在 DOM 里**。若直接数锚点，
+    ui-only 会稳定误报一条「缺 scrape-keywords」。点一次幂等：
+    已经展开了（输入框在）就不再点，避免又把它收起来。
+    """
+    if page.query_selector('[data-testid="scrape-keywords"]') is not None:
+        return True
+    toggle = page.query_selector('[data-testid="scrape-filter-toggle"]')
+    if toggle is None:
+        return False
+    try:
+        # 用 page.click 而不是 element.click()：真 playwright 两种都行，
+        # 但 FakePage（frontend/tests）只模拟 page 这一层，行为才可离线验证。
+        page.click('[data-testid="scrape-filter-toggle"]')
+        page.wait_for_selector('[data-testid="scrape-keywords"]', timeout=timeout_ms)
+        return True
+    except Exception:  # noqa: BLE001 — 展开失败由调用方的断言报告，这里只返回事实
+        return False
 
 
 def _missing_testids(page, specs) -> list[str]:
@@ -274,10 +310,13 @@ def _login_cookie_names_inner(cookie_db: Path) -> set[str]:
 TESTID_HOMES: dict[str, str | None] = {
     "app-root": "src/components/shell.rs",
     "score-spec": "src/components/shell.rs",
+    "job-list": "src/features/jobs/list.rs",
     "job-refresh": "src/features/jobs/list.rs",
     "scrape-status": "src/features/scrape/panel.rs",
     "scrape-login-btn": "src/features/scrape/panel.rs",
-    "scrape-keywords": "src/features/scrape/panel.rs",
+    "scrape-filter-toggle": "src/features/scrape/panel.rs",
+    # 2026-11-21 迁移：关键词输入框 + 九类筛选条件整体下沉到 filter.rs
+    "scrape-keywords": "src/features/scrape/filter.rs",
     "scrape-min-score": "src/features/scrape/panel.rs",
     "scrape-start-btn": "src/features/scrape/panel.rs",
     "scrape-stop-btn": "src/features/scrape/panel.rs",
@@ -288,6 +327,10 @@ TESTID_HOMES: dict[str, str | None] = {
     "rescore-llm-toggle": "src/features/jobs/rescore.rs",
     "rescore-note": "src/features/jobs/rescore.rs",
     "demo-score-btn": "src/features/score/demo.rs",
+    # 点击门禁
+    "sensitive-open": "src/features/sensitive/panel.rs",
+    "auto-bar": "src/features/auto/panel.rs",
+    "demo-panel": "src/features/score/demo.rs",
 }
 
 # 五个进度 Stat 的锚点以**组件属性**写法下发：`<Stat … test_id="scrape-scraped"/>`。
@@ -311,6 +354,35 @@ TEXT_CONTRACTS: list[tuple[str, str]] = [
     ("重算改写文案", "改写"),
 ]
 
+# 夹具（渲染后的 DOM）里应当出现的文案片段。源码里的 `{}` 占位符在 DOM 里已代入数值，
+# 所以「五段进度文案」那条不在本表，由 `_fixture_missing` 用 `PROGRESS_RE` 单独验。
+RENDERED_TEXT_CONTRACTS: list[tuple[str, str]] = [
+    ("入库行 tag", "✔"),
+    # 重算进行中 / 失败数：夹具里放一条历史进度行，证明 `_rescore_count` 取得到数
+    ("重算进度文案", "已扫描"),
+    ("重算改写文案", "改写"),
+]
+
+# 同一个 testid 同时承担两个名字时要留痕（避免后人以为漏了一个控件、又造一个新的）。
+ALIAS_DECLARATIONS: list[tuple[str, str]] = [
+    ("scrape-filter-kw-input", "scrape-keywords"),
+]
+
+
+def _fixture_sources() -> dict[str, str]:
+    """E2E 离线夹具（`frontend/tests/fixtures/*.html`）。
+
+    夹具是**契约的第二实现**：`run` 拿真实 DOM 断言，`contract` 拿夹具做静态回归。
+    两边必须对同一份契约成立，否则测试全绿而真机全红（2026-11-21 就差点这样）。
+    """
+    out: dict[str, str] = {}
+    root = REPO_ROOT / "frontend" / "tests" / "fixtures"
+    if not root.is_dir():
+        return out
+    for p in sorted(root.glob("*.html")):
+        out[f"tests/fixtures/{p.name}"] = p.read_text(encoding="utf-8", errors="replace")
+    return out
+
 
 def _rust_sources() -> dict[str, str]:
     root = REPO_ROOT / "frontend"
@@ -331,19 +403,53 @@ def _anchor_home(tid: str, src: dict[str, str]) -> str | None:
     return hits[0] if hits else None
 
 
+def _fixture_missing(fixtures: dict[str, str]) -> list[str]:
+    """把 `run` 的界面契约判定**原样**跑在离线夹具上（不启动应用）。
+
+    只用 `data-testid="x"` 字面量匹配，不用 `_anchor_home` 的裸名回退——
+    夹具是 HTML，裸名回退会把属性名、注释里的词也算成命中。
+    """
+    out: list[str] = []
+    for name, body in fixtures.items():
+        miss = [tid for tid in _ids(REQUIRED_TESTIDS)
+                if f'data-testid="{tid}"' not in body]
+        if miss:
+            out.append(f"夹具 {name} 缺必需锚点：{miss}")
+        flow = [tid for tid in _ids(FLOW_TESTIDS) if f'data-testid="{tid}"' not in body]
+        if flow:
+            out.append(f"夹具 {name} 缺点击门禁锚点：{flow}")
+        form = [spec for spec in DEMO_FORM_TESTIDS
+                if not any(f'data-testid="{a}"' in body for a in _ids(spec))]
+        if form:
+            out.append(f"夹具 {name} 缺试算表单锚点：{[' | '.join(_ids(s)) for s in form]}")
+        # 五段文案：`run` 走 `_parse_progress`，优先读五个独立 Stat，读不到才退回
+        # 容器文本。夹具里两路都得能取到，否则真机换一条路就会静默为 0。
+        if f'data-testid="scrape-progress"' not in body:
+            out.append(f"夹具 {name} 找不到 scrape-progress 容器")
+        elif PROGRESS_RE.search(body) is None:
+            out.append(f"夹具 {name} 里没有任何满足五段进度契约的文本（{PROGRESS_RE.pattern}）")
+        if "✔" not in body:
+            out.append(f"夹具 {name} 的事件流里没有入库行 tag「✔」")
+        for label, snippet in RENDERED_TEXT_CONTRACTS:
+            if snippet not in body:
+                out.append(f"夹具 {name} 缺文案契约「{label}」：{snippet!r}")
+    return out
+
+
 def contract_check() -> int:
     """不开应用，静态核对 `frontend/src/**` 是否满足本脚本的 E2E 契约。
 
     存在理由：`run --ui-only` 要能启动真实 exe（需要工作区外的产物 + 可写的
     `%LOCALAPPDATA%`）。这两条在本机/沙箱里常常一条都不满足，此时「界面契约」
     这一层仍然**可以静态验证**：缺哪个锚点、哪个文案被改了，这里直接点名到文件。
+    额外把同一份契约跑在 `frontend/tests/fixtures/*.html` 上（夹具必须与真机同构）。
     返回 0 = 契约齐；1 = 有缺口（逐条打印）。
     """
     src = _rust_sources()
     blade = "\n".join(src.values())
     missing: list[str] = []
 
-    for tid in _ids(REQUIRED_TESTIDS):
+    for tid in _ids(REQUIRED_TESTIDS) + _ids(FLOW_TESTIDS):
         home = TESTID_HOMES.get(tid)
         where = f"（应出现在 {home}）" if home else ""
         found = _anchor_home(tid, src)
@@ -361,9 +467,20 @@ def contract_check() -> int:
         if snippet not in blade:
             missing.append(f"文案契约「{label}」片段找不到：{snippet!r}")
 
+    for alias, primary in ALIAS_DECLARATIONS:
+        if f'data-alias="{alias}"' not in blade:
+            missing.append(f"别名声明丢失：{alias!r}（主锚点 {primary}）")
+
+    fixtures = _fixture_sources()
+    if not fixtures:
+        print("[note] 没找到 frontend/tests/fixtures/*.html，跳过夹具同构校验")
+    else:
+        missing.extend(_fixture_missing(fixtures))
+
     for m in missing:
         print(f"[FAIL] {m}")
-    total = len(_ids(REQUIRED_TESTIDS)) + 1 + len(TEXT_CONTRACTS)
+    total = (len(_ids(REQUIRED_TESTIDS)) + len(_ids(FLOW_TESTIDS)) + 1
+             + len(TEXT_CONTRACTS) + len(ALIAS_DECLARATIONS))
     print(f"[contract] {total - len(missing)}/{total} 项契约成立（扫描 {len(src)} 个 .rs）")
     return 0 if not missing else 1
 
@@ -579,12 +696,26 @@ def run_exe(report: Report, exe: Path, *, ui_only: bool, keywords: str, min_scor
             # ── 1. 界面契约：data-testid 一个不能少 ────────────────────
             # 缺锚点只记「本次」失败，绝不短路：后面的读库 / 重算 / 试算照跑，
             # 这样一份报告就能看出「缺哪几个锚点」和「其余路径是否健康」。
+            #
+            # 折叠态例外：`scrape-keywords` 在「筛选条件 ▼」之后才渲染
+            # （frontend/src/features/scrape/panel.rs 的 `<Show when=expanded>`），
+            # 所以先展开再数锚点——否则会把「设计上折叠」误报成「契约缺失」。
+            expanded = _expand_scrape_filters(page)
             missing = _missing_testids(page, REQUIRED_TESTIDS)
             report.add("界面契约：data-testid 齐全", not missing,
-                       f"缺 {missing}" if missing else f"{len(REQUIRED_TESTIDS)} 项全中")
+                       f"缺 {missing}" if missing else
+                       f"{len(REQUIRED_TESTIDS)} 项全中"
+                       f"{'' if expanded else '（筛选展开失败）'}")
             missing_form = _missing_testids(page, DEMO_FORM_TESTIDS)
             report.add("试算表单 input 锚点齐全", not missing_form,
                        f"缺 {missing_form}" if missing_form else "")
+            # 点击门禁：不是「界面必须具备」，但缺了后面的路径会挂得莫名其妙
+            missing_flow = _missing_testids(page, FLOW_TESTIDS)
+            report.add("点击门禁锚点齐全（敏感库 / 自动投递 / 试算卡片）", not missing_flow,
+                       f"缺 {missing_flow}" if missing_flow else f"{len(_ids(FLOW_TESTIDS))} 项全中")
+            # 自动投递 20 秒间隔：**只验存在与初始态，绝不真等**（等待属于契约外的成本）
+            auto_status = _text(page, "auto-status")
+            report.add("自动投递状态条可读", bool(auto_status), auto_status[:120])
 
             spec = _text(page, "score-spec")
             report.add("打分口径由 Rust 下发（前端不硬编码）", bool(spec), spec)

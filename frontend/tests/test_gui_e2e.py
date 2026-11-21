@@ -115,6 +115,10 @@ class FakePage:
     def click(self, selector: str) -> None:
         tid = _selector_testid(selector)
         self.clicks.append(tid or selector)
+        self._on_click(tid or selector)
+
+    def _on_click(self, tid: str) -> None:
+        """子类可覆盖：模拟「点一下之后 DOM 变了」（如展开筛选区）。"""
 
     def fill(self, selector: str, value: str) -> None:
         tid = _selector_testid(selector)
@@ -278,7 +282,13 @@ def _broken_fixture(*drop_ids: str) -> str:
 
 class RequiredTestidsTest(unittest.TestCase):
     def test_required_list_is_the_documented_16(self):
-        """任务书 / AGENTS §6.2 第 9 项点名的 16 个锚点一个都不能少。"""
+        """任务书 / AGENTS §6.2 第 9 项点名的 16 个锚点一个都不能少。
+
+        2026-11-21 第二轮起该清单是 16 项的**超集**：多出的两项是
+        `scrape-filter-toggle`（关键词输入框折叠在它之后才渲染，不先展开就必然误报缺失）
+        与 `job-list`（读库见证，用来区分「库为空」和「列表没渲染」）。
+        **只许加不许减**：任何一项被删掉，这条断言都会红。
+        """
         documented = [
             "app-root", "score-spec", "job-refresh", "scrape-status", "scrape-login-btn",
             "scrape-keywords", "scrape-min-score", "scrape-start-btn", "scrape-stop-btn",
@@ -288,7 +298,40 @@ class RequiredTestidsTest(unittest.TestCase):
         flat = [t for spec in gui_e2e.REQUIRED_TESTIDS for t in gui_e2e._ids(spec)]
         for tid in documented:
             self.assertIn(tid, flat)
-        self.assertEqual(len(gui_e2e.REQUIRED_TESTIDS), 16)
+        self.assertEqual(len(flat), len(set(flat)), "REQUIRED_TESTIDS 里有重复项")
+        extra = sorted(set(flat) - set(documented))
+        self.assertEqual(extra, ["job-list", "scrape-filter-toggle"],
+                         "必需清单出现了未登记的扩展项（登记见本用例 docstring）")
+
+    def test_flow_testids_are_separate_from_contract(self):
+        """点击门禁锚点（敏感库 / 自动投递 / 试算卡片）不是界面契约，不许混进必需清单。"""
+        required = {t for spec in gui_e2e.REQUIRED_TESTIDS for t in gui_e2e._ids(spec)}
+        flow = {t for spec in gui_e2e.FLOW_TESTIDS for t in gui_e2e._ids(spec)}
+        self.assertTrue(flow, "FLOW_TESTIDS 不能为空")
+        self.assertFalse(required & flow, f"必需清单与门禁清单重叠：{required & flow}")
+
+    def test_flow_anchors_present_in_fixture(self):
+        page = FakePage(_fixture())
+        self.assertEqual(gui_e2e._missing_testids(page, gui_e2e.FLOW_TESTIDS), [])
+
+    def test_every_required_anchor_has_a_declared_home(self):
+        """每个锚点都要登记 file，否则「漏在哪个文件」只能靠人猜。"""
+        for spec in list(gui_e2e.REQUIRED_TESTIDS) + list(gui_e2e.FLOW_TESTIDS):
+            for tid in gui_e2e._ids(spec):
+                self.assertIn(tid, gui_e2e.TESTID_HOMES, f"{tid} 没登记 TESTID_HOMES")
+                self.assertTrue(gui_e2e.TESTID_HOMES[tid], f"{tid} 的 home 为 None")
+
+    def test_declared_homes_point_at_real_files(self):
+        homes = {h for h in gui_e2e.TESTID_HOMES.values() if h}
+        self.assertTrue(homes)
+        for home in sorted(homes):
+            self.assertTrue((gui_e2e.REPO_ROOT / "frontend" / home).is_file(),
+                            f"TESTID_HOMES 指向不存在的文件：frontend/{home}")
+
+    def test_scrape_keywords_home_is_filter_module(self):
+        """`scrape-keywords` 已从 panel.rs 迁到 filter.rs；HOME 表必须跟着走。"""
+        self.assertEqual(gui_e2e.TESTID_HOMES["scrape-keywords"],
+                         "src/features/scrape/filter.rs")
 
     def test_fixture_satisfies_every_required_testid(self):
         page = FakePage(_fixture())
@@ -402,7 +445,8 @@ class RescoreWaitTest(unittest.TestCase):
                          extra={"rescore-note": FakeElement("已扫描 1370 条，改写 42 条")})), 1370)
         self.assertEqual(gui_e2e._rescore_count(FakePage(_fixture(),
                          extra={"rescore-note": FakeElement("扫描 7 条，改写 0 条")})), 7)
-        self.assertIsNone(gui_e2e._rescore_count(FakePage(_fixture())))
+        # 夹具自 2026-11-21 起带一条历史进度行（证明取得到数），「取不到」改用无锚点的页面
+        self.assertIsNone(gui_e2e._rescore_count(FakePage("<div></div>")))
 
     def test_failed_count_is_reported_in_note(self):
         """`rescore.rs` 在有失败时会追加「N 条失败」，脚本据此判「结果无失败」。"""
@@ -447,6 +491,93 @@ class ExePathPolicyTest(unittest.TestCase):
         """产物必须在工作区外（工作区内 exe 继承 Low 完整性标签，起不来）。"""
         default = Path("D:/jt/release/jobassistant-app.exe")
         self.assertFalse(default.is_relative_to(REPO_ROOT))
+
+
+# ──────────────────────── 折叠区（筛选条件）展开 ─────────────────────────
+
+
+def _collapsed_fixture() -> str:
+    """模拟**未展开**的真实页面：`scrape-keywords` 不在 DOM 里（`<Show when=expanded>`）。"""
+    body = _fixture()
+    assert '<input data-testid="scrape-keywords" />' in body
+    return body.replace('<input data-testid="scrape-keywords" />', "")
+
+
+class ExpandFiltersTest(unittest.TestCase):
+    """2026-11-21 的关键坑：关键词输入框折叠后才渲染，直接数锚点会稳定误报缺失。"""
+
+    def test_collapsed_page_is_missing_keywords_until_expanded(self):
+        page = FakePage(_collapsed_fixture())
+        self.assertIn("scrape-keywords",
+                      gui_e2e._missing_testids(page, gui_e2e.REQUIRED_TESTIDS))
+
+    def test_already_expanded_is_not_clicked_twice(self):
+        """幂等：输入框已在 DOM 里就不再点 toggle，否则又把它收起来。"""
+        page = FakePage(_fixture())
+        self.assertTrue(gui_e2e._expand_scrape_filters(page))
+        self.assertEqual(page.clicks, [])
+
+    def test_click_expands_then_contract_is_satisfied(self):
+        class ExpandingPage(FakePage):
+            def _on_click(self, tid: str) -> None:
+                if tid == "scrape-filter-toggle":
+                    self.node = _fixture()
+
+        page = ExpandingPage(_collapsed_fixture())
+        self.assertTrue(gui_e2e._expand_scrape_filters(page))
+        self.assertEqual(page.clicks, ["scrape-filter-toggle"])
+        self.assertEqual(gui_e2e._missing_testids(page, gui_e2e.REQUIRED_TESTIDS), [])
+
+    def test_toggle_absent_reports_false_without_raising(self):
+        """连 toggle 都没有：返回 False（由调用方的断言报告），不许抛异常打断其余检查。"""
+        body = _collapsed_fixture().replace('data-testid="scrape-filter-toggle"', "")
+        page = FakePage(body)
+        self.assertFalse(gui_e2e._expand_scrape_filters(page))
+
+    def test_click_that_does_not_expand_reports_false(self):
+        page = FakePage(_collapsed_fixture())  # 点了但 DOM 没变
+        self.assertFalse(gui_e2e._expand_scrape_filters(page))
+        self.assertEqual(page.clicks, ["scrape-filter-toggle"])
+
+
+# ───────────────────── 夹具同构（contract 二实现的回归） ─────────────────────
+
+
+class FixtureIsomorphismTest(unittest.TestCase):
+    """`run` 拿真机 DOM 断言，`contract` 拿夹具断言——两套必须对同一份契约成立。"""
+
+    def test_fixture_passes_static_contract(self):
+        self.assertEqual(gui_e2e._fixture_missing(gui_e2e._fixture_sources()), [])
+
+    def test_fixture_is_discovered_when_it_exists(self):
+        srcs = gui_e2e._fixture_sources()
+        self.assertIn("tests/fixtures/dashboard_contract.html", srcs)
+
+    def test_dropping_a_required_anchor_fails_the_fixture_check(self):
+        broken = {"x.html": _fixture().replace('data-testid="rescore-note"', "")}
+        problems = gui_e2e._fixture_missing(broken)
+        self.assertTrue(any("rescore-note" in p for p in problems), problems)
+
+    def test_fixture_without_five_segment_text_fails(self):
+        body = _fixture().replace("已抓 3 · 入库 1 · 重复 0 · 低于门槛 2 · 规则否决 0", "随便什么")
+        problems = gui_e2e._fixture_missing({"x.html": body})
+        self.assertTrue(any("五段进度契约" in p for p in problems), problems)
+
+    def test_fixture_without_check_mark_fails(self):
+        problems = gui_e2e._fixture_missing({"x.html": _fixture().replace("✔", "OK")})
+        self.assertTrue(any("✔" in p for p in problems), problems)
+
+    def test_static_text_contract_leaves_placeholders_out_of_fixture_check(self):
+        """源码契约里的 `{}` 占位符在 DOM 里已代入数值，夹具校验不能拿它比。"""
+        rendered = {s for _, s in gui_e2e.RENDERED_TEXT_CONTRACTS}
+        self.assertNotIn("已抓 {} · 入库 {} · 重复 {} · 低于门槛 {} · 规则否决 {}", rendered)
+        body = " ".join(rendered)
+        self.assertNotIn("{}", body)
+
+    def test_alias_declaration_is_enforced(self):
+        """`scrape-filter-kw-input` 是同一个输入框的别名，丢了要报。"""
+        self.assertIn(("scrape-filter-kw-input", "scrape-keywords"),
+                      gui_e2e.ALIAS_DECLARATIONS)
 
 
 if __name__ == "__main__":
