@@ -7,7 +7,8 @@ description: Layering rules for app/src-tauri/src/core - keeping domain rules pu
 
 导语：`core/` 曾经是独立 crate，2026-11-21 并入 `app` crate 后**编译器不再替你守边界**
 （根 `AGENTS.md` 第 0 节），守边界的人就是读这份文件的你。
-收益非常具体：`cargo test --lib` 里 **367 个用例、0.3 秒跑完**，不需要窗口、不需要浏览器、不需要数据库文件。
+收益非常具体：`cargo test --lib` 里 **376 个用例**（core 305 + 命令层 71，2026-11-21 在 `22d5752` 上按 `#[test]` 实测），
+不需要窗口、不需要浏览器、不需要数据库文件。
 
 规则一句话：**`core/` 里的纯函数只吃参数、只吐结论；一切副作用经 trait 端口注入。**
 
@@ -32,14 +33,14 @@ description: Layering rules for app/src-tauri/src/core - keeping domain rules pu
 |---|---|---|
 | 分层铁律的原文 | `app/src-tauri/src/core/mod.rs:1-7`、`:11-15` | 「本 crate 不得依赖 tauri」「domain 不得依赖 rusqlite」 |
 | 打分口径唯一真源 | `core/mod.rs:18-27` | `SCORE_MAX=100` / `SCORE_MIN_DEFAULT=70` |
-| 存储端口 | `core/domain/job.rs:113`（JobStore）、`:192`（SensitiveStore） | 端口签名与「为什么游标按 job_id」的注释 |
+| 存储端口 | `core/domain/job.rs:113`（JobStore）、`:133`（`list_scored_ids`）、`:192`（SensitiveStore） | 端口签名与「为什么游标按 job_id」的注释（`:125-145`） |
 | 四个管理端口 | `core/domain/store_ports.rs:19/144/197/233` | `JobAdminStore` / `SensitiveAdminStore` / `DecisionStore` / `ConfigStore` |
 | LLM 端口 | `core/domain/scoring_llm.rs:58` | `LlmClient: Send + Sync`，实现只在 `infra/llm.rs:122` |
-| 入库纯函数 | `core/sidecar/ingest.rs:1-8`、`:252-322`、`:324-339` | 模块自称纯函数；`DecisionNote` / `decision_note()` 纯映射；三卡预筛 |
-| 副作用端口 | `core/sidecar/session.rs:148-163`、`:166-203` | `IngestPort` 三方法 + 默认空实现的坑 |
-| 无 JD 否决 | `core/domain/scoring.rs:262-280`、`ingest.rs:180-190` | `RuleScore::passes()` 与 72 分事故 |
+| 入库纯函数 | `core/sidecar/ingest.rs:1-8`、`:257-339`、`:378-462` | 模块自称纯函数；`DecisionNote` / `decision_note()` 纯映射；三卡预筛 |
+| 副作用端口 | `core/sidecar/session.rs:150-168`、`:170-189`、`:191-208` | `IngestPort` 三方法（**都无默认实现**）+ 三闭包 `Ports::new` |
+| 无 JD 否决 | `core/domain/scoring.rs:262-280`、`ingest.rs:184-194` | `RuleScore::passes()` 与 72 分事故 |
 | 帧解析语义 | `core/sidecar/process/codec.rs:36-52`、`:54-70`、`:73-96` | `LineParse::Ignore` ≠ 解析失败 |
-| 重算分页 | `core/domain/rescore.rs:105-130`、`core/infra/sqlite/jobs.rs:151-165` | 游标必须按 `job_id` |
+| 重算分页 | `core/domain/rescore.rs:105-130`、`core/infra/sqlite/jobs.rs:151-162` | 游标必须按 `job_id` |
 | 可测性范式 | `core/domain/auto_greet.rs:1-13`、`:31-41`；`core/domain/logbuf.rs:99-105` | 时间 / 随机数一律做参数 |
 
 ---
@@ -63,13 +64,14 @@ description: Layering rules for app/src-tauri/src/core - keeping domain rules pu
 
 3. **加副作用一律经端口注入，端口要能被一个闭包替身替掉。**
    范本是抓取链路：
-   - `IngestPort`（`session.rs:148-163`）只有三件事：`put`（写库）、`remember`（记敏感库）、
-     `record`（写决策日志）。
-   - ⚠ **`record` 带默认空实现**（`session.rs:162`），注释原话是「生产实现 `scrape::make_sink`
-     必须覆盖，否则决策日志生产路径恒空」。默认空实现是为了让测试少写代码，代价是——
-     新写一个 `impl IngestPort` 时代码能编译、用例能绿、**生产环境决策日志一条不写**。
-   - `Ports`（`session.rs:166-203`）用三个闭包 + `no_decision` 拼装，测试直接塞闭包。
-   - 纯的那一半：`decision_note(&ScrapedJob, &IngestVerdict) -> DecisionNote`（`ingest.rs:286-322`）
+- `IngestPort`（`session.rs:150-168`）只有三件事：`put`（写库）、`remember`（记敏感库）、
+  `record`（写决策日志）。**三个方法都没有默认实现**（`:153-157` 注释原话：
+  「决策日志曾经整条写入链缺失……忘写必须编译失败，这是唯一可靠的护栏」——这是 `b8cd3ad` 修的）。
+- `Ports`（`session.rs:170-189`）用三个闭包 `new(put, remember, record)` 拼装（`:182`，**三参必填**；
+  `:172-173` 注释：「曾经有一个 `Ports::new(put, remember)` 省掉 `record`，那正是静默失效的入口」）。
+  测试直接塞闭包；`tests/sidecar_smoke.rs:57-62` 就是一个如实传三参的实例
+  （`:60-61` 注释：「`record` 没有默认实现，这里必须显式写出来」）。
+- 纯的那一半：`decision_note(&ScrapedJob, &IngestVerdict) -> DecisionNote`（`ingest.rs:299-339`）
      是纯数据映射（Accepted→`"accept"` + `new_score=Some`；Rejected→`"reject"` + `None`；
      BelowThreshold→`"skip"` + `None`），脏的那一半只有 `record`。
 
@@ -88,7 +90,8 @@ description: Layering rules for app/src-tauri/src/core - keeping domain rules pu
    ```
    事故原文（`scoring.rs:262-273`）：无 JD 岗位在薪资与经验都匹配时**实测能拿 72 分**，
    越过默认 70 分门槛。所以 `score < min_score` 这种写法在门槛 ≤70 时会**直接放行**。
-   `ingest.rs:180-190` 记录了同一处修复（「原先只比 `score < cfg.min_score`」→ 改成 `if !rule.passes(cfg.min_score)`），
+    `ingest.rs:184-194` 记录了同一处修复（「原先只比 `score < cfg.min_score`」→ 改成 `if !rule.passes(cfg.min_score)`，
+    `:186` 注释写的是「57~72 分」），
    `scoring_service.rs:33-40` 是规则 / 大模型双通道的同名入口。
    → 任何新的「够不够格」判断，都问一句：**这里要不要连否决位一起看？**
 
@@ -107,7 +110,7 @@ description: Layering rules for app/src-tauri/src/core - keeping domain rules pu
 7. **`JobStore::list_scored_ids` 必须按 `job_id` 升序。**
    全量重算要用它翻页，而重算**自己会写 `match_score`**。
    按 `match_score` 排序 → 写回后后续页的边界整体漂移 → 同一条被算两次、别的被跳过，
-   **且没有任何报错**（`domain/job.rs:125-137` 注释；实现 `infra/sqlite/jobs.rs:151-165`；
+    **且没有任何报错**（`domain/job.rs:125-145` 注释；实现 `infra/sqlite/jobs.rs:151-162`，SQL 在 `:157`；
    用例 `infra/sqlite/tests.rs:141-165`、`:168-175`）。
    配套两条：`rescore.rs:110` 的 `.max(1)` 防止 `limit=Some(0)` 原地打转；
    `rescore.rs:124` 的 `verdict.score.min(SCORE_MAX)` 防止越界分数写进 `u8` 列。
@@ -132,7 +135,8 @@ description: Layering rules for app/src-tauri/src/core - keeping domain rules pu
 
 - [ ] `core/` 里没有新增 `use tauri::`（`grep -n "use tauri" src/core` 应为空）
 - [ ] `core/domain/` 里没有新增 `rusqlite` / `ureq`
-- [ ] 新增的 trait 方法没有「默认空实现」——如果有，生产实现必须覆盖并补一条用例
+- [ ] 新增的 trait 方法没有「默认空实现」——本项目已经因为 `IngestPort::record` 吃过一次亏，
+      现在的规矩是：宁可编译失败，也不要静默少写。
 - [ ] 时间 / 随机数都是入参
 - [ ] 「够不够格」走的是 `passes()` 而不是分数比较
 - [ ] 翻页游标是稳定键（`job_id`），不是会被自己改写的列
@@ -143,10 +147,10 @@ description: Layering rules for app/src-tauri/src/core - keeping domain rules pu
 
 | 现象 | 真因 | 依据 |
 |---|---|---|
-| 无 JD 岗位进了库（门槛 ≤70） | 用了 `score < min_score` | `scoring.rs:262-280`、`ingest.rs:180-190` |
+| 无 JD 岗位进了库（门槛 ≤70） | 用了 `score < min_score` | `scoring.rs:262-280`、`ingest.rs:184-194` |
 | 界面冒出「无法解析」但数据正常 | 把回执当成 `Malformed` | `codec.rs:36-52` |
-| 重算漏算 / 重复算，无报错 | 游标按 `match_score` | `job.rs:125-137`、`jobs.rs:151-165` |
-| 决策日志生产环境一条没有 | `IngestPort::record` 用了默认空实现 | `session.rs:148-163` |
+| 重算漏算 / 重复算，无报错 | 游标按 `match_score` | `job.rs:125-145`、`jobs.rs:151-162` |
+| 决策日志生产环境一条没有 | 曾经的 `IngestPort::record` 默认空实现 | `session.rs:150-168`（`b8cd3ad` 已改为必需方法） |
 | `core` 的测试突然要起窗口 | `core` 里混进了 `tauri::` | `core/mod.rs:4`、`lib.rs:8` |
 | 领域测试需要等 20 秒 | 抖动没做成入参 | `auto_greet.rs:1-13`、`:31-41` |
 | 分数偶发超过 100 | 写回前没 `.min(SCORE_MAX)` | `rescore.rs:124` |

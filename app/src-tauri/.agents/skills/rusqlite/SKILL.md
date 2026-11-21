@@ -38,8 +38,8 @@ description: SQLite persistence work in the jobassistant-app crate via rusqlite 
 | 补列声明表 | `core/domain/schema.rs:140-176` | `DECISION_UPGRADE_COLUMNS`(147-157)、`SCHEMA_COLUMN_DECLS`(159-176) |
 | 排序表达式 | `core/domain/job.rs:342-369` | `SALARY_K_EXPR`、`SALARY_UNKNOWN_RANK_EXPR` |
 | 排序拼接 | `core/infra/sqlite/jobs.rs:92-114` | 薪资排序键必须排第一且恒 ASC |
-| 游标分页 | `core/infra/sqlite/jobs.rs:151-165` | `WHERE job_id > ?1 ORDER BY job_id ASC LIMIT ?2` |
-| 第二个事务点（批量写） | `core/infra/sqlite/admin.rs:335-358` | `sync_stored` 整段一个事务 |
+| 游标分页 | `core/infra/sqlite/jobs.rs:151-162`（SQL 在 `:157`） | `WHERE job_id > ?1 ORDER BY job_id ASC LIMIT ?2` |
+| 第二个事务点（批量写） | `core/infra/sqlite/admin.rs:338-358` | `sync_stored` 整段一个事务；`:338-341` 拒绝超 `MAX_BATCH_IDS`(57) |
 | 存储层测试范本 | `core/infra/sqlite/tests.rs` | 50 个用例：排序、游标、补列、迁移 |
 
 ---
@@ -73,7 +73,8 @@ description: SQLite persistence work in the jobassistant-app crate via rusqlite 
    `PRAGMA table_info({table})`(85) 取已存在列名 → 已存在就 `continue`(90) → 否则
    `ALTER TABLE {table} ADD COLUMN {name} {decl}`(93)。
    拼进去的全部是**编译期常量**，所以字符串拼接在这里是安全的（`sqlite.rs:78` 注释）。
-   声明表在 `schema.rs`：`SCHEMA_COLUMN_DECLS`(159-176)、`DECISION_UPGRADE_COLUMNS`(147-157)。
+   声明表在 `schema.rs`：`SCHEMA_COLUMN_DECLS`(177-205)、`UPGRADE_COLUMNS`(115-145)、
+   `DECISION_UPGRADE_COLUMNS`(152)、`upgrade_decision_columns()`(155-157)。
    → 加列的完整动作是**两处都改**：建表语句 `SCHEMA` **和**补列声明表
    （`schema.rs:140-143` 的注释就是这么要求的）；漏了后者，老库永远不会长出新列。
    `upgrade_columns()`(157-178) 末尾的 `REINDEX`(176) 也不能删：历史上索引损坏
@@ -82,26 +83,32 @@ description: SQLite persistence work in the jobassistant-app crate via rusqlite 
 5. **薪资排序的 NULL 语义与 MySQL / PostgreSQL 相反。**
    SQLite 的 `ORDER BY x ASC` 把 NULL 排**最前**，`DESC` 排最后。
    而「面议 / 空」在本项目里应当**永远垫底**。所以：
-   - `SALARY_UNKNOWN_RANK_EXPR`（`job.rs:362-369`）：
+   - `SALARY_UNKNOWN_RANK_EXPR`（`job.rs:367-369`）：
      `CASE WHEN salary IS NULL OR TRIM(salary) = '' OR salary LIKE '%面议%' THEN 1 ELSE 0 END`
    - 它**必须恒 ASC，且必须是第一排序键**（注释 `job.rs:363-366`）：
      `ORDER BY {SALARY_UNKNOWN_RANK_EXPR} ASC, {SALARY_K_EXPR} {dir}, job_id {dir}`（`jobs.rs:100-104`）。
      让它跟着用户选的 `dir` 翻转，用户一点「降序」面议就会跳到最上面。
    - 非表达式列走 `jobs.rs:105-114` 的分支，但仍要 `job_id {dir}` 兜底：同分没有稳定次序
      （注释 106-109）。
-   - 有效用例：`tests.rs:67-80`（`"面议"` 与 `""` 都排最后）。
+   - 有效用例：`tests.rs:76`（`("d", "面议")` 注释「未知，排最后」）、`:104-105`
+     （`assert_eq!(&ids[4..], &["d", "f"], "面议/空应排最后")`）。
 
 6. **游标分页只能按 `job_id` 升序。**
-   `jobs.rs:151-165`：`WHERE job_id > ?1 ORDER BY job_id ASC LIMIT ?2`。
+   `jobs.rs:151-162`：`WHERE job_id > ?1 ORDER BY job_id ASC LIMIT ?2`。
    改成 `ORDER BY match_score`，全量重算的写回会改动 `match_score`，
    从而推翻后续页的边界——**同一条被算两次、别的被跳过，且没有任何报错**
-   （trait 注释 `domain/job.rs:125-137`；用例 `tests.rs:141-165`、`tests.rs:168-175`）。
+   （trait 注释 `domain/job.rs:125-145`；用例 `tests.rs:141`
+   `list_scored_ids_pages_by_job_id_cursor`、`tests.rs:168`
+   `list_scored_ids_ignores_score_so_paging_is_stable`）。
    顺便：`limit` 不能传 0，`rescore` 侧用 `.max(1)` 兜底（`domain/rescore.rs:110`）。
 
 7. **写库失败不得计入 `inserted`。**
-   入库计数只在 `core/sidecar/session.rs:549-562` 分类、`:589-607` 记账：
-   `put` 返回 `Err` 时 bucket=4，**只写 `last_log`，不加 `inserted`**。
-   用例锁死在此：`session.rs:709-730`（`store_error_does_not_count_as_inserted`）。
+   入库计数只在 `core/sidecar/session.rs::handle_job`（`:502` 起）里分类与记账：
+   `:548-552` 定初值（0 入库 / 3 规则否决 / 2 门槛）、`:557-570` `put` 返回 `Err` 时 bucket=4、
+   `:599-614` 五个分支记账——**bucket=4 只写 `last_log`，不加 `inserted`**（`:565-566` 注释：
+   「否则用户会以为『抓到了 10 条却一条没进』」）。
+   用例锁死在此：`session.rs:724`（`store_error_does_not_count_as_inserted`）、
+   `session.rs:690`（`duplicate_is_counted_separately_from_inserted`）。
    → 在存储层「吞掉错误返回 Ok」等于把失败伪装成入库，是把这条铁律从背后捅穿。
 
 8. **严禁对真实库做破坏性验证。**

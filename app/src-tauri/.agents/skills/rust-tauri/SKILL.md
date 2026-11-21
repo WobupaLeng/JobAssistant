@@ -32,12 +32,12 @@ description: Tauri 2 desktop shell work in the jobassistant-app crate - command 
 
 | 要读什么 | 文件 | 读它为了 |
 |---|---|---|
-| 启动编排、单实例锁、毛玻璃、命令总表 | `app/src-tauri/src/lib.rs` | 45 条命令的唯一注册点（473-522）、`manage()` 清单（412-425）、启动前置检查（392-410） |
-| 命令参数与 alias 的写法范本 | `app/src-tauri/src/commands_db.rs` | `ListJobsArgs`(103-128) / `ScoreArgs`(311-328) / `RescoreArgs`(451-471) |
+| 启动编排、单实例锁、毛玻璃、命令总表 | `app/src-tauri/src/lib.rs` | 48 条命令的唯一注册点（473-522）、`manage()` 清单（415-425）、启动前置检查（392-410） |
+| 命令参数与 alias 的写法范本 | `app/src-tauri/src/commands_db.rs` | `ListJobsArgs`(102-128) / `ScoreArgs`(311-328) / `RescoreArgs`(451-471) |
 | 抓取命令与进程级互斥 | `app/src-tauri/src/commands_scrape.rs` | `ScrapeState`(35)、`LAST_SPEC`(37)、`RESTART_LOCK`(44)、`ScrapeArgs`(163-176) |
-| 会话启停 / 重启策略 / 入库端口 | `app/src-tauri/src/core/scrape.rs` | `resolve_script_dir`(42-58)、`make_sink`(90)、`restart_decision`(243-258) |
+| 会话启停 / 重启策略 / 入库端口 | `app/src-tauri/src/core/scrape.rs`（43 行 re-export 外壳）+ `core/scrape/` | `launch.rs`(126 行：`resolve_script_dir` 22 / `launch_session` 70 / `ensure_session_locked` 106)、`sink.rs`(86 行：`make_sink` 14 / `make_lookup` 67)、`restart.rs`(177 行：`MAX_AUTO_RESTARTS` 8 / `restart_decision` 28 / `plan_restart` 105) |
 | sidecar 协议帧 | `app/src-tauri/src/core/sidecar/protocol.rs` | `#[serde(rename = "scrape.start")]`(72)、`Envelope` |
-| 序列化 / 解析的唯一入口 | `app/src-tauri/src/core/sidecar/process/codec.rs` | `protocol_line`(23)、`parse_line`(54-70)、`LineParse`(36-52) |
+| 序列化 / 解析的唯一入口 | `app/src-tauri/src/core/sidecar/process/codec.rs` | `protocol_line`(23)、`parse_line`(54-97)、`LineParse`(36-52) |
 | 权限面 | `app/src-tauri/capabilities/default.json` | 只有 5 条权限，`windows: ["main"]` |
 | 窗口 / CSP / frontendDist | `app/src-tauri/tauri.conf.json` | `frontendDist: "../../frontend/dist"`、`transparent: true` |
 
@@ -55,26 +55,31 @@ description: Tauri 2 desktop shell work in the jobassistant-app crate - command 
    （`commands_db.rs:99-101` 是这条规矩的注释原点；`commands_db.rs:112/115/118`、`:198`、`:252`、
    `:320/323`、`:455/462/464`；`commands_scrape.rs:172/174`；`commands_auto.rs:72`；
    `core/domain/app_config.rs:152-228` 一整批）。
-   双向兼容有实测用例：`commands_db.rs:864-875`（`{"useLlm":true}` 与 `{"use_llm":true}` 都认）。
-   → **新增字段后必须补一条同形态的双写用例**，否则下一次改前端就会静默失效。
+   双向兼容有实测用例：`commands_db.rs:864-875`（`fn score_args_accept_both_camel_and_snake_case`，
+   `{"useLlm":true}` 与 `{"use_llm":true}` 都认）。
+    → **新增字段后必须补一条同形态的双写用例**，否则下一次改前端就会静默失效。
 
 2. **`invoke_handler` 是单点，且是唯一注册入口。**
-   `lib.rs:473-522` 用 `tauri::generate_handler![...]` 注册了全部 45 条命令（16+6+7+4+5+2+2+2+2，按命令层文件分组）。
+   `lib.rs:473-522` 用 `tauri::generate_handler![...]` 注册了全部 **48** 条命令
+   （`commands_db` 14 + `commands_scrape` 10 + `commands_chat` 7 + `commands_auto` 5 + `commands_config` 4 +
+   `commands_sensitive` 2 + `commands_logs` 2 + `commands_greet` 2 + `lib.rs` 内联 2：`get_scoring_spec` / `app_info`；
+   2026-11-21 在 `bb9d16c` 上实测，`#[tauri::command]` 定义数与注册项数**都是 48**）。
    忘了登记不会编译报错，只会表现为前端 `invoke` 被拒。改动该文件属于高冲突单点（根 `AGENTS.md` 第 2.5 节），**同一时刻只允许一个写者**。
 
 3. **全局状态一律 `manage()`，命令里用 `State<'_, T>` 取。**
-   `lib.rs:412-425` 注册了 6 个：单实例锁、`StoreState(Mutex<Option<Arc<SqliteStore>>>)`、
+   `lib.rs:415-425` 注册了 6 个：单实例锁、`StoreState(Mutex<Option<Arc<SqliteStore>>>)`、
    `LlmState`、`ScrapeState`、`AutoGreetState`、`AppPaths`。
    store 用 `Mutex<Option<..>>` 而不是裸 `Arc`，是因为数据库打开失败时应用**照常启动**、由命令层报错；
    这条「不阻断启动」的取舍在 `lib.rs:426-472`（setup 里失败只 `eprintln`）。
    `ScrapeState` 的 `Mutex<Option<SidecarSession>>` 同理：会话只在用户点开始抓取时才创建，
-   停止 / 重开要能彻底回收子进程（`commands_scrape.rs:31-35`）。
+    停止 / 重开要能彻底回收子进程（`commands_scrape.rs:35`）。
 
 4. **命令层只做「收参数 → 调 core → 错误转字符串」。**
    会话怎么起、崩几次就放弃、敏感库怎么查，全在 `core::scrape`
-   （`commands_scrape.rs:1-15` 模块注释；`restart_decision` 在 `core/scrape.rs:243-258`）。
+   （`core/scrape.rs:1-15` 模块注释写明下沉理由）；其中 `restart_decision` 在
+   `core/scrape/restart.rs:28`，`make_sink` 在 `core/scrape/sink.rs:14`。
    进程级互斥（`LAST_SPEC` / `RESTART_LOCK`）留在命令层是因为它们属于「进程全局」而非领域规则
-   （`commands_scrape.rs:14-15`、`:39-44`）。
+   （`commands_scrape.rs:14`、`:37`、`:44`）。
 
 5. **sidecar 的 JSON 参数必须平铺，不许包 `params`。**
    Python 侧 `handle()` 读的是同一层的 `cmd` / `keywords`；序列化唯一入口是
@@ -125,11 +130,14 @@ description: Tauri 2 desktop shell work in the jobassistant-app crate - command 
 
 ### 碰 sidecar
 
-1. 起停编排改 `core/scrape.rs`（`launch_session` 167 / `ensure_session_locked` 203 / `restart_decision` 243）。
+1. 起停编排改 `core/scrape/`：`launch.rs`（`resolve_script_dir` 22 / `launch_session` 70 /
+   `ensure_session_locked` 106）、`restart.rs`（`restart_decision` 28）。
+   `core/scrape.rs` 本身只是 43 行 re-export 外壳，对外路径 `core::scrape::*` 不变（`scrape.rs:26-43`）。
 2. 崩溃重启只允许一次：`restart_decision` 的三条早退（用户主动停 → `Skip`；退出码 0 → `Skip`；
-   已重启过 → `GiveUp`）——无限重启只会反复起浏览器、反复弹验证（`core/scrape.rs:240-258`）。
+   已重启过 → `GiveUp`）——无限重启只会反复起浏览器、反复弹验证
+   （`core/scrape/restart.rs:8` 的 `MAX_AUTO_RESTARTS = 1`、`:12` `RestartAction`）。
 3. 起不来时**必须留痕迹**：`resolve_script_dir` 会打 `[sidecar] 解析目录 ...`
-   （`core/scrape.rs:49`），历史上 sidecar 静默死亡就是没人打这行。
+   （`core/scrape/launch.rs:22` 起），历史上 sidecar 静默死亡就是没人打这行。
 4. 想验证真进程：`cargo test --test sidecar_smoke -- --ignored --nocapture`（见 `rust-testing`）。
 
 ### 打包与启动冒烟
@@ -169,4 +177,4 @@ D:\jt\release\jobassistant-app.exe
 | 打包后白屏 | 用了 `cargo build --release` | `tauri.conf.json` 的 `frontendDist` |
 | 启动即 `os error 5` | 产物在工作区内，继承 `S-1-16-4096` | `lib.rs:284-304`、`lib.rs:527-558` |
 | 「另一个实例正在运行」 | 命名互斥体被占（不是锁文件） | `lib.rs:340-385` |
-| 崩溃重启无限循环 | 绕过了 `restart_decision` | `core/scrape.rs:243-258` |
+| 崩溃重启无限循环 | 绕过了 `restart_decision` | `core/scrape/restart.rs:28`、`:8`（`MAX_AUTO_RESTARTS = 1`） |
