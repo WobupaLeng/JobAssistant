@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::commands_db::{store_err, store_handle, with_store, CmdResult, LlmState, StoreState};
 use crate::commands_scrape::ScrapeState;
-use crate::core::domain::auto_greet::{next_gap_ms, AutoGreetRuntime};
+use crate::core::domain::auto_greet::AutoGreetRuntime;
 use crate::core::domain::greeting::{write_greeting, Greeting, GreetingProfile};
 use crate::core::domain::job::{Job, JobQuery};
 use crate::core::domain::profile::DEFAULT_PROFILE;
@@ -426,7 +426,9 @@ pub fn auto_greet_reset(state: tauri::State<'_, AutoGreetState>) -> CmdResult<bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::domain::auto_greet::{AUTO_GAP_MIN_MS, AUTO_GAP_MS, AUTO_MAX_FAILURES};
+    use crate::core::domain::auto_greet::{
+        next_gap_ms, AUTO_GAP_MIN_MS, AUTO_GAP_MS, AUTO_MAX_FAILURES,
+    };
     use crate::core::infra::SqliteStore;
 
     #[test]
