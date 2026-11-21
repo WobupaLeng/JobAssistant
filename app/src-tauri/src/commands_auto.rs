@@ -423,12 +423,6 @@ pub fn auto_greet_reset(state: tauri::State<'_, AutoGreetState>) -> CmdResult<bo
     Ok(true)
 }
 
-/// 供单测与前端展示：一次间隔的毫秒数（不依赖运行态）。
-#[tauri::command]
-pub fn auto_greet_gap(roll: Option<f64>) -> CmdResult<u64> {
-    Ok(next_gap_ms(roll.unwrap_or_else(random_roll)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
