@@ -1,5 +1,7 @@
 /**
- * 自动投递的纯逻辑（Leptos `features/auto/state.rs` 的逐条直译）。
+ * 自动投递的纯逻辑。
+ *
+ * 行为对照的是 Leptos 版的自动投递状态机（Leptos 版已退役，见 git 历史，提交 53d05cb 之前）。
  *
  * ## 节奏规则归属（不可改动）
  * 「下一条什么时候发」**完全由后端决定**（`core/domain/auto_greet.rs`：

@@ -34,3 +34,6 @@ export {
   type SensitiveTab,
   type SensitiveTabMeta,
 } from './sensitive-model';
+export * from './job-detail-model';
+export * from './platform-model';
+export * from './error-queue';

@@ -330,7 +330,7 @@ export function keepaliveRows(jobs: readonly Job[]): KeepaliveRow[] {
   }));
 }
 
-/** 决策/日志里常见的 `公司 / 岗位` 串拆开（`logfmt.rs` 的同名规则）。 */
+/** 决策/日志里常见的 `公司 / 岗位` 串拆开（Leptos 版已退役，见 git 历史，提交 53d05cb 之前）。 */
 export function splitCompanyTitle(raw: string): [string, string] {
   return splitCompanyJob(raw);
 }

@@ -74,9 +74,9 @@ export function dateTimeMs(tsMs: number, offsetSecs: number): DateTime {
  * 唯一判不了的是 1973-03-03 之前的**毫秒**值（其数值落在秒区间里，单位信息已丢失），
  * 而这两个数据源（sidecar 的 `time.time()` 秒、`Date.now()` 毫秒）都不会产出它们。
  *
- * 旧判据是 1e12（Leptos 版 `lib_ui/time.rs` 原样搬来），它把 2001-09-10 之前的
+ * 旧判据是 1e12（Leptos 版已退役，见 git 历史，提交 53d05cb 之前），它把 2001-09-10 之前的
  * 毫秒戳（例如 `951_753_600_000` = 2000-02-29）误当秒再乘 1000，显示成 32129 年。
- * 已随 C14 口径修正，**`time.rs::to_ms` 必须同一判据**——改一处不同改另一处就是两版分叉。
+ * 已随 C14 口径修正。
  */
 export function toMs(ts: number): number {
   return ts !== 0 && Math.abs(ts) < 100_000_000_000 ? ts * 1000 : ts;

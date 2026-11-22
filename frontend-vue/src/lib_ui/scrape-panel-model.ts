@@ -13,7 +13,7 @@ export type ScrapeButtonState = 'idle' | 'running' | 'paused';
 /**
  * `max_jd` 输入框的上限。
  *
- * 与后端 `core/domain/app_config.rs:162` 的 `MAX_JD_CAP = 500` 对齐：
+ * 与后端 `backend-tauri/src/core/domain/app_config.rs:162` 的 `MAX_JD_CAP = 500` 对齐：
  * 超过它 `set_limit` 会**直接拒绝**（不是静默夹住），所以界面先夹一次，
  * 避免用户看到「保存失败但值已经生效」。这是后端常量，不是业务门槛。
  */

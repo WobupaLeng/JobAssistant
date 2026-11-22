@@ -11,11 +11,13 @@
 
 `frontend-vue/` 已进入 **Vue 3 + Vite + TypeScript 原地重写**：ARCH-003 **阶段 0–3 完成**——`src/api/**` 覆盖全部 48 条命令（`tests/commands-payload.test.ts` 守卫）、四页全部接线（`App.vue` 分发：概览常挂 + 聊天/配置/日志浮层）、`npm run typecheck` 0 错、`npm run build` 通过、vitest 全绿。
 
-**Leptos 0.8 `.rs` 已部分退役**（用户裁决「先删除」）：`src/pages/*.rs` 五个页面文件、`lib.rs` 的 `mod pages`/`pages::Page` 引用、`features/scrape/filter.rs` 的旧城市 `<select>` 均已删除（git 历史可取回）。**其余 `.rs`（api/components/features/lib_ui，约 40 个）仍是行为对照基线**，阶段 4 整体退役。后端 `backend-tauri/` 不动。方案见 [`ARCH-003`](../docs/architecture/ARCH-003-vue-frontend-migration.md)。
+**Leptos 0.8 `.rs` 已全部退役**（阶段 4 完成，用户裁决「先删除」）：`src/` 下 `.rs` 计数 **0**（pages 5 + 第一批 41 + 第二批 15，含 `lib.rs`/`main.rs`/两个 `mod.rs`；git 历史可取回，提交 53d05cb 之前）。注释溯源统一改写为「Leptos 版已退役，见 git 历史」。后端 `backend-tauri/` 不动。方案见 [`ARCH-003`](../docs/architecture/ARCH-003-vue-frontend-migration.md)。
 
 **已接线**：概览页（CityPicker 373 城 + 全筛选控件 + C12 草稿 400ms 防抖 + 抓取三态 + 岗位网格/长按多选/批量 + 敏感库浮层 + 顶栏 token）、聊天页（Boss 列表 + 抽屉 v3 布局 + 自动投递三态队列 + 打招呼草稿）、配置页（三卡 + 掩码 + diff 保存）、日志页（决策/运行双视图 + seq 游标增量）。**分层整改已完成**：被展示组件消费的视图模型全部住 `lib_ui/`（chat-model / auto-model / job-list-model / longpress / scrape-panel-model / sensitive-model / scrape-filter-model），`features/` 只留编排（`features/scrape/filter.ts` 仅剩 loadDraft/saveDraft）；三条越层 grep 归零。
 
-**测试现状**：`npx vitest run` 全量全绿（21 文件）。秒/毫秒判据已修为 `1e11`（见 §2.3）。**已知例外**：`lib_ui/theme.ts` 仍直接触碰 `localStorage`/`matchMedia`/`document`（首帧主题入口，Leptos `lib_ui/theme.rs` 同样如此，C7 遗产）；拆纯函数+副作用会改启动路径，留待阶段 4 一并裁决，不算 §2.5 违例（§2.2 禁的是反向 import，不是 DOM）。
+**M5 补遗完成**：`JobDetailDrawer.vue`（kv 十行/JD 四态/chips/单条 reject↔allow 同位单按钮/Esc 摘除）、`PlatformCard.vue`（三平台、boss 登录已接 `login_start`/`login_status`，智联/51job `is-off`）、`AppErrorBar.vue` 改 FIFO 队列（上限 5 + dropped 计数 + 逐条关闭 + aria-live）；视图模型 `lib_ui/{job-detail-model,platform-model,error-queue}.ts`。
+
+**测试现状**：`npx vitest run` 全量全绿（24 文件 433 用例）。秒/毫秒判据已修为 `1e11`（见 §2.3）。**已知例外**：`lib_ui/theme.ts` 仍直接触碰 `localStorage`/`matchMedia`/`document`（首帧主题入口，Leptos `lib_ui/theme.rs` 同样如此，C7 遗产）；拆纯函数+副作用会改启动路径，留待后续裁决，不算 §2.5 违例（§2.2 禁的是反向 import，不是 DOM）。
 
 ---
 

@@ -34,7 +34,7 @@ frontend-vue/
 
 **没有 `src/app/`**，不要新建。
 
-Leptos 版现状（重写期间的真实目录，作迁移对照）：`src/` 61 个 `.rs` / 11,551 行；`api/mod.rs` 380 行（39 手写 + 8 宏展开 = 47 函数，去重覆盖 46 命令）、`api/types.rs` 591 行（37 struct + 1 enum）；`components/` shell 287 + widgets 263；`features/` 39 文件 8,369 行（其中 `scrape/filter.rs` 1,445 行）；`lib_ui/` 9 个纯函数模块；`pages/` 4 页 + `mod.rs` 分发；`styles/` 11 份 3,197 行。
+Leptos 版**已全部退役**（阶段 4 完成）：`src/` 下 `.rs` 计数 0；历史基线（61 个 `.rs` / 11,551 行）从 git 历史取回（提交 53d05cb 之前）。本文件第 4/5 节引用的 `.rs` 行号均为**历史证据坐标**，不再对应存活文件。
 
 ---
 
@@ -126,7 +126,7 @@ pages → features → components → lib_ui
 
 ---
 
-## 5. 契约面的现状
+## 5. 契约面的现状（Leptos 历史基线，已退役；Vue 侧真源见 `src/api/` 与 `tests/commands-payload.test.ts`）
 
 | 项 | 数值 | 说明 |
 |---|---|---|

@@ -14,7 +14,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import AppErrorBar from '../components/AppErrorBar.vue';
 import FilterPanel from '../components/FilterPanel.vue';
+import JobDetailDrawer from '../components/JobDetailDrawer.vue';
 import JobListView from '../components/JobListView.vue';
+import PlatformCard from '../components/PlatformCard.vue';
 import LogCard, { type LogLine } from '../components/LogCard.vue';
 import ScrapeBar from '../components/ScrapeBar.vue';
 import SensitivePanel from '../components/SensitivePanel.vue';
@@ -31,7 +33,14 @@ import { getScoringSpec } from '../api/commands/shell';
 import { scrapeProgress, scrapeStart, scrapeStop } from '../api/commands/scrape';
 import { getAppConfig, setScrapeDefaults } from '../api/commands/config';
 import { sensitiveList, sensitiveRemove } from '../api/commands/sensitive';
-import type { AppConfigReply, Job, JobTabCounts, SensitivePage } from '../api/types';
+import { loginStart, loginStatus } from '../api/commands/scrape';
+import type {
+  AppConfigReply,
+  Job,
+  JobTabCounts,
+  LoginStatus,
+  SensitivePage,
+} from '../api/types';
 import { setGreetDraft } from '../features/chat/greet-draft';
 import {
   LIST_TAB_DEFAULT,
@@ -80,6 +89,25 @@ import { loadDraft, saveDraft } from '../features/scrape/filter';
 import { pageTestId } from '../lib_ui/nav';
 import { parseLogLevel } from '../lib_ui/logfmt';
 import { readInitialTheme, flipTheme, applyTheme } from '../lib_ui/theme';
+import {
+  EMPTY_DETAIL,
+  actionFailPrefix,
+  actionNote,
+  closeDetail,
+  detailTitle,
+  openDetail,
+  type DetailAction,
+  type DetailState,
+} from '../lib_ui/job-detail-model';
+import { PRIMARY_PLATFORM, pickPlatform } from '../lib_ui/platform-model';
+import {
+  EMPTY_QUEUE,
+  clearErrors,
+  dismissError,
+  pushError,
+  type ErrorItem,
+  type ErrorQueue,
+} from '../lib_ui/error-queue';
 
 /**
  * 跳页：本页不直接改 `App.vue` 的 nav，交给父级。
@@ -130,8 +158,22 @@ const sensitivePage = shallowRef<SensitivePage>({ items: [], total: 0 });
 const sensitiveLoading = ref(false);
 const sensitiveError = ref('');
 
-const errorMessage = ref('');
-const errorCode = ref('');
+// 错误是**队列**：并发失败时一条都不丢（见 lib_ui/error-queue.ts）。
+const errors = ref<ErrorQueue>(EMPTY_QUEUE);
+
+// 岗位详情抽屉。
+const detail = ref<DetailState>(EMPTY_DETAIL);
+const detailJob = computed<Job | null>(() => {
+  const id = detail.value.jobId;
+  if (id === null) return null;
+  return jobs.value.find((j) => j.job_id === id) ?? null;
+});
+
+// 平台卡：本轮只有 Boss 接了登录链路，选中的平台随抓取一起发给 scrape_start。
+const platform = ref(PRIMARY_PLATFORM);
+const login = shallowRef<LoginStatus | null>(null);
+const loginBusy = ref(false);
+
 const themeLabel = ref(readInitialTheme() === 'dark' ? '深色' : '浅色');
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -143,6 +185,37 @@ let pressJobId = '';
 
 const segs = computed(() => scoreModeSegs('rule'));
 const state = computed(() => buttonState(progress.value.running, pausedByUser.value));
+
+// ---------------------------------------------------------------- 错误
+
+/**
+ * 记一条错误进队列。`retry` 给出时，错误条上多一个「重试」按钮。
+ * 队列上限与去重都在 `pushError` 里（纯函数），这里不做判断。
+ */
+function fail(message: string, code: string, retry: { label: string; run: () => void } | null = null): void {
+  errors.value = pushError(errors.value, message, code, Date.now(), retry?.label ?? null);
+  if (retry) retryActions.set(errors.value.items[errors.value.items.length - 1]?.id ?? -1, retry.run);
+}
+
+/** 重试动作按条挂：关掉一条不影响其它条的重试。 */
+const retryActions = new Map<number, () => void>();
+
+function onRetry(item: ErrorItem): void {
+  const run = retryActions.get(item.id);
+  errors.value = dismissError(errors.value, item.id);
+  retryActions.delete(item.id);
+  run?.();
+}
+
+function onDismissError(id: number): void {
+  errors.value = dismissError(errors.value, id);
+  retryActions.delete(id);
+}
+
+function onDismissAllErrors(): void {
+  errors.value = clearErrors(errors.value);
+  retryActions.clear();
+}
 
 // ---------------------------------------------------------------- 读
 
@@ -166,8 +239,7 @@ async function refreshList(): Promise<void> {
     counts.value = c;
   } catch (e) {
     listError.value = errText(e);
-    errorMessage.value = `岗位列表加载失败：${listError.value}`;
-    errorCode.value = 'list_jobs';
+    fail(`岗位列表加载失败：${listError.value}`, 'list_jobs', { label: '重试', run: () => void refreshList() });
   } finally {
     listLoading.value = false;
   }
@@ -213,8 +285,7 @@ async function loadSpecAndConfig(): Promise<void> {
     scoreMax.value = spec.score_max;
     minScore.value = spec.score_min_default;
   } catch (e) {
-    errorMessage.value = `计分规格读取失败：${errText(e)}`;
-    errorCode.value = getScoringSpec.name;
+    fail(`计分规格读取失败：${errText(e)}`, getScoringSpec.name, { label: '重试', run: () => void loadSpecAndConfig() });
   }
   try {
     const cfg = await getAppConfig();
@@ -229,8 +300,7 @@ async function loadSpecAndConfig(): Promise<void> {
     savedKnown.value = adopted > 0 ? { ...(cfg.scrape_defaults ?? {}) } : {};
     if (adopted === 0) saveDraft(draft.value);
   } catch (e) {
-    errorMessage.value = `配置读取失败：${errText(e)}`;
-    errorCode.value = 'get_app_config';
+    fail(`配置读取失败：${errText(e)}`, 'get_app_config', { label: '重试', run: () => void loadSpecAndConfig() });
   }
 }
 
@@ -255,8 +325,7 @@ async function persistDraft(): Promise<void> {
     filterNote.value = '筛选条件已保存';
   } catch (e) {
     filterNote.value = `保存失败：${errText(e)}`;
-    errorMessage.value = `筛选条件保存失败：${errText(e)}`;
-    errorCode.value = 'set_scrape_defaults';
+    fail(`筛选条件保存失败：${errText(e)}`, 'set_scrape_defaults', { label: '重试', run: () => void persistDraft() });
   } finally {
     saving.value = false;
   }
@@ -306,8 +375,78 @@ async function batch(op: 'reject' | 'allow'): Promise<void> {
     selection.value = exitSelecting();
     await refreshList();
   } catch (e) {
-    errorMessage.value = `批量操作失败：${errText(e)}`;
-    errorCode.value = op === 'reject' ? 'reject_jobs' : 'allow_jobs';
+    fail(`批量操作失败：${errText(e)}`, op === 'reject' ? 'reject_jobs' : 'allow_jobs');
+  }
+}
+
+// ---------------------------------------------------------------- 详情抽屉
+
+/** 卡片单击（非多选态）= 打开详情。长按多选时 click 由 onGridClick 吃掉。 */
+function onOpenDetail(jobId: string): void {
+  detail.value = openDetail(detail.value, jobId);
+}
+
+function onCloseDetail(): void {
+  detail.value = closeDetail();
+}
+
+/**
+ * 抽屉底部三个单条动作。
+ *
+ * 与批量条共用同一批命令（reject_jobs / allow_jobs / mark_delivered，载荷都是
+ * `{args:{jobIds}}`），差别只在「影响几条」的文案。动作成功后关抽屉并刷新，
+ * 失败进错误队列——**不让抽屉停在半更新状态**。
+ */
+async function onDetailAction(action: DetailAction): Promise<void> {
+  const job = detailJob.value;
+  if (!job) return;
+  const ids = [job.job_id];
+  const code = action === 'reject' ? 'reject_jobs' : action === 'allow' ? 'allow_jobs' : 'mark_delivered';
+  try {
+    const hit =
+      action === 'reject'
+        ? await rejectJobs(ids)
+        : action === 'allow'
+          ? await allowJobs(ids)
+          : (await markDelivered(ids), ids.length);
+    filterNote.value = actionNote(action, hit);
+    detail.value = closeDetail();
+    await refreshList();
+  } catch (e) {
+    fail(`${actionFailPrefix(action)}${errText(e)}`, code, {
+      label: '重试',
+      run: () => void onDetailAction(action),
+    });
+  }
+}
+
+// ---------------------------------------------------------------- 平台
+
+function onPickPlatform(id: string): void {
+  platform.value = pickPlatform(platform.value, id);
+}
+
+/** 读登录态。失败静默：状态点只是提示，不值得开一条错误。 */
+async function refreshLogin(): Promise<void> {
+  try {
+    login.value = await loginStatus(platform.value);
+  } catch {
+    login.value = null;
+  }
+}
+
+async function onLogin(id: string): Promise<void> {
+  if (loginBusy.value) return;
+  platform.value = pickPlatform(platform.value, id);
+  loginBusy.value = true;
+  try {
+    await loginStart(platform.value);
+    filterNote.value = '已打开登录窗口，请在弹出的浏览器里扫码';
+    await refreshLogin();
+  } catch (e) {
+    fail(`启动登录失败：${errText(e)}`, 'login_start', { label: '重试', run: () => void onLogin(id) });
+  } finally {
+    loginBusy.value = false;
   }
 }
 
@@ -363,7 +502,15 @@ function onGridClick(e: MouseEvent): void {
   }
   const id = card.dataset.card ?? '';
   if (id === '') return;
-  selection.value = clickCard(selection.value, id);
+  // 多选态：单击 = 勾选切换；非多选态：单击 = 打开详情（长按才进多选）。
+  // 打开详情前先确认不是点在按钮/链接上（`shouldOpenCard` 同口径，见 JobCard）。
+  if (selection.value.selecting) {
+    selection.value = clickCard(selection.value, id);
+    return;
+  }
+  const el = e.target as HTMLElement;
+  if (el.closest('button, a, input, label, select, textarea, [data-greet]')) return;
+  onOpenDetail(id);
 }
 
 // ---------------------------------------------------------------- 抓取
@@ -373,7 +520,7 @@ async function onStart(): Promise<void> {
   starting.value = true;
   try {
     await scrapeStart({
-      platform: 'boss',
+      platform: platform.value,
       keywords: draft.value.exclude
         .split(/[\s,，、;；|]+/)
         .map((s) => s.trim())
@@ -384,8 +531,7 @@ async function onStart(): Promise<void> {
     pausedByUser.value = false;
     await refreshProgress();
   } catch (e) {
-    errorMessage.value = `启动抓取失败：${errText(e)}`;
-    errorCode.value = 'scrape_start';
+    fail(`启动抓取失败：${errText(e)}`, 'scrape_start', { label: '重试', run: () => void onStart() });
   } finally {
     starting.value = false;
   }
@@ -397,8 +543,7 @@ async function onStop(): Promise<void> {
     pausedByUser.value = true;
     await refreshProgress();
   } catch (e) {
-    errorMessage.value = `停止抓取失败：${errText(e)}`;
-    errorCode.value = 'scrape_stop';
+    fail(`停止抓取失败：${errText(e)}`, 'scrape_stop');
   }
 }
 
@@ -438,6 +583,7 @@ onMounted(() => {
   void refreshList();
   void refreshProgress();
   void loadLogs();
+  void refreshLogin();
   // C16：setInterval 在 WebView 挂起时同样不触发；恢复后下一次立即生效。
   tickTimer = setInterval(() => void refreshCounts(), TICK_MS);
   const pollLogs = (): void => {
@@ -467,15 +613,18 @@ watch(
 <template>
   <section class="page page-dashboard" :data-testid="pageId">
     <AppErrorBar
-      :message="errorMessage"
-      :code="errorCode"
-      @retry="refreshList()"
-      @close="
-        () => {
-          errorMessage = '';
-          errorCode = '';
-        }
-      "
+      :queue="errors"
+      @dismiss="onDismissError"
+      @dismiss-all="onDismissAllErrors"
+      @retry="onRetry"
+    />
+
+    <PlatformCard
+      :selected="platform"
+      :login="login"
+      :login-busy="loginBusy"
+      @pick="onPickPlatform"
+      @login="onLogin"
     />
 
     <TopbarTail
@@ -559,6 +708,14 @@ watch(
       :min-score="minScore"
       :live="true"
       @open-decisions="emit('navigate', 'logs')"
+    />
+
+    <JobDetailDrawer
+      :job="detailJob"
+      :min-score="minScore"
+      :score-max="scoreMax"
+      @close="onCloseDetail"
+      @act="onDetailAction"
     />
 
     <SensitivePanel

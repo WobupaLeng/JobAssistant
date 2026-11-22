@@ -1,70 +1,98 @@
-<script setup lang="ts">
 /**
- * 页面级错误条（原型 `.app-error`）。
+ * 错误条 **队列**（M5 补遗：从单条升级为队列）。
  *
- * 为什么不是 `styles/controls.css` 里那个 `.error-bar`：这一条横在整页最上面，
- * 带错误码与重试按钮，视觉层级更高。10 秒自动消失（Leptos `shell.rs` 的既有行为，
- * 见 ARCH-003 §1.3），悬停暂停计时——否则用户刚看清就没了。
+ * 为什么必须改：单条时后到的失败会把前一条挤掉（一次并发刷新里
+ * `list_jobs` 与 `job_tab_counts` 同时失败，用户只看到后一条），
+ * 而且 `app-error-dismiss` 一次清空全部。这里改成：
+ *
+ * - FIFO 展示**最前一条**（原型里错误条只有一行高，放不下三条）；
+ * - 其余折叠成「另有 N 条更早的错误」，一条都不丢；
+ * - 每条都能独立关闭，关掉第一条第二条立刻顶上；
+ * - sr-only `aria-live` 播报新错误，屏读用户不会漏。
+ *
+ * 队列语义在 `lib_ui/error-queue.ts`（纯函数、有单测），本组件只负责渲染。
  */
-import { onBeforeUnmount, watch } from 'vue';
+<script setup lang="ts">
+import { computed } from 'vue';
+
+import {
+  announceText,
+  firstError,
+  hasError,
+  pendingCount,
+  pendingText,
+  type ErrorItem,
+  type ErrorQueue,
+} from '../lib_ui/error-queue';
 
 const props = withDefaults(
   defineProps<{
-    /** 空串表示不显示。 */
-    message?: string;
-    /** 可选的错误码/命令名，便于对日志。 */
-    code?: string;
-    /** 自动消失毫秒数；`0` 表示常驻。 */
-    autoDismissMs?: number;
+    queue: ErrorQueue;
+    /** 展示位。概览页定高，错误条一律 `flex: 0 0 auto`。 */
+    testId?: string;
   }>(),
-  { message: '', code: '', autoDismissMs: 10_000 },
+  { testId: 'app-error-bar' },
 );
 
 const emit = defineEmits<{
-  (e: 'retry'): void;
-  (e: 'close'): void;
+  (e: 'dismiss', id: number): void;
+  (e: 'dismiss-all'): void;
+  (e: 'retry', item: ErrorItem): void;
 }>();
 
-let timer: ReturnType<typeof setTimeout> | null = null;
-
-function clear(): void {
-  if (timer !== null) {
-    clearTimeout(timer);
-    timer = null;
-  }
-}
-
-function arm(): void {
-  clear();
-  if (props.autoDismissMs <= 0 || props.message === '') return;
-  timer = setTimeout(() => emit('close'), props.autoDismissMs);
-}
-
-watch(() => props.message, arm, { immediate: true });
-
-onBeforeUnmount(clear);
+const head = computed(() => firstError(props.queue));
+const visible = computed(() => hasError(props.queue));
+const rest = computed(() => pendingCount(props.queue));
+const restText = computed(() => pendingText(props.queue));
+const live = computed(() => announceText(props.queue));
+const canRetry = computed(() => head.value?.retryLabel !== null && head.value !== null);
 </script>
 
 <template>
   <div
-    v-if="message"
-    class="app-error"
+    v-if="visible && head"
+    class="app-error error-bar app-error"
+    :data-testid="testId"
     role="alert"
-    data-testid="app-error-bar"
-    @mouseenter="clear"
-    @mouseleave="arm"
   >
-    <span class="app-error-ico" aria-hidden="true">!</span>
+    <svg class="app-error-ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.4" />
+      <path d="M8 4.5v4.2M8 11.2v.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+    </svg>
     <span class="app-error-text">
-      <code v-if="code" data-testid="app-error-code">{{ code }}</code>
-      <span>{{ message }}</span>
+      <code :data-testid="`${testId}-code`">{{ head.code }}</code>
+      <span :data-testid="`${testId}-message`">{{ head.message }}</span>
     </span>
-    <span class="spacer"></span>
-    <button class="btn btn-sm btn-ghost" type="button" data-testid="app-error-retry-btn" @click="emit('retry')">
-      重试
+    <span v-if="rest > 0" class="app-error-rest" :data-testid="`${testId}-rest`" :title="restText">
+      {{ restText }}
+    </span>
+    <span class="spacer" />
+    <button
+      v-if="canRetry"
+      class="btn btn-sm btn-ghost"
+      :data-testid="`${testId}-retry-btn`"
+      @click="emit('retry', head)"
+    >
+      {{ head.retryLabel }}
     </button>
-    <button class="btn btn-sm btn-ghost" type="button" data-testid="app-error-close-btn" @click="emit('close')">
+    <button
+      v-if="rest > 0"
+      class="btn btn-sm btn-ghost"
+      :data-testid="`${testId}-dismiss-all`"
+      @click="emit('dismiss-all')"
+    >
+      全部忽略
+    </button>
+    <button
+      class="btn btn-sm btn-ghost"
+      :data-testid="`${testId}-close-btn`"
+      title="忽略这一条"
+      @click="emit('dismiss', head.id)"
+    >
       忽略
     </button>
+    <span class="sr-only" :data-testid="`${testId}-live`" aria-live="assertive" aria-atomic="true">
+      {{ live }}
+    </span>
   </div>
 </template>

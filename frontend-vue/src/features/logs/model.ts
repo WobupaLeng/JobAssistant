@@ -1,7 +1,7 @@
 /**
  * M4 决策记录页的纯逻辑：运行日志 seq 游标、决策行视图模型、筛选。
  *
- * 对照 Leptos `features/logs/state.rs` / `runtime.rs` / `decision.rs`，
+ * 对照 Leptos 版已退役，见 git 历史，提交 53d05cb 之前的决策记录状态机，
  * 但运行日志增量改用 **seq 游标**（根 AGENTS.md §7.1）：
  * 后端 `list_logs(since)` 是闭区间（ts_ms >= since），游标那一毫秒会重送；
  * 旧版按 (ts,level,message) 多重集去重，同毫秒多条会误删。这里改为
