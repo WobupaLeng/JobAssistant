@@ -13,13 +13,13 @@
 
 ## 0. 状态看板（动手前必读）
 
-**当前阶段**：`FRONTEND_REBUILD_QA_PENDING` —— 界面从 Leptos 0.8 WASM 原地重写为 Vue 3 + Vite + TypeScript，后端 `backend-tauri/` 不动。Vue 阶段 0–4 已落地（脚手架/契约层/四页接线/M5 补遗/Leptos 全退役），剩 QA 验收与产物冒烟。
+**当前阶段**：`BACKEND_WIRING_IN_PROGRESS` —— 前端 Vue 3 重写已 QA 复审收口 + 产物冒烟通过；现接后端 `scrape_defaults` 运行时消费（城市/排除词/薪资真正生效）+ serde alias 补缺 + 登录链 emit，让重写后的 app 真正可用。
 
 | 层 | 状态 |
 |---|---|
 | `backend-tauri/` | ✅ 可用。命令全部定义且全部注册；CSP 已显式声明 `script-src`（缺失即白屏，见 §3.1） |
 | `scraper/` | ⚠️ 抓取 / 登录 / 聊天 / 求职期望已通；**从 Tauri 子进程拉起真实 Chrome 仍失败**（见 §6.2） |
-| `frontend-vue/` | ✅ Vue 3 重写阶段 0–4 完成：四页接线 + M5 补遗（详情抽屉/平台卡/错误队列）、`src/` 下 Leptos `.rs` 计数 0、vitest 全绿；待 QA 与 `tauri build` 冒烟 |
+| `frontend-vue/` | ✅ Vue 3 重写完成：四页接线 + M5 补遗、Leptos `.rs` 计数 0、QA 复审收口（A54 几何/11 testid 对齐原型/A36）、vitest 全绿；CSP 收紧（删 `wasm-unsafe-eval`）+ `tauri build --no-bundle` 产物工作区外冒烟通过（Vue 渲染 + IPC 回读正常，非白屏） |
 | `docs/ui/` + `prototypes/ui-v1/` | ✅ 界面设计 `UI_READY`：聊天抽屉 v3–v10 裁决已冻结（[UI-SPEC-chat-detach-v3](docs/ui/UI-SPEC-chat-detach-v3.md)），单文件原型带三套无浏览器自检脚本 |
 
 - **状态只升不降**，推进时原地替换整表。
@@ -156,7 +156,7 @@ python -m compileall -q scraper
 ### 7.2 未决项
 
 1. **【阻塞】Tauri 子进程拉不起真实 Chrome**：`msedgewebview2.exe` 创建的 Chromium 单例命名对象让 sidecar 的 Chrome 报「正在现有的浏览器会话中打开」并退出 → `TargetClosedError`。已排除 Job Object、环境变量、stdio、`--user-data-dir` 路径、profile 脏数据、Chrome 版本。待试：给 sidecar 的 Chrome 换不撞名的 user-data-dir。
-2. **前端 Vue 3 重写待 QA**：只读验收（C1–C17 对照后端真源 + testid 对照冻结原型）与 `npx tauri build --no-bundle` 产物冒烟（产物放工作区外）。方案 [ARCH-003](docs/architecture/ARCH-003-vue-frontend-migration.md)，决策 [ADR-003](docs/adr/ADR-003-frontend-leptos-to-vue.md)，进度写 `frontend-vue/HANDOFF.md`。
+2. **后端 `scrape_defaults` 运行时接线 + 登录链**（进行中）：前端 Vue 重写已 QA + 冒烟通过（[ARCH-003](docs/architecture/ARCH-003-vue-frontend-migration.md) / [ADR-003](docs/adr/ADR-003-frontend-leptos-to-vue.md)，进度见 `frontend-vue/HANDOFF.md`）；但 `Command::ScrapeStart` 协议只带 platform/keywords/max_jd/min_score，城市/薪资/排除词未下发 → sidecar 回退默认、`IngestConfig` 恒用 `ExcludeRules::default()`，用户筛选只持久化不生效。登录链 `login_save`/`logout` 前端调用点 0、主进程未把 `login.state` emit 给 WebView。
 3. **Liquid Glass 第二三层未做**：第二层 SVG 湍流折射，第三层 WebGL 卡片间真折射。第一层 CSS 玻璃已完成。规格原文从提交 `d39bae4` 的 `docs/ui/UI-SPEC-liquid-glass-l2-l3.md` 取回。
 4. **预筛否决的 `rule` 字段恒写 `"prescan"`**，丢失具体命中规则。需给 `ingest::PreScan::Rule` 加承载字段（纯后端，不动前端契约）。
 5. **`set_limit` 夹值语义未定**：`max_jd > 500` 时返回错误而非静默夹住，表现为「保存失败但上限已生效」。
