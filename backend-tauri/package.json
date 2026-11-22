@@ -1,0 +1,9 @@
+{
+  "name": "backend-tauri-shell",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Tauri CLI anchor for backend-tauri (beforeBuildCommand cwd must be this directory so ../frontend-vue resolves)",
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.6"
+  }
+}
