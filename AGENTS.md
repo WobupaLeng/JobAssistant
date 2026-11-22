@@ -13,7 +13,7 @@
 
 ## 0. 状态看板（动手前必读）
 
-**当前阶段**：`BACKEND_WIRING_IN_PROGRESS` —— 前端 Vue 3 重写已 QA 复审收口 + 产物冒烟通过；现接后端 `scrape_defaults` 运行时消费（城市/排除词/薪资真正生效）+ serde alias 补缺 + 登录链 emit，让重写后的 app 真正可用。
+**当前阶段**：`INTEGRATION_PENDING` —— 前端 Vue 3 重写 + 后端功能接线（`scrape_defaults` 运行时消费 / serde alias / `login-state` emit）+ 前端登录接线均已完成并各自门禁通过；待端到端联调与最终产物冒烟。**真实抓取/扫码登录的端到端仍受 §6.2「Tauri 子进程拉不起真实 Chrome」阻塞**（既有硬阻塞，非本轮引入）。
 
 | 层 | 状态 |
 |---|---|
@@ -156,7 +156,7 @@ python -m compileall -q scraper
 ### 7.2 未决项
 
 1. **【阻塞】Tauri 子进程拉不起真实 Chrome**：`msedgewebview2.exe` 创建的 Chromium 单例命名对象让 sidecar 的 Chrome 报「正在现有的浏览器会话中打开」并退出 → `TargetClosedError`。已排除 Job Object、环境变量、stdio、`--user-data-dir` 路径、profile 脏数据、Chrome 版本。待试：给 sidecar 的 Chrome 换不撞名的 user-data-dir。
-2. **后端 `scrape_defaults` 运行时接线 + 登录链**（进行中）：前端 Vue 重写已 QA + 冒烟通过（[ARCH-003](docs/architecture/ARCH-003-vue-frontend-migration.md) / [ADR-003](docs/adr/ADR-003-frontend-leptos-to-vue.md)，进度见 `frontend-vue/HANDOFF.md`）；但 `Command::ScrapeStart` 协议只带 platform/keywords/max_jd/min_score，城市/薪资/排除词未下发 → sidecar 回退默认、`IngestConfig` 恒用 `ExcludeRules::default()`，用户筛选只持久化不生效。登录链 `login_save`/`logout` 前端调用点 0、主进程未把 `login.state` emit 给 WebView。
+2. **端到端联调待做**：`scrape_defaults` 运行时消费（协议扩 9 字段下发城市/薪资/排除词等、`ExcludeRules::from_keywords` 注入用户规则）、serde alias（`jobId`/`useLlm`/`logChanges`）、`login-state` emit（集中 watcher）与前端登录接线（`listenLoginState` + 保存/退出按钮 + 兜底查询）均已完成并门禁通过（[ARCH-003](docs/architecture/ARCH-003-vue-frontend-migration.md) / [ADR-003](docs/adr/ADR-003-frontend-leptos-to-vue.md)，进度见 `frontend-vue/HANDOFF.md`）。剩余：真实扫码登录→保存→抓取的端到端受 §6.2 Chrome 阻塞；`work_weekend=no_bigweek`（大小周）`rules.rs` 只实现 `double` 分支待补；`login_status.saved` 恒 false（不读 `platform_login:{platform}` marker）。
 3. **Liquid Glass 第二三层未做**：第二层 SVG 湍流折射，第三层 WebGL 卡片间真折射。第一层 CSS 玻璃已完成。规格原文从提交 `d39bae4` 的 `docs/ui/UI-SPEC-liquid-glass-l2-l3.md` 取回。
 4. **预筛否决的 `rule` 字段恒写 `"prescan"`**，丢失具体命中规则。需给 `ingest::PreScan::Rule` 加承载字段（纯后端，不动前端契约）。
 5. **`set_limit` 夹值语义未定**：`max_jd > 500` 时返回错误而非静默夹住，表现为「保存失败但上限已生效」。
