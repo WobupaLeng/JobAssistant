@@ -36,8 +36,10 @@ coverage.xml
 htmlcov/
 
 # ---------- 本地运行数据（严禁入库）----------
-# data/ 里有 SQLite 数据库（含 Boss 登录 cookie）与 241 MB 的 Chrome profile
-data/
+# 只忽略仓库根的 data/（SQLite 数据库含 Boss 登录 cookie + 241 MB Chrome profile）。
+# 必须带前导 `/`：不带的 `data/` 会匹配任意层级的 data 目录，
+# 曾把 frontend-vue/src/lib_ui/data/cities.ts（373 城源码数据）一起吞掉、静默漏提交。
+/data/
 *.db
 *.db-shm
 *.db-wal
