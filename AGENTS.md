@@ -20,6 +20,7 @@
 | `backend-tauri/` | ✅ 可用。命令全部定义且全部注册；CSP 已显式声明 `script-src`（缺失即白屏，见 §3.1） |
 | `scraper/` | ⚠️ 抓取 / 登录 / 聊天 / 求职期望已通；**从 Tauri 子进程拉起真实 Chrome 仍失败**（见 §6.2） |
 | `frontend-vue/` | ✅ Leptos 版四页全部实现、配置页已接读写。🔨 重写为 Vue 3 未开工 |
+| `docs/ui/` + `prototypes/ui-v1/` | ✅ 界面设计 `UI_READY`：聊天抽屉 v3–v10 裁决已冻结（[UI-SPEC-chat-detach-v3](docs/ui/UI-SPEC-chat-detach-v3.md)），单文件原型带三套无浏览器自检脚本 |
 
 - **状态只升不降**，推进时原地替换整表。
 - **不写用例数与版本号**（每轮必过期）。要数字现场跑，`#[test]` 静态计数 **≠** 通过数，两者不许混引。
