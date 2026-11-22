@@ -10,29 +10,50 @@
     <!-- 开头这段内联样式（防首帧闪白 / 防滚动条闪烁）的 nonce 由 Tauri 构建期自动注入：
          tauri-utils html2 的 inject_nonce 会给所有 <style> 打上随机 nonce 并补进 CSP 的 style-src。
          所以这里不要手工写 nonce 属性（已有 nonce 属性的元素会被跳过）；也不要在 HTML 里出现 Tauri 的
-         nonce 令牌字面量——一旦出现，Tauri 会判定这份 HTML 已自行处理过 CSP 而不再改写它。 -->
+         nonce 令牌字面量——一旦出现，Tauri 会判定这份 HTML 已自行处理过 CSP 而不再改写它。
+
+         这三条不许挪进外部 CSS（frontend-vue/AGENTS.md C4）：外部样式表要等 JS 拉起后才加载，
+         而首帧闪白恰好发生在它之前。#app 是 Vue 的挂载点，语义与原 #root 相同。 -->
     <style>
       html { background: transparent; }
       body { margin: 0; }
-      /* trunk 构建完成前不要出现滚动条闪烁 */
-      body:not(:has(#root > *)) { overflow: hidden; }
+      /* Vue 挂载完成前不要出现滚动条闪烁 */
+      body:not(:has(#app > *)) { overflow: hidden; }
     </style>
-    <!-- 顺序有意义：tokens 定义变量，其余三份消费它们 -->
-    <link data-trunk rel="css" href="styles/tokens.css" />
-    <link data-trunk rel="css" href="styles/layout.css" />
-    <link data-trunk rel="css" href="styles/controls.css" />
-    <link data-trunk rel="css" href="styles/jobs.css" />
-    <link data-trunk rel="css" href="styles/drawer.css" />
-    <link data-trunk rel="css" href="styles/motion.css" />
-    <link data-trunk rel="css" href="styles/scrape.css" />
-    <link data-trunk rel="css" href="styles/pages.css" />
-    <!-- 批次 2（Lane I）：敏感库浮层 + 自动投递控制条。只消费 tokens/layout/controls，必须排在最后 -->
-    <link data-trunk rel="css" href="styles/sensitive.css" />
-    <link data-trunk rel="css" href="styles/auto.css" />
-    <!-- 批次 1（Lane H）：抓取筛选面板（图 3）展开体，只依赖 tokens/controls/scrape 的变量 -->
-    <link data-trunk rel="css" href="styles/filter.css" />
-    <!-- rust 链接声明：trunk 会换成 modulepreload 加外链 module 脚本，不再生成内联引导脚本 -->
-    <link data-trunk rel="rust" />
+    <script>
+      /* 首帧主题（体积极小、必须同步执行、必须在样式表之后）：
+         在 Vue 挂载之前就把 data-theme 打到 <html> 上，否则会先闪一帧深色再切浅色。
+         语义与 src/lib_ui/theme.ts 的 readInitialTheme 逐条一致：
+           已保存的 aja.theme（只认 'light'，其余按深色）> 系统偏好 > 深色。
+         任何异常都吞掉并回落深色（CSS 默认值），绝对不能让它挡住后续脚本。
+
+         这里只能写 ES5：它由 Tauri 的 html2 原样内联进 CSP（script-src 显式存在，
+         见根 AGENTS.md §3.1），不经过 Vite 转译，没有可选链 / 箭头函数可用。 */
+      (function () {
+        var theme = 'dark';
+        try {
+          var stored = window.localStorage.getItem('aja.theme');
+          if (stored !== null && stored !== undefined) {
+            theme = stored === 'light' ? 'light' : 'dark';
+          } else if (
+            typeof window.matchMedia === 'function' &&
+            window.matchMedia('(prefers-color-scheme: light)').matches
+          ) {
+            theme = 'light';
+          }
+        } catch (e) {
+          theme = 'dark';
+        }
+        try {
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          /* 无 document（不该发生）：CSS 默认就是深色 */
+        }
+      })();
+    </script>
   </head>
-  <body></body>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
 </html>

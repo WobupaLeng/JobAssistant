@@ -9,15 +9,13 @@
 
 ## 1. 现状
 
-`frontend-vue/` 目前是 **Leptos 0.8 WASM**，四个页面（概览 / 消息 / 配置 / 日志）全部正式实现，无占位符（`todo!()`、`unimplemented!()`、`TODO`、`FIXME`、`施工中` 全为 0 命中）。
+`frontend-vue/` 已进入 **Vue 3 + Vite + TypeScript 原地重写**：ARCH-003 的**阶段 0（脚手架）与阶段 1（契约层 + 纯函数）完成**——`src/api/**` 覆盖全部 48 条命令（`tests/commands-payload.test.ts` 守卫）、`src/lib_ui/**` 纯函数就位、`src/components/AppShell.vue` 外壳可用、`npm run typecheck` 0 错、`npm run build` 通过。
 
-**下一阶段是原地重写为 Vue 3 + Vite + TypeScript**，后端 `backend-tauri/` 完全不动。方案见 [`ARCH-003`](../docs/architecture/ARCH-003-vue-frontend-migration.md)。
+**`src/` 下的 Leptos 0.8 `.rs` 源码仍在**（四个页面全部实现、无占位符），作为迁移对照与拆除前的回滚基线，**阶段 4 才退役**。后端 `backend-tauri/` 不动。方案见 [`ARCH-003`](../docs/architecture/ARCH-003-vue-frontend-migration.md)。
 
-### ⚠️ 开工前的第一个前置条件
+**当前未接线**：`App.vue` 仍是页面占位，四个页面尚未迁移；`components/CityPicker.vue`（城市两级联动 + 搜索，373 个城市）已就绪但**没有任何页面在用**——要等阶段 2/3 迁移筛选栏时替换 Leptos 的 `features/scrape/filter.rs:1100-1115`。
 
-**`frontend-vue/` 当前有 50 项未提交改动**（34 项已跟踪 + 16 项未跟踪，含 305 行的 `src/features/config/draft.rs` 与 15 个新技能目录）。
-
-**Vue 原地重写会覆盖它们。开工前必须先落一个 Leptos 收尾提交**，作为 diff 与回滚基线。**原地重写没有「改一行配置回滚」这条路**——Leptos 版和 Vue 版共用同一个目录，回滚只能靠 git。
+**测试现状**：`npx vitest run` = 116 passed / **4 failed**，4 条红全在 `tests/time.test.ts`，是**已知口径问题**（见 §2.3「时间戳秒/毫秒判据」），按裁决挂起，不是回归。
 
 ---
 
@@ -31,6 +29,12 @@
 | trunk 报 artifacts not found | `frontend-vue/Cargo.toml` 缺 `[[bin]]` | trunk 要的是 **bin** 的 wasm，`[[bin]] path = "src/main.rs"` 不可删 |
 | Rust WASM 单测「全过」但其实是静态计数 | `#[test]` 数 ≠ 通过数 | 两者不许混引 |
 | `dist/` 里 wasm 有 94.9 MB | 未优化的 debug 产物 | release 档配了 `opt-level="s"` + `lto`，正常 2–4 MB |
+| `vitest` 报 `Failed to parse source ... Install @vitejs/plugin-vue` | `vitest.config.ts` 没挂 `@vitejs/plugin-vue`；`vite build` 走的是 `vite.config.ts`（已挂），**构建成功掩盖了测试配置的缺口** | 两份配置各管一摊，改依赖时**两个都要对**。`vitest.config.ts` 已补 `plugins: [vue()]` |
+| 组件用例报 `document is not defined` | 全局 `environment: 'node'` | 需要 DOM 的用例在**文件首行**写 `// @vitest-environment jsdom`，不要切全局 |
+| 焦点断言恒为 `<body>` | `mount()` 没 `attachTo`，元素不在文档里 | `mount(C, { attachTo: document.body })`，并在断言前 `await new Promise(r => setTimeout(r, 0))` 让 `nextTick` 里的 `focus()` 落地 |
+| 测「关闭后清空」时 `Unable to get [data-testid=...]` | 面板 `v-if` 已卸载，DOM 不存在 | 断言重开后的值，不要查已卸载的元素 |
+| `npm run build` 打印 `✓ built` 但样式大面积丢失 | `styles/pages.css` 的块注释里用反引号包了 `*/`，注释提前闭合，**其后四份样式表整体失效**，只报一条 `[css-syntax-error] Unexpected "\`"` | 改完 CSS **去产物里数选择器**：`(Select-String dist/assets/*.css -Pattern '\.xxx').Count`，不要只看构建成功 |
+| `npm install` 报 `EBUSY ... node_modules/esbuild.exe` 或 SSL 失败 | 残留 `node` 进程持有 exe；直连 npmjs 被代理拦 | 先 `Remove-Item node_modules -Recurse -Force`，再 `npm install --registry https://registry.npmmirror.com` |
 
 ### 2.3 契约与文案
 
@@ -41,6 +45,7 @@
 - **进度文案是测试契约**：五段标签与 `·` 分隔逐字照抄，改字就断锚点。
 - **`index.html` 的 11 份 CSS 顺序**：乱序会导致层级覆盖错误（`pages` 必须早于 `filter`）。
 - **CSS 里写 `//!` 或 `///` 会让整份样式表被静默丢弃**，表现为「变量生效、组件样式全无」。Leptos 版当前 0 违规。
+- **时间戳秒/毫秒判据是「`|ts| < 1e11`（10 位及以下）就当秒」**：`lib_ui/time.ts` 与 Leptos 的 `time.rs::to_ms` 同一判据（C14），**改一处必须同改另一处**。取 1e11 后秒覆盖到公元 5138 年、毫秒从 **1973-03-03** 起，`time.time()` 与 `Date.now()` 两个数据源都在各自区间内。**旧判据 1e12 有真缺陷**（2001-09-10 之前的毫秒戳被误乘 1000，例如 2000-02-29 显示成 32129 年），已随本轮修正，`tests/time.test.ts` 全绿。唯一判不了的是 1973 年以前的毫秒值（`|ts| < 1e11` 时与秒不可区分，信息已丢失），不要用「猜日期」的办法补救。
 
 ### 2.4 布局与视觉
 

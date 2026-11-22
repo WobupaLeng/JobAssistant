@@ -1,0 +1,144 @@
+/* 仅补齐 Vue 版新增的两个类；其余全部来自 styles/ 的 11 份分域 CSS
+ * （顺序即层叠契约，见 styles/index.css 与 AGENTS.md C4）。
+ *
+ * 本文件由 main.ts 在 styles/index.css 之后引入，所以这里的规则一定压在上面。 */
+
+/* tokens.css 的高度重置只认 #root，Vue 的挂载点是 #app，这里补一条。
+ * 不设 body 底色（C5）：窗口的亚克力必须透上来。 */
+html,
+body,
+#app {
+  height: 100%;
+}
+
+/* 页面分发槽：吃掉外壳剩下的高度、自己滚动
+ * （等价于 Leptos 版 `.dashboard` 容器在 `.app-shell` 里的 flex 行为）。 */
+.app-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-top: 10px;
+}
+
+/* 页面还没接上时的占位文案（ui lane 接管后自然消失）。 */
+.page-placeholder {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+/* ---------------------------------------------- 城市选择器（省 → 市 + 搜索）
+ *
+ * 定位：`.city-picker` 只做 `position: relative` 的锚，面板用 `position: absolute`
+ * 挂在触发按钮下方，**不参与文档流**——顶栏高度不受影响，投递列表也不会被挤压。
+ * 面板宽度 `min(420px, 100%)` 且 `max-height` 内部滚动，窄屏时收窄而不是撑开。
+ *
+ * 字号口径：本仓库 `styles/tokens.css` 目前**没有** `--fs-*` 变量族（那是
+ * `prototypes/ui-v1` 原型的口径），所以这里沿用 `app.css` 已有的写法直接给 px，
+ * 不新增颜色、不新增变量，也不写 `//!` / `///` 注释（C6）。
+ */
+.city-picker {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.city-picker-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.city-picker-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.city-picker-caret {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.city-picker-panel {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(420px, 100%);
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  overflow-y: auto;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius);
+  background: var(--glass-3);
+  backdrop-filter: blur(var(--blur-pop));
+  -webkit-backdrop-filter: blur(var(--blur-pop));
+  box-shadow: var(--shadow-pop);
+}
+
+.city-picker-search {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.city-picker-cols {
+  display: grid;
+  grid-template-columns: minmax(96px, 1fr) minmax(0, 1.4fr);
+  gap: 8px;
+  min-height: 0;
+}
+
+.city-picker-col {
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  overflow-y: auto;
+  max-height: 220px;
+  border-radius: var(--radius-sm);
+  background: var(--glass-1);
+}
+
+.city-picker-col.is-focus {
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.city-picker-item {
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.city-picker-item.is-active {
+  color: var(--text-1);
+  background: var(--primary-soft);
+}
+
+.city-picker-item[aria-selected='true'] {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.city-picker-empty {
+  padding: 8px;
+  color: var(--text-3);
+  font-size: 11px;
+}

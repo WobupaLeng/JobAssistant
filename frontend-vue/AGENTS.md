@@ -47,6 +47,7 @@ pages → features → components → lib_ui
 2. **`lib_ui` 不得反向引用** `api` / `pages` / `features` / `components`，只允许内部互引。
 3. **禁止同层横向依赖**：`features` 下不同领域不得互相 import。Leptos 版有两处既有违例（`features/jobs/cards.rs:17` → `features/scrape/options::platform_name`；`features/scrape/panel.rs:23` → `features/auto::AutoBar`），Vue 版**必须消除**——公共部分下沉到 `lib_ui/` 或 `components/`。
 4. **页面分发是插槽**：`AppShell` 里**不得 import 任何页面**；由 `App.vue` 作为 dispatch 插槽传入（或 `<router-view>`）。
+5. **`components` / `pages` 不得 import `features`**：这两层只往 `lib_ui` 与 `api` 走。一个状态机若要被展示组件消费，它就该住 `lib_ui/`，哪怕业务上属于某个 feature——先例是 `lib_ui/city-picker.ts`（城市选择器的开合与键盘规则，消费方是 `components/CityPicker.vue`；放 `features/scrape/` 会造成向上引用）。
 
 ---
 
@@ -57,6 +58,7 @@ pages → features → components → lib_ui
 3. **页面背景必须透明**，否则毛玻璃失效。
 4. **可交互控件必须带 `data-testid`**，命名 `<页面/模块>-<功能>-<控件类型>`（`job-refresh`、`scrape-start-btn`）。动态 id 用 `tid_safe()` 把 `: / \` 与空格换成 `-`。
 5. **CSS 文件不允许 `//!` 或 `///` 注释**。CSS 解析器会判定整份样式表非法并**静默丢弃**（曾导致「变量生效、组件样式全无」的误诊）。引入预处理器后需重新评估。
+   **同族变体：注释正文里也不许出现 `` `*/` ``**——真正的坑不是 `//!` 本身，而是**块注释被提前闭合**。`styles/pages.css` 曾在注释里用反引号包住 `*/`，导致该行之后的四份样式表（`pages` / `sensitive` / `auto` / `filter`）全部失效，而 `vite build` 只报一条 `[css-syntax-error] Unexpected "\`"`、末尾照样打印 `✓ built`。改完 CSS 后**必须在产物里数一遍选择器**（`dist/assets/*.css`），不能只看构建成功。
 6. **不引入第二套 UI 库**：玻璃与控件规范由 `styles/` 与 `liquid-glass` 技能确定。
 7. **`src/` 里不放调试桩**：浏览器单独调试用的 `__TAURI_INTERNALS__` 桩不得进入正式路径。
 
