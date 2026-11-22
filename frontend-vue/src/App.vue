@@ -21,6 +21,7 @@ import { ref } from 'vue';
 
 import AppShell from './components/AppShell.vue';
 import { type Nav } from './lib_ui/nav';
+import DashboardPage from './pages/DashboardPage.vue';
 
 const nav = ref<Nav>('dashboard');
 
@@ -32,10 +33,13 @@ function onNavigate(next: Nav): void {
 <template>
   <div class="app-shell" data-testid="app-shell-slot">
     <AppShell :nav="nav" @navigate="onNavigate">
-      <!-- 占位页：ui lane 接管后整块替换 -->
-      <section class="card page-placeholder" data-testid="page-placeholder" :data-page="nav">
-        界面重构中：本页由 ui lane 的 pages/* 接管
-      </section>
+      <DashboardPage v-if="nav === 'dashboard'" />
+      <template v-else>
+        <!-- 占位页：ui lane 接管后逐页替换 -->
+        <section class="card page-placeholder" data-testid="page-placeholder" :data-page="nav">
+          界面重构中：本页由 ui lane 的 pages/* 接管
+        </section>
+      </template>
     </AppShell>
   </div>
 </template>

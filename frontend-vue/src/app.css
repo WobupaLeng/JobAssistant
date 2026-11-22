@@ -1,4 +1,4 @@
-/* 仅补齐 Vue 版新增的两个类；其余全部来自 styles/ 的 11 份分域 CSS
+/* 仅补齐 Vue 版新增的类；其余全部来自 styles/ 的 11 份分域 CSS
  * （顺序即层叠契约，见 styles/index.css 与 AGENTS.md C4）。
  *
  * 本文件由 main.ts 在 styles/index.css 之后引入，所以这里的规则一定压在上面。 */
@@ -12,7 +12,7 @@ body,
 }
 
 /* 页面分发槽：吃掉外壳剩下的高度、自己滚动
- * （等价于 Leptos 版 `.dashboard` 容器在 `.app-shell` 里的 flex 行为）。 */
+ * （等价于 Leptos 版 .dashboard 容器在 .app-shell 里的 flex 行为）。 */
 .app-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -28,16 +28,16 @@ body,
   color: var(--text-3);
   font-size: 13px;
 }
-
-/* ---------------------------------------------- 城市选择器（省 → 市 + 搜索）
+/* ----------------------------------------------
+ * 城市选择器（省 → 市 + 搜索）
  *
- * 定位：`.city-picker` 只做 `position: relative` 的锚，面板用 `position: absolute`
- * 挂在触发按钮下方，**不参与文档流**——顶栏高度不受影响，投递列表也不会被挤压。
- * 面板宽度 `min(420px, 100%)` 且 `max-height` 内部滚动，窄屏时收窄而不是撑开。
+ * 定位：.city-picker 只做 position: relative 的锚，面板用 position: absolute
+ * 挂在触发按钮下方，不参与文档流 —— 顶栏高度不受影响，投递列表也不会被挤压。
+ * 面板宽度 min(420px, 100%) 且 max-height 内部滚动，窄屏时收窄而不是撑开。
  *
- * 字号口径：本仓库 `styles/tokens.css` 目前**没有** `--fs-*` 变量族（那是
- * `prototypes/ui-v1` 原型的口径），所以这里沿用 `app.css` 已有的写法直接给 px，
- * 不新增颜色、不新增变量，也不写 `//!` / `///` 注释（C6）。
+ * 字号口径：本仓库 styles/tokens.css 目前没有字号变量族（那是 prototypes/ui-v1
+ * 原型的口径），所以这里沿用本文件已有写法直接给 px，不新增颜色、不新增变量，
+ * 也不写 C6 禁止的注释形式。
  */
 .city-picker {
   position: relative;
@@ -141,4 +141,27 @@ body,
   padding: 8px;
   color: var(--text-3);
   font-size: 11px;
+}
+
+/* ----------------------------------------------
+ * 概览页：抓取筛选栏（本轮只接城市）
+ *
+ * 容器不设底色，玻璃与边框借 .card；这里只负责一条横排、可换行、不撑破。
+ */
+.page-dashboard {
+  display: block;
+}
+
+.scrape-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  padding: 10px 12px;
+}
+
+.scrape-filter-field {
+  flex: 1 1 180px;
+  min-width: 0;
+  max-width: 320px;
 }
