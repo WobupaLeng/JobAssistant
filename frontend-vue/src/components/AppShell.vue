@@ -16,6 +16,7 @@ import { onMounted, ref } from 'vue';
 import { scrapeClose } from '../api/commands/scrape';
 import { NAV, NAV_BLOCK_CLASS, navTestId, pageTestId, type Nav } from '../lib_ui/nav';
 import { applyTheme, flipTheme, isDark, readInitialTheme, type Theme } from '../lib_ui/theme';
+import { useCanvasScale } from '../lib_ui/use-canvas-scale';
 // 常量经 import 绑定后在模板里可直接用（不需要挂到 setup 的返回上）。
 const NAV_LIST = NAV;
 const NAV_CLASS = NAV_BLOCK_CLASS;
@@ -58,8 +59,6 @@ function toggleTheme(): void {
   applyTheme(theme.value);
 }
 
-defineExpose({ toggleTheme, theme });
-
 function go(key: Nav): void {
   emit('navigate', key);
 }
@@ -67,6 +66,15 @@ function go(key: Nav): void {
 onMounted(() => {
   void scrapeClose().catch(() => undefined);
 });
+
+/**
+ * 全景几何接线：resize → 先写 `--ui-scale`，再写 `--rail-w` / `--detach-w`
+ * （原型 `syncUiScale()` 先行于 `syncDetachWidth()`；顺序由 `syncCanvas()` 内部保证）。
+ * 挂在外壳上而不是 `main.ts`：外壳是与窗口同寿命的根组件，卸载时有钩子可以摘监听，
+ * 也不会在 mount 之前就去读 `innerWidth`。
+ */
+const canvas = useCanvasScale();
+defineExpose({ toggleTheme, theme, syncCanvas: canvas.sync });
 </script>
 
 <template>

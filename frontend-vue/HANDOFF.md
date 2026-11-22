@@ -17,7 +17,9 @@
 
 **M5 补遗完成**：`JobDetailDrawer.vue`（kv 十行/JD 四态/chips/单条 reject↔allow 同位单按钮/Esc 摘除）、`PlatformCard.vue`（三平台、boss 登录已接 `login_start`/`login_status`，智联/51job `is-off`）、`AppErrorBar.vue` 改 FIFO 队列（上限 5 + dropped 计数 + 逐条关闭 + aria-live）；视图模型 `lib_ui/{job-detail-model,platform-model,error-queue}.ts`。
 
-**测试现状**：`npx vitest run` 全量全绿（29 文件 474 用例）。秒/毫秒判据已修为 `1e11`（见 §2.3）。
+**测试现状**：`npx vitest run` 全量全绿（31 文件 519 用例）。秒/毫秒判据已修为 `1e11`（见 §2.3）。
+
+**几何契约补齐完成**（用户裁决「补齐实现，规格不动」）：原型 v7/v8 响应式几何已搬进 Vue——`tokens.css` 追加 `--ui-scale`（`lib_ui/canvas.ts` 的 `computeUiScale = clamp(1, innerWidth/1920, 1.5)`）+ 5 档 `--fs-{2xs,xs,sm,md,lg}`（11/12/13/15/20px × scale）；`lib_ui/use-canvas-scale.ts` 在 AppShell onMounted/resize（rAF 合并）按 `--ui-scale→--rail-w→--detach-w` 顺序写变量；**全部 174 处 font-size 声明用 var()，产物裸 px 字号归零**（vue 系 + 10 份契约 CSS 共享控件均收口）；三窗固定高乘 scale（config 640 / decisions 620 / sensitive 720），对话框宽 `clamp(600,50vw,80vw)` 不乘 scale，A54 job-greet 方块公式落地；`--detach-w` 单一来源（ChatPage 行内绑定已删，只留 syncCanvas + vue-chat.css 静态兜底）；敏感库居中窗规则从 vue-pages.css 覆写迁回 sensitive.css 本体。**残留非阻塞**：契约 CSS 160 处颜色字面量（vue 系已零，全量收口需另轮新增语义令牌）；非字号定值（.job-check/.score-box 等）原型本就是定值，未乘 scale。
 
 **QA 修复轮完成**（qa-verify 判 QA_FAILED 后用户裁决「全部修」）：① 严重——搜索词与排除词彻底分离，`lib_ui/scrape-filter-model.ts` 新增 `searchKeywords()` 唯一出口，`DashboardPage.onStart` 只发 `keywords`（空则拦下不静默回落），推荐 chip/读期望进 keywords 不进 exclude；② `set_limit` 接线持久化上限/门槛（`onMaxJd`/`onMinScore`，失败走 AppErrorBar 带重试，门槛上限取 `get_scoring_spec` 不硬编码）；③ C9 入库 feed 补齐（`scrape-panel-model.ts` 的 `toFeedLine`/`FEED_ACCEPTED_TAG='✔'`/`FEED_SKIPPED_TAG='跳过'`，`DashboardPage.drainFeed` 调 `scrapeDrain(50)`，LogCard 每行 `log-row`）；④ testid 对齐冻结原型（job-tab/sort/batch-bar/空态四件、sensitive-open-btn、chat-detach-head、chat-rail 去重恰 1 处）；⑤ 51job 显示名对齐原型、注释溯源修正。新增 5 个回归文件 41 用例（qa-{keywords,limits,feed,testids,provenance}）。**低#1-3 后端 alias 潜伏缺口未动**（另轮路由）。**已知例外**：`lib_ui/theme.ts` 仍直接触碰 `localStorage`/`matchMedia`/`document`（首帧主题入口，Leptos `lib_ui/theme.rs` 同样如此，C7 遗产）；拆纯函数+副作用会改启动路径，留待后续裁决，不算 §2.5 违例（§2.2 禁的是反向 import，不是 DOM）。
 
@@ -64,7 +66,7 @@
 ### 3.1 开工顺序（阶段 0–4 已完成，HEAD 5f7cddc；以下为收尾顺序）
 
 1. **QA 只读验收**：✅ 已完成（qa-verify 判 QA_FAILED → 用户裁决全部修 → 修复轮落地，474 用例全绿，见 §1）。
-2. **几何契约补齐**（用户裁决「补齐实现」，规格不动）：原型 v7/v8 的响应式几何没搬进 Vue——`tokens.css` 无 `--ui-scale`/`--fs-*`，vue-*.css 约 100 处裸 px 字号、敏感库 720px 固定高与 A54 min-width 缺失。需补 `--ui-scale: clamp(1, innerWidth/1920, 1.5)` + 5 档 `--fs-*`，裸 px 换回 `calc(var(--fs-*)*…)`，三窗尺寸乘 scale。**下一轮 lane 执行**。
+2. **几何契约补齐**：✅ 已完成（用户裁决「补齐实现」，见 §1）——`--ui-scale` + 5 档 `--fs-*` 落地，174 处 font-size 全 var()、产物裸 px 归零，三窗 scale + 敏感库 720 居中窗 + A54，`--detach-w` 单一来源。残留：契约 CSS 160 处颜色字面量全量收口（非阻塞，另轮）。
 3. **槽位 C 产物冒烟**（根 AGENTS §5.3 / ARCH-003 §6 R5，用户已授权 release lane）：先删 CSP `'wasm-unsafe-eval'`（ARCH-003:248 阶段 4 遗漏，WASM 已不存在），再 `cd backend-tauri && npx tauri build --no-bundle`（独占 `CARGO_TARGET_DIR=%TEMP%\jt-release`），产物拷到**工作区外**启动，确认 Vue 真渲染（CSP 白屏唯一实测点）。
 4. **登出入口接线**（§3.3 #6，后端+前端两边）：主进程把 `login.state` emit 给 WebView；前端 PlatformCard 已接 `login_start`/`login_status`，缺 `login_save`/`logout` 与事件订阅。
 5. **Liquid Glass L2/L3**（根 §7.2 #3，待用户裁决是否开工）：规格 `git show d39bae4:docs/ui/UI-SPEC-liquid-glass-l2-l3.md`。

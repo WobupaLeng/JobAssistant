@@ -8,7 +8,7 @@
  *
  * 结构：
  *   .sensitive-backdrop  全屏遮罩（点击关闭）
- *   .sensitive-panel     右侧抽屉（收起 = translateX(100%)，打开 = 0）
+ *   .sensitive-panel     居中固定窗（收起 = 缩小 0.98 且透明，打开 = 居中归位）
  *   .sensitive-head      标题行
  *   .sensitive-tools     工具行（搜索 / 筛选 / 全选 / 移出所选）
  *   .sensitive-body      唯一滚动容器
@@ -27,37 +27,47 @@
   transition: opacity 220ms var(--ease-glass);
 }
 
-/* 抽屉主体：贴右边缘、满高。
+/* 主体：居中固定窗（用户裁决 v10 / 原型 .sen 一系）。
+ *
+ * 尺寸随 --ui-scale 等比放大，但外层再套 min() 与视口差值，保证永远不顶破窗口：
+ *   width  min(calc(1120px * var(--ui-scale)), calc(100vw - 40px))
+ *   height min(calc(720px * var(--ui-scale)), calc(100vh - 56px))
+ * 700 行正文的滚动交给 .sensitive-body（flex:1 1 auto + min-height:0 + overflow-y:auto），
+ * 所以这里必须 max-height:none —— 否则 min() 算出的高度会被视口高度二次夹住。
+ *
  * z-index 51 > 遮罩 50 > 岗位详情抽屉 41——两者由页面层保证互斥，
  * 万一动画尾帧重叠，后打开的（敏感库）压在上面更符合直觉。
- * `will-change: transform` 让 220ms 的平移动画走合成层，不逐帧重排。 */
+ * 动画走 opacity + 轻微缩放（合成层友好，不逐帧重排）。 */
 .sensitive-panel {
   position: fixed;
   z-index: 51;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(1040px, 72vw);
-  max-width: 100vw;
+  top: 50%;
+  left: 50%;
+  width: min(calc(1120px * var(--ui-scale)), calc(100vw - 40px));
+  height: min(calc(720px * var(--ui-scale)), calc(100vh - 56px));
+  max-height: none;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  border-radius: var(--radius-lg);
   background: var(--glass-3);
   border: 1px solid var(--hairline-strong);
-  border-right: none;
   box-shadow: var(--shadow-pop);
   -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-2));
   backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-2));
-  will-change: transform;
-  transform: translateX(100%);
-  transition: transform 220ms var(--ease-glass);
+  transform: translate(-50%, -50%) scale(0.98);
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+  transition: transform 220ms var(--ease-glass), opacity 220ms var(--ease-glass);
 }
 
-/* 打开态：滑入到 0。收起态由基础规则承担（translateX(100%)），
+/* 打开态：居中归位。收起态由基础规则承担（缩放 0.98 + 透明），
  * 所以关闭时也会走同一条 220ms 回程，不需要额外的出场关键帧。 */
 .sensitive-panel.is-open {
-  transform: translateX(0);
+  transform: translate(-50%, -50%);
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* 头部：左标题区可收缩，右侧「关闭」固定。 */
@@ -79,7 +89,7 @@
 
 .sensitive-title {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--fs-md);
   font-weight: 650;
   color: var(--text-1);
 }
@@ -87,7 +97,7 @@
 /* 副标题：一句话解释这块数据是干什么的，逐字照抄，不要精简。 */
 .sensitive-sub {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   line-height: 1.55;
   color: var(--text-3);
 }
@@ -118,7 +128,7 @@
 .sensitive-filter {
   height: 24px;
   padding: 0 11px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .sensitive-filter.is-on {
@@ -128,7 +138,7 @@
 }
 
 .sensitive-hint {
-  font-size: 11.5px;
+  font-size: var(--fs-2xs);
 }
 
 .sensitive-error {
@@ -146,7 +156,7 @@
 
 .sensitive-loading {
   padding: 24px 0;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   text-align: center;
 }
 
@@ -206,7 +216,7 @@
 
 /* 公司名：单行省略，完整名放 title。 */
 .sensitive-company {
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-1);
   overflow: hidden;
@@ -218,7 +228,7 @@
 /* 薪资：右对齐加粗，等宽数字，避免相邻卡片数字宽度不一。 */
 .sensitive-salary {
   flex: 0 0 auto;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   color: var(--text-1);
   font-variant-numeric: tabular-nums;
@@ -226,7 +236,7 @@
 }
 
 .sensitive-job {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -242,7 +252,7 @@
 }
 
 .sensitive-note {
-  font-size: 11.5px;
+  font-size: var(--fs-2xs);
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -256,7 +266,7 @@
 }
 
 .sensitive-time {
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }

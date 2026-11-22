@@ -133,7 +133,15 @@ const autoBusy = ref(false);
 const autoNote = ref('');
 let queue: AutoQueue | null = null;
 
-/* ------------------------------ 窗口宽度（宽度公式） -------------------------- */
+/* ------------------------------ 窗口宽度（宽度公式） --------------------------
+ *
+ * --detach-w / --rail-w 的写入已经统一收口到 AppShell 的 syncCanvas()（canvas.ts 是唯一
+ * 公式来源，并且保证 --ui-scale 先于这两个变量落盘）。所以本页**不再**写行内样式：
+ * 同一份样式表里 `.chat-detach.is-open { flex-basis: var(--detach-w) }` 直接吃行内值，
+ * 静态兜底 720px 留在 vue-chat.css，首帧不会塌成 0 宽。
+ *
+ * 这里只保留一份只读的镜像给单测与调试用（defineExpose 出去），数值来自同一个函数，
+ * 所以不会和 syncCanvas 打架。 */
 
 const innerWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth);
 const detachW = computed(() => detachWidth(innerWidth.value));
@@ -549,7 +557,6 @@ defineExpose({
       :open="ui.chatOpen"
       :friend="activeFriend"
       :count="friends.length"
-      :style="{ '--detach-w': `${detachW}px` }"
       @close="close"
     >
       <template #head>

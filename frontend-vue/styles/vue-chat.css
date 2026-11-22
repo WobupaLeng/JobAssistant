@@ -3,14 +3,16 @@
  *
  * 口径：冻结原型 prototypes/ui-v1 的 class 与尺寸逐条照抄（v3–v10 全部裁决），
  * 只做两处本仓库适配：
- *   1. tokens.css 没有 `--fs-*` 字号族，也没有 `--ui-scale` / `--rail-w` / `--detach-w`，
- *      所以字号沿用 app.css 既有的 px 口径（12.5px 正文级、11.5px 辅助级），
- *      宽度变量在 .page-chat 上就地定义；
+ *   1. 字号一律 `var(--fs-*)`（5 档的定义在 tokens.css，按 1920 基准乘
+ *      `--ui-scale`）；`--rail-w` / `--detach-w` 在 `.page-chat` 上给一份静态兜底，
+ *      运行期由 lib_ui/canvas.ts 的 syncCanvas() 用行内 style 覆写，行内优先级更高。
+ *      右栏宽同样乘 --ui-scale：原型 L135 / L1319 写的就是 calc(300px * scale)；
+ *      对话框宽不乘——原型 syncDetachWidth() 只有 50vw/80vw 与 600px 下限；
  *   2. 原型把自动投递条在展开时搬进对话框头，这里由页面用 v-if 两处二选一渲染，
  *      同一个 rail-auto-bar 与 auto-apply-bar 规则两处都适用。
  *
  * 禁止事项（C6 同族）：本文件不得出现 //! 或 /// 注释；
- * 块注释正文里不得出现反引号包起来的星号斜杠（会提前闭合注释、丢掉整份样式表）。
+ * 块注释正文里不得出现反引号包起来的星号斜杠——同样的原因，会提前闭合注释。
  * 颜色一律取 tokens，不写字面色值（两处 light 主题微调除外，均带注释说明来源）。
  */
 
@@ -19,9 +21,11 @@
  * ============================================================ */
 
 .page-chat {
-  /* 右栏基线宽：≥1280 为 300，1280 以下收窄到 260（原型 --rail-w 的等价物）。 */
-  --rail-w: 300px;
-  /* 对话框宽由页面按公式算好写进行内样式；这里只给兜底，防公式缺席时宽为 0。 */
+  /* 右栏基线宽：≥1280 为 300，1280 以下收窄到 260（原型 --rail-w 的等价物），
+   * 两者都乘 --ui-scale。运行期真实值来自 canvas.ts 的行内 style。 */
+  --rail-w: calc(300px * var(--ui-scale));
+  /* 对话框宽由 syncDetachWidth() 的 clamp(600px, 50vw, 80vw) 算好写进行内样式；
+   * 这里是与原型 :root 一致的 720px 兜底（注意：**不乘 scale**，见 canvas.ts 的说明）。 */
   --detach-w: 720px;
   display: flex;
   flex-wrap: wrap;
@@ -32,7 +36,7 @@
 
 @media (max-width: 1279px) {
   .page-chat {
-    --rail-w: 260px;
+    --rail-w: calc(260px * var(--ui-scale));
   }
 }
 
@@ -76,7 +80,7 @@
 }
 
 .rail-title {
-  font-size: 15px;
+  font-size: var(--fs-md);
   font-weight: 620;
   color: var(--text-1);
   white-space: nowrap;
@@ -166,7 +170,7 @@
   background: linear-gradient(145deg, var(--primary) 0%, var(--accent) 140%);
   /* 深色文字压在亮绿渐变上（语义令牌 --on-primary-deep）。 */
   color: var(--on-primary-deep);
-  font-size: 12.5px;
+  font-size: var(--fs-xs);
   font-weight: 620;
 }
 
@@ -179,7 +183,7 @@
 }
 
 .friend-name {
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-1);
   overflow: hidden;
@@ -187,7 +191,7 @@
 }
 
 .friend-msg {
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -202,7 +206,7 @@
 }
 
 .friend-time {
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -217,7 +221,7 @@
   border-radius: var(--radius-pill);
   background: var(--bad);
   color: var(--on-bad);
-  font-size: 10.5px;
+  font-size: var(--fs-2xs);
   font-weight: 620;
 }
 
@@ -235,19 +239,19 @@
 }
 
 .rail-state .state-title {
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   color: var(--text-2);
 }
 
 .state-sub,
 .rail-guide {
-  font-size: 11.5px;
+  font-size: var(--fs-2xs);
   color: var(--text-3);
   line-height: 1.5;
 }
 
 .state-glyph {
-  font-size: 20px;
+  font-size: var(--fs-lg);
   line-height: 1;
 }
 
@@ -265,13 +269,13 @@
 }
 
 .rail-error-head {
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 620;
   color: var(--bad);
 }
 
 .rail-err-msg {
-  font-size: 11.5px;
+  font-size: var(--fs-2xs);
   color: var(--text-2);
   word-break: break-word;
 }
@@ -324,7 +328,7 @@
 }
 
 .chat-detach-sub {
-  font-size: 11.5px;
+  font-size: var(--fs-sm);
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -408,7 +412,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-2);
   white-space: nowrap;
@@ -451,7 +455,7 @@
   align-items: center;
   gap: 10px;
   margin-left: auto;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   color: var(--text-3);
   white-space: nowrap;
 }

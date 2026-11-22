@@ -1,16 +1,25 @@
 /* M3 配置弹窗 / M4 决策记录页专有类名（config-modal / decisions-modal / dl-rows 等）。
- * 只消费 tokens.css 变量；字号转 px（tokens.css 无 --fs-* 与 --ui-scale，
- * 与 vue-dashboard.css / vue-chat.css 同一套适配）；窗高用任务给定的定值
- * min(640px / 620px, calc(100vh - 96px))，不随内容变化。
+ * 只消费 tokens.css 变量；字号一律 var(--fs-*)（5 档定义在 tokens.css，按 1920
+ * 基准乘 --ui-scale，本文件不出现裸 px 字号）。
+ *
+ * 三窗固定高（原型 prototypes/ui-v1/index.html 的裁决，逐字照抄）：
+ *   config    min(calc(640px * var(--ui-scale)), calc(100vh - 96px))
+ *   sensitive min(calc(720px * var(--ui-scale)), calc(100vh - 56px))
+ *   decisions min(calc(620px * var(--ui-scale)), calc(100vh - 96px))
+ * 高度随 --ui-scale 放大，但不许顶破视口（所以外面再套一层 min 与 vh 差值）；
+ * 滚动容器保持 flex:1 1 auto + min-height:0 + overflow-y:auto。
+ *
  * 共享类（btn / input / textarea / card 头 / log-tools / run-log-line / config-card 等）
  * 已由 controls / layout / pages.css 定义，这里只补弹窗骨架与 scoped 覆盖。
  * 只用块注释；注释正文不含反引号包的星斜杠；无硬编码颜色。 */
 
-.config-modal, .decisions-modal {
-  --vp-fs-2xs: 10.5px;
-  --vp-fs-xs: 11.5px;
-  --vp-fs-sm: 12.5px;
-  --vp-fs-md: 15px;
+/* 兼容别名：早期版本用 --vp-fs-* 做过就地换算，语义与 --fs-* 同一档。
+ * 保留只为既有规则与单测继续成立，数值只有一份；新代码直接用 --fs-*。 */
+:root {
+  --vp-fs-2xs: var(--fs-2xs);
+  --vp-fs-xs: var(--fs-xs);
+  --vp-fs-sm: var(--fs-sm);
+  --vp-fs-md: var(--fs-md);
 }
 
 .page-config,
@@ -27,7 +36,7 @@
   left: 50%;
   transform: translate(-50%, -50%) scale(0.98);
   width: min(760px, calc(100vw - 64px));
-  height: min(640px, calc(100vh - 96px));
+  height: min(calc(640px * var(--ui-scale)), calc(100vh - 96px));
   display: none;
   flex-direction: column;
   border-radius: var(--radius-lg);
@@ -117,7 +126,7 @@
   left: 50%;
   transform: translate(-50%, -50%) scale(0.98);
   width: min(860px, calc(100vw - 64px));
-  height: min(620px, calc(100vh - 96px));
+  height: min(calc(620px * var(--ui-scale)), calc(100vh - 96px));
   display: none;
   flex-direction: column;
   border-radius: var(--radius-lg);
@@ -216,3 +225,6 @@
   min-height: 0;
   max-height: none;
 }
+
+/* ---- 敏感库：几何已回归 styles/sensitive.css 本体（居中固定窗 + 乘 --ui-scale），
+ * 这里不再做特异性覆写。见 sensitive.css 的 .sensitive-panel 注释。 */

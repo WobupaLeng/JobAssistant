@@ -20,6 +20,34 @@
  * ========================================================================== */
 
 :root {
+  /* ---------- 设计基准与等比缩放（用户裁决 K，v7） ----------
+   * 基准分辨率 1920×1080：下面 --fs-* 的像素值就是该基准下的值。
+   * --ui-scale 由 `lib_ui/ui-scale.ts` 的 `syncUiScale()` 在启动与 resize 时写进
+   * `<html>` 的行内 style；公式 clamp(1, innerWidth / 1920, 1.5)：
+   *   ≤1920 恒为 1（**只放大不缩小**），≥1920 线性放大，封顶 1.5。
+   * 写成变量后，--fs-* / --rail-w / --detach-w / 三窗尺寸全部跟着走，
+   * 否则大屏上会「字放大、框不放大」。
+   *
+   * 注意：这两组令牌**与主题无关**，只出现在 :root，浅色块不镜像；
+   * 也不参与下面「深浅两套不共用数值」的约定（那是玻璃/文字色，不是几何）。 */
+  --ui-scale: 1;
+
+  /* ---------- 字号令牌：标准阶梯 5 档（用户裁决 L，v8） ----------
+   * v7 曾按「保留每一种手写值」建了 9 档（10 / 10.5 / 11 / 11.5 / 12 / 12.5 / 13 / 14 / 16），
+   * 相邻档只差 0.5–1px，肉眼无从分辨，反而让整页显得大小不统一 → v8 收敛为这 5 档，旧 9 档已废止。
+   * 铁律：**只允许这 5 个名字**，新增第 6 档视为破坏契约。
+   *   2xs 11px 说明 / 时间戳 / field-hint / chip / rail-stat
+   *   xs  12px 次要正文：卡片副标题 / 表单标签 / 表格 / 日志行 / 条目摘要
+   *   sm  13px 正文基准：body / 列表正文 / 按钮 / 输入框 / 聊天消息
+   *   md  15px 小标题：card-title / rail-title / config-title / 区块标题
+   *   lg  20px 页面级标题：.brand / 弹窗大标题（配置 / 敏感库）
+   * 行高配套：正文 1.55、小字 1.5、标题 1.3（.job-title 1.4 是唯一例外）。 */
+  --fs-2xs: calc(11px * var(--ui-scale));
+  --fs-xs: calc(12px * var(--ui-scale));
+  --fs-sm: calc(13px * var(--ui-scale));
+  --fs-md: calc(15px * var(--ui-scale));
+  --fs-lg: calc(20px * var(--ui-scale));
+
   /* ---------- 玻璃底色 ----------
    * 越靠前的层越亮（surface-0 是页面底板，最暗最透）。
    * alpha 全部 < 0.8，否则亚克力透不出来，窗口会变成一块死色。 */
@@ -242,7 +270,7 @@ body {
   background: transparent;
   color: var(--text-1);
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;

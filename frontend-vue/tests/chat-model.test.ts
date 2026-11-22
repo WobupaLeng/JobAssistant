@@ -92,11 +92,17 @@ describe('对话框宽度公式（SPEC §2.2 / §16.6，A49）', () => {
     expect(detachWidth(Number.POSITIVE_INFINITY)).toBe(DETACH_MIN_W);
   });
 
-  it('右栏宽：≥1280 为 300，以下为 260', () => {
+  it('右栏宽：≥1280 基准 300，以下 260；≤1920 时 scale=1 故原值不变', () => {
     expect(railWidth(1280)).toBe(300);
     expect(railWidth(1600)).toBe(300);
     expect(railWidth(1279)).toBe(260);
     expect(railWidth(1200)).toBe(260);
+  });
+
+  it('右栏宽随 --ui-scale 放大（用户裁决 K/v7）：2560 → 300×1.333', () => {
+    // 大屏上字号放大到 1.333 倍，右栏与对话框一起放大，否则正文会挤在 300px 栏里。
+    expect(railWidth(2560)).toBe(400);
+    expect(railWidth(3840)).toBe(450); // 450 × 1.5（封顶）
   });
 
   it('聊天区可用宽 = 对话框宽 − 右栏宽，规格下限 320 在四档内都满足', () => {

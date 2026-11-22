@@ -27,7 +27,7 @@
   gap: 4px;
   height: 22px;
   padding: 0 9px;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   font-weight: 520;
   color: var(--text-2);
   background: var(--glass-input);
@@ -54,7 +54,7 @@
 }
 
 .job-tab-count {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
 }
@@ -70,7 +70,7 @@
   align-items: center;
   gap: 4px;
   margin-left: 6px;
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   color: var(--text-3);
   cursor: pointer;
   user-select: none;
@@ -94,12 +94,12 @@
 
 .job-sort-label {
   margin-right: 4px;
-  font-size: 11px;
+  font-size: var(--fs-2xs);
 }
 
 .job-sort {
   padding: 2px 6px;
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   color: var(--text-3);
   background: transparent;
   border: 0;
@@ -124,7 +124,7 @@
 .job-sort-arrow {
   display: inline-block;
   width: 10px;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--primary);
 }
 
@@ -138,7 +138,7 @@
   gap: 10px;
   flex-wrap: wrap;
   margin: 8px 0 6px;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
 }
 
 .job-batch-check {
@@ -161,7 +161,7 @@
 }
 
 .job-batch-hint {
-  font-size: 10.5px;
+  font-size: var(--fs-2xs);
 }
 
 /* ================================================================
@@ -286,7 +286,7 @@
   width: 28px;
   height: 20px;
   border-radius: 6px;
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--text-1);
@@ -332,7 +332,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 560;
   color: var(--text-1);
 }
@@ -350,7 +350,7 @@
   width: 16px;
   height: 16px;
   padding: 0;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   line-height: 1;
   color: transparent;
   background: transparent;
@@ -374,7 +374,7 @@
 }
 
 .jc-sub {
-  font-size: 11px;
+  font-size: var(--fs-2xs);
 }
 
 .jc-company {
@@ -390,7 +390,7 @@
 /* 薪资是卡片里第二重要的信息：加粗、用正文色 */
 .jc-salary {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 640;
   font-variant-numeric: tabular-nums;
   color: var(--text-1);
@@ -401,11 +401,11 @@
 .jc-sub .chip {
   height: 16px;
   padding: 0 5px;
-  font-size: 9.5px;
+  font-size: var(--fs-2xs);
 }
 
 .jc-meta {
-  font-size: 10.5px;
+  font-size: var(--fs-2xs);
   color: var(--text-3);
 }
 
@@ -432,7 +432,7 @@
 }
 
 .jc-foot {
-  font-size: 10.5px;
+  font-size: var(--fs-2xs);
   color: var(--text-3);
 }
 
@@ -443,7 +443,7 @@
 .jc-foot .chip.as-btn {
   height: 16px;
   padding: 0 6px;
-  font-size: 9.5px;
+  font-size: var(--fs-2xs);
 }
 
 /* 地址是卡片里最长的自由文本：给它左弹性 + 省略号，
@@ -498,7 +498,7 @@
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
 }
 
 /* ---------- 表头 ----------
@@ -510,7 +510,7 @@
   z-index: 1;
   padding: 8px 10px;
   text-align: left;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   font-weight: 560;
   color: var(--text-3);
   white-space: nowrap;
@@ -598,7 +598,7 @@
   padding: 36px 20px;
   text-align: center;
   color: var(--text-3);
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   line-height: 1.8;
   white-space: normal;
 }
@@ -611,7 +611,7 @@
   min-width: 30px;
   font-variant-numeric: tabular-nums;
   font-weight: 680;
-  font-size: 13px;
+  font-size: var(--fs-xs);
   text-align: center;
   letter-spacing: 0.2px;
 }

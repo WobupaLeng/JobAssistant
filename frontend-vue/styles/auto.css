@@ -27,7 +27,7 @@
   border: 1px solid var(--hairline);
   background: var(--glass-3);
   color: var(--text-1);
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 650;
   cursor: pointer;
   white-space: nowrap;
@@ -80,7 +80,7 @@
   min-width: 0;
   max-width: 240px;
   flex: 0 1 auto;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   color: var(--text-2);
 }
 

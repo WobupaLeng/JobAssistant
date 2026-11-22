@@ -202,10 +202,14 @@ describe('展开 / 收起（SPEC §3 状态机 + 单处渲染）', () => {
     w.unmount();
   });
 
-  it('对话框宽度按公式写进 --detach-w（1440 ⇒ 720px）', async () => {
+  // 收编后（REMAINING#3）：--detach-w 只由 AppShell 的 syncCanvas() 写到 <html>，
+  // 页面不再往对话框上写行内样式。宽度仍由公式给出，但读的是同一个函数。
+  it('对话框宽度由 canvas 公式给出（1440 ⇒ 720px），页面不再写行内 --detach-w', async () => {
     const w = await mountPage();
     const detach = w.find('[data-testid="chat-detach"]');
-    expect(detach.attributes('style')).toContain('--detach-w: 720px');
+    expect(detach.attributes('style') ?? '').not.toContain('--detach-w');
+    // 页面组件仍暴露同一个公式（defineExpose 的 detachW 镜像），数值与 syncCanvas 一致。
+    expect((w.vm as unknown as { detachW: number }).detachW).toBe(720);
     w.unmount();
   });
 });

@@ -33,7 +33,7 @@
 }
 
 .filter-row-title {
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     font-weight: 560;
     color: var(--text-2);
     letter-spacing: 0.01em;
@@ -43,7 +43,7 @@
     margin-left: auto;
     height: 18px;
     padding: 0 6px;
-    font-size: 10px;
+    font-size: var(--fs-2xs);
     line-height: 1;
     color: var(--text-3);
     background: transparent;
@@ -88,7 +88,7 @@
     height: 12px;
     margin-left: 2px;
     padding: 0;
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     line-height: 1;
     color: var(--text-3);
     background: transparent;
@@ -130,7 +130,7 @@
 }
 
 .filter-mini {
-    font-size: 11px;
+    font-size: var(--fs-2xs);
 }
 
 /* ---------------- 三列 / 两列 / 四列网格 ---------------- */
@@ -186,7 +186,7 @@
 .filter-exclude .textarea {
     min-height: 62px;
     resize: vertical;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     line-height: 1.5;
 }
 
@@ -199,7 +199,7 @@
 .filter-footnote {
     margin: 2px 0 0;
     padding: 4px 0 4px 8px;
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     line-height: 1.5;
     color: var(--text-3);
     border-left: 2px solid var(--hairline-strong);

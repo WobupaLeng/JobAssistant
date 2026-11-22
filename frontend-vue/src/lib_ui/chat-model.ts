@@ -14,6 +14,7 @@
  * 这里只放能在 node 里单测的东西：状态机、宽度公式、筛选、气泡分型、文案。
  */
 import type { Friend, ChatMessage } from '../api/types';
+import { computeRailWidth } from './canvas';
 import { needsSession } from './session';
 
 /** 对话框宽度下限（v10 裁决 U，用户 m00332：「把下限降到 600px」）。 */
@@ -49,9 +50,16 @@ export function detachWidth(innerWidth: number): number {
   return Math.round(capped);
 }
 
-/** 右栏（= 对话框内左段 Boss 列表）宽度。 */
+/**
+ * 右栏（= 对话框内左段 Boss 列表）宽度，**已乘 `--ui-scale`**（用户裁决 K/v7）：
+ * 大屏上右栏要和字号一起变宽，否则 3840 宽度下 13px→19.5px 的字挤在 300px 栏里。
+ *
+ * 公式只有一份，在 `canvas.ts:computeRailWidth`；这里保留旧名字，
+ * 免得 `ChatPage` 与既有单测跟着改（值域同时改变：见 `tests/chat-model.test.ts`
+ * 的 `railWidth` 断言）。
+ */
 export function railWidth(innerWidth: number): number {
-  return innerWidth < RAIL_NARROW_BELOW ? RAIL_W_NARROW : RAIL_W_WIDE;
+  return computeRailWidth(innerWidth);
 }
 
 /** 聊天区可用宽 = 对话框宽 − 左段宽（§2.2「≥ 320 为舒适下限」）。 */

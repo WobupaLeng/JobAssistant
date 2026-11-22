@@ -14,8 +14,11 @@ function blockOf(sel: string): string {
 }
 
 describe('配置弹窗固定窗', () => {
-  it('.config-modal 高度恒为 min(640px, calc(100vh - 96px))，不随内容变化', () => {
-    expect(blockOf('.config-modal')).toContain('height: min(640px, calc(100vh - 96px))');
+  // 用户裁决 K（v7）：窗高随 --ui-scale 放大，但恒不顶破视口（外层 min 与 vh 差值守住）。
+  it('.config-modal 高度恒为 min(calc(640px * var(--ui-scale)), calc(100vh - 96px))，不随内容变化', () => {
+    expect(blockOf('.config-modal')).toContain(
+      'height: min(calc(640px * var(--ui-scale)), calc(100vh - 96px))',
+    );
   });
   it('.config-modal 宽度 min(760px, calc(100vw - 64px))，固定定位', () => {
     const b = blockOf('.config-modal');
