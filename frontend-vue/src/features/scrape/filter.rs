@@ -1097,22 +1097,7 @@ pub fn ScrapeFilterPanel(
 
             // ---------- 三列：城市 / 职位类型 / 翻页次数 ----------
             <div class="filter-grid3">
-                <label class="field">
-                    <div class="label">"城市"</div>
-                    <select
-                        class="input"
-                        data-testid="scrape-filter-city"
-                        prop:value=move || city.get()
-                        on:change=move |ev| {
-                            city.set(event_target_value(&ev));
-                            save.run(());
-                        }
-                    >
-                        {CITIES.iter().map(|(code, name)| view! {
-                            <option value=*code>{*name}</option>
-                        }).collect_view()}
-                    </select>
-                </label>
+                // 城市槽位已迁移 Vue：src/components/CityPicker.vue（testid scrape-filter-city 现挂其触发按钮）；Leptos select 退役。
                 <label class="field">
                     <div class="label">"职位类型"</div>
                     <select

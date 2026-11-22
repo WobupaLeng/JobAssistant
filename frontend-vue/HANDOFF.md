@@ -11,11 +11,11 @@
 
 `frontend-vue/` 已进入 **Vue 3 + Vite + TypeScript 原地重写**：ARCH-003 的**阶段 0（脚手架）与阶段 1（契约层 + 纯函数）完成**——`src/api/**` 覆盖全部 48 条命令（`tests/commands-payload.test.ts` 守卫）、`src/lib_ui/**` 纯函数就位、`src/components/AppShell.vue` 外壳可用、`npm run typecheck` 0 错、`npm run build` 通过。
 
-**`src/` 下的 Leptos 0.8 `.rs` 源码仍在**（四个页面全部实现、无占位符），作为迁移对照与拆除前的回滚基线，**阶段 4 才退役**。后端 `backend-tauri/` 不动。方案见 [`ARCH-003`](../docs/architecture/ARCH-003-vue-frontend-migration.md)。
+**Leptos 0.8 `.rs` 已部分退役**（用户裁决「先删除」）：`src/pages/*.rs` 五个页面文件、`lib.rs` 的 `mod pages`/`pages::Page` 引用、`features/scrape/filter.rs` 的旧城市 `<select>` 均已删除（git 历史可取回）；`src/pages/` 现在只有 `DashboardPage.vue`。**其余 `.rs`（api/components/features/lib_ui）仍是阶段 2/3 的行为对照**，阶段 4 整体退役。后端 `backend-tauri/` 不动。方案见 [`ARCH-003`](../docs/architecture/ARCH-003-vue-frontend-migration.md)。
 
-**当前未接线**：`App.vue` 仍是页面占位，四个页面尚未迁移；`components/CityPicker.vue`（城市两级联动 + 搜索，373 个城市）已就绪但**没有任何页面在用**——要等阶段 2/3 迁移筛选栏时替换 Leptos 的 `features/scrape/filter.rs:1100-1115`。
+**已接线**：概览页 `pages/DashboardPage.vue` 消费 `components/CityPicker.vue`（城市两级联动 + 搜索，373 城），筛选状态在 `features/scrape/filter.ts`（本轮只有 `city` 单字段）；`App.vue` 的 `dashboard` 槽渲染该页，其余三页仍是占位。**未接线**：其余筛选控件（薪资/经验/学历/规模/阶段/职位类型/行业/关键词）、`scrape_start`、本地草稿与防抖——阶段 3。
 
-**测试现状**：`npx vitest run` = 116 passed / **4 failed**，4 条红全在 `tests/time.test.ts`，是**已知口径问题**（见 §2.3「时间戳秒/毫秒判据」），按裁决挂起，不是回归。
+**测试现状**：`npx vitest run` = **130 passed / 0 failed**（8 文件）。秒/毫秒判据已修为 `1e11`（见 §2.3），原 4 条红全部转绿。
 
 ---
 

@@ -12,7 +12,6 @@ mod api;
 mod components;
 mod features;
 mod lib_ui;
-mod pages;
 
 use leptos::prelude::*;
 
@@ -50,11 +49,9 @@ fn App() -> impl IntoView {
         view! { <features::sensitive::SensitiveEntry open=sensitive_open /> }
     });
     let dispatch = ViewFn::from(move || {
-        let nav = use_context::<RwSignal<Nav>>().expect("AppShell 必须注入 nav");
-        let page_tick = use_context::<RwSignal<u32>>().expect("AppShell 必须注入 page_tick");
-        let on_notice = use_context::<Callback<String>>().expect("AppShell 必须注入 on_notice");
+        // 页面分发已迁 Vue（`src/App.vue` 是唯一槽位），这里只剩敏感库浮层：
+        // 浮层要盖在页面之上，所以仍留在 Leptos 树里，`open` 由组装层持有。
         view! {
-            <pages::Page nav=nav page_tick=page_tick on_notice=on_notice />
             <features::sensitive::SensitiveOverlay open=sensitive_open />
         }
     });
