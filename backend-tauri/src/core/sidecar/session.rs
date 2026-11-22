@@ -44,6 +44,10 @@ pub struct ScrapeProgress {
     pub rejected: u32,
     /// 登录状态：`unknown` | `waiting` | `logged_in` | `closed` | `error`
     pub login_state: String,
+    /// 登录态所属平台（来自 `login.state` 事件的 `platform`，或 `login_status`
+    /// 查询写回）。空串 = 尚未收到任何登录事件；lib.rs 的 login-state watcher
+    /// 以「平台空且 unknown」判定「还没有可广播的登录态」。
+    pub login_platform: String,
     /// 最近一条日志（给界面做实时回显）
     pub last_log: Option<String>,
     /// 最近一次入库的岗位标题，界面上「刚刚抓到」的提示用
@@ -383,6 +387,7 @@ impl SidecarSession {
             p.last_title = prev.last_title.clone();
             if prev.login_state != "unknown" {
                 p.login_state = prev.login_state.clone();
+                p.login_platform = prev.login_platform.clone();
             }
             p.running = true;
             p.finished_reason = None;
@@ -460,9 +465,10 @@ fn consume(
                 let _ = tx.send(SessionUpdate::Log { level, msg });
             }
             SidecarEvent::Event(Event::LoginState {
-                state, msg, ..
+                platform, state, msg,
             }) => {
                 if let Ok(mut p) = progress.lock() {
+                    p.login_platform = platform;
                     p.login_state = state.clone();
                 }
                 let _ = tx.send(SessionUpdate::Login { state, msg });
@@ -794,6 +800,7 @@ mod tests {
     fn progress_defaults_are_unknown() {
         let p = ScrapeProgress::new();
         assert_eq!(p.login_state, "unknown");
+        assert!(p.login_platform.is_empty());
         assert!(!p.running);
         assert_eq!(p.scraped, 0);
     }
@@ -829,6 +836,42 @@ mod tests {
             !progress.lock().unwrap().running,
             "ready 不该把状态切成「抓取中」"
         );
+    }
+
+    /// `login.state` 事件必须把 platform 连同 state 一起记进 progress：
+    /// lib.rs 的 login-state watcher 按 (platform, state) 去重广播，
+    /// 丢了 platform 就分不清是哪个平台的登录态（契约字段会恒为空）。
+    #[test]
+    fn login_event_records_platform_and_state() {
+        let progress = Arc::new(Mutex::new(ScrapeProgress::new()));
+        let (tx, rx) = mpsc::channel();
+        let (events_tx, events_rx) = mpsc::channel();
+        events_tx
+            .send(SidecarEvent::Event(Event::LoginState {
+                platform: "boss".into(),
+                state: "logged_in".into(),
+                msg: "登录成功".into(),
+            }))
+            .unwrap();
+        drop(events_tx);
+        consume(
+            events_rx,
+            Arc::clone(&progress),
+            tx,
+            DEFAULT_PROFILE.clone(),
+            IngestConfig::default(),
+            Ports::new(
+                |_: &Job| Ok(false),
+                |_: &SensitiveEntry<'_>| {},
+                |_: &DecisionNote| {},
+            ),
+            NoSensitive,
+            Arc::new(AtomicBool::new(false)),
+        );
+        let snap = progress.lock().unwrap().clone();
+        assert_eq!(snap.login_state, "logged_in");
+        assert_eq!(snap.login_platform, "boss");
+        assert!(matches!(rx.try_recv(), Ok(SessionUpdate::Login { .. })));
     }
 
     /// 被规则否决的岗位要进敏感库，这样下次抓取能省掉一整轮详情页。

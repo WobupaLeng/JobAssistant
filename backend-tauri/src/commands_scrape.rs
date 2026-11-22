@@ -536,7 +536,23 @@ pub fn login_status(
             page: None,
         },
     ) {
-        Ok(data) => Ok(parse_login_state(&platform, &data)),
+        Ok(data) => {
+            let reply = parse_login_state(&platform, &data);
+            // 查询结论写回 progress：session.open 的回执**不会**触发 login.state
+            // 事件，不写回的话 lib.rs 的 login-state watcher 永远播不出这次查询
+            // 结果。unknown 是查询失败的降级值，不得覆盖已知登录态。
+            if reply.state != "unknown" {
+                if let Ok(guard) = state.0.lock() {
+                    if let Some(session) = guard.as_ref() {
+                        if let Ok(mut p) = session.progress_handle().lock() {
+                            p.login_platform = platform.clone();
+                            p.login_state = reply.state.clone();
+                        }
+                    }
+                }
+            }
+            Ok(reply)
+        }
         Err(e) => Ok(LoginStatusReply {
             platform,
             state: "unknown".to_string(),

@@ -438,6 +438,108 @@ fn acquire_instance_lock(_app: &tauri::AppHandle) -> Result<InstanceLock, String
     Ok(InstanceLock(Some(())))
 }
 
+/// 登录态快照：`login-state` 事件的去重键。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LoginSnapshot {
+    platform: String,
+    state: String,
+}
+
+/// `login-state` 事件的载荷（**蛇形命名，冻结契约**）。
+///
+/// 前端用 `listen('login-state', e => e.payload)` 接收；
+/// `logged_in` 是 `state == "logged_in"` 的派生便利字段。
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct LoginStatePayload {
+    platform: String,
+    state: String,
+    logged_in: bool,
+}
+
+/// 从会话进度里提取值得广播的登录态快照。
+///
+/// 刚创建、还没收到任何登录事件的会话（platform 空且 unknown）不播：
+/// 那不是「登录态变化」，只是「会话存在」，播出去只会让界面闪一下未知态。
+fn login_snapshot(progress: &core::sidecar::ScrapeProgress) -> Option<LoginSnapshot> {
+    if progress.login_platform.is_empty() && progress.login_state == "unknown" {
+        return None;
+    }
+    Some(LoginSnapshot {
+        platform: progress.login_platform.clone(),
+        state: progress.login_state.clone(),
+    })
+}
+
+/// 广播决策：只在 (platform, state) 变化时发事件。
+///
+/// 会话消失（logout / scrape_close / 崩溃后未重启）时补发一次 `closed`，
+/// 让界面有机会把「已登录」徽标收掉；此后再无会话就不再重复播。
+/// 启动时本来就没有会话、也从未播过任何状态 → 什么都不发。
+fn login_emit_decision(
+    last: Option<&LoginSnapshot>,
+    current: Option<LoginSnapshot>,
+) -> Option<LoginSnapshot> {
+    match current {
+        Some(next) => {
+            if last == Some(&next) {
+                None
+            } else {
+                Some(next)
+            }
+        }
+        None => match last {
+            Some(prev) if prev.state != "closed" => Some(LoginSnapshot {
+                platform: prev.platform.clone(),
+                state: "closed".to_string(),
+            }),
+            _ => None,
+        },
+    }
+}
+
+/// 登录态 watcher：把 sidecar 的登录态变化 emit 给 WebView。
+///
+/// 为什么是轮询而不是在会话创建处装回调：会话有 6 个创建触点
+/// （scrape_start / maybe_restart / login_start / login_status / session_open /
+/// auto_greet），逐处装 observer 漏一处就是静默失效——正是本工程反复踩过的
+/// 坑。watcher 只读 `ScrapeState` 这一个集中点，天然覆盖全部触点与崩溃重启。
+/// 500ms 的粒度对「扫码登录」这种秒级状态足够；登录态的权威来源仍是
+/// `login_status` 命令与 `scrape_drain` 轮询，本事件只是补充推送。
+fn spawn_login_state_watcher(app: &tauri::AppHandle) {
+    use tauri::{Emitter, Manager};
+
+    let handle = app.clone();
+    let spawned = std::thread::Builder::new()
+        .name("login-state-watcher".into())
+        .spawn(move || {
+            let mut last: Option<LoginSnapshot> = None;
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                let current = {
+                    let state = handle.state::<ScrapeState>();
+                    // 锁中毒也继续播：watcher 是旁路观察者，不该因一次 panic 永久失声
+                    let guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
+                    guard.as_ref().and_then(|s| login_snapshot(&s.progress()))
+                };
+                if let Some(next) = login_emit_decision(last.as_ref(), current) {
+                    let payload = LoginStatePayload {
+                        logged_in: next.state == "logged_in",
+                        platform: next.platform.clone(),
+                        state: next.state.clone(),
+                    };
+                    match handle.emit("login-state", &payload) {
+                        Ok(()) => last = Some(next),
+                        // emit 失败不推进 last：下一拍重试，状态变化不会丢
+                        Err(e) => eprintln!("[login-watch] emit login-state 失败：{e}"),
+                    }
+                }
+            }
+        });
+    if let Err(e) = spawned {
+        eprintln!("[login-watch] 登录态 watcher 启动失败（登录事件不再推送，轮询仍可用）：{e}");
+    }
+}
+
 pub fn run() {
     use tauri::Manager;
 
@@ -517,6 +619,9 @@ pub fn run() {
                 }
                 Err(e) => eprintln!("[startup] 无法解析数据目录（应用继续运行）：{e}"),
             }
+            // 登录态推送：sidecar → progress → watcher → WebView（契约见
+            // LoginStatePayload）。放在 setup 末尾：此时 ScrapeState 已 manage。
+            spawn_login_state_watcher(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -603,5 +708,67 @@ mod startup_tests {
         let missing = std::env::temp_dir().join("aja-probe-definitely-missing-dir");
         let _ = std::fs::remove_dir_all(&missing);
         assert!(probe_writable(&missing).is_err());
+    }
+}
+
+#[cfg(test)]
+mod login_watch_tests {
+    use super::*;
+
+    fn snap(platform: &str, state: &str) -> LoginSnapshot {
+        LoginSnapshot {
+            platform: platform.into(),
+            state: state.into(),
+        }
+    }
+
+    /// 载荷形状是冻结契约：蛇形三字段，前端按此监听，不得漂移。
+    #[test]
+    fn payload_shape_is_frozen_snake_case() {
+        let v = serde_json::to_value(LoginStatePayload {
+            platform: "boss".into(),
+            state: "logged_in".into(),
+            logged_in: true,
+        })
+        .unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"platform": "boss", "state": "logged_in", "logged_in": true})
+        );
+    }
+
+    #[test]
+    fn blank_unknown_session_is_not_broadcast() {
+        let mut p = core::sidecar::ScrapeProgress::new();
+        assert_eq!(login_snapshot(&p), None, "新会话不该播未知态");
+        p.login_state = "waiting".into();
+        p.login_platform = "boss".into();
+        assert_eq!(login_snapshot(&p), Some(snap("boss", "waiting")));
+        // login_status 写回 no_login 时同样可播
+        p.login_state = "no_login".into();
+        assert_eq!(login_snapshot(&p), Some(snap("boss", "no_login")));
+    }
+
+    #[test]
+    fn first_known_state_is_emitted_once() {
+        let cur = snap("boss", "waiting");
+        assert_eq!(login_emit_decision(None, Some(cur.clone())), Some(cur.clone()));
+        assert_eq!(login_emit_decision(Some(&cur), Some(cur.clone())), None, "重复状态不重播");
+    }
+
+    #[test]
+    fn state_change_is_emitted() {
+        let prev = snap("boss", "waiting");
+        let next = snap("boss", "logged_in");
+        assert_eq!(login_emit_decision(Some(&prev), Some(next.clone())), Some(next));
+    }
+
+    #[test]
+    fn session_gone_emits_closed_exactly_once() {
+        let prev = snap("boss", "logged_in");
+        let closed = snap("boss", "closed");
+        assert_eq!(login_emit_decision(Some(&prev), None), Some(closed.clone()));
+        assert_eq!(login_emit_decision(Some(&closed), None), None, "closed 不重复播");
+        assert_eq!(login_emit_decision(None, None), None, "从未有过会话就不播");
     }
 }
