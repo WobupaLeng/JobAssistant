@@ -954,6 +954,17 @@
   height: 24px;
 }
 
+/* 登录二维码：login_status.message 里的 data URI，仅在 waiting 态出现。
+   尺寸与平台卡等高，点开登录窗后由后端推送把它带进来。 */
+.platform-scan {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: var(--on-primary);
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
 /* 登录状态点：ok 用 good 色，bad 用 bad 色，未知用中性描边。 */
 .status-dot {
   width: 8px;

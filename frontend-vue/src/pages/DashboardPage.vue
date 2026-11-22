@@ -34,6 +34,8 @@ import { scrapeDrain, scrapeProgress, scrapeStart, scrapeStop } from '../api/com
 import { getAppConfig, setLimit, setScrapeDefaults } from '../api/commands/config';
 import { sensitiveList, sensitiveRemove } from '../api/commands/sensitive';
 import { loginStart, loginStatus } from '../api/commands/scrape';
+import { loginSave, logout } from '../api/commands/scrape';
+import { listenLoginState, type UnlistenFn } from '../api/events';
 import { listExpectations } from '../api/commands/chat';
 import type {
   AppConfigReply,
@@ -108,6 +110,7 @@ import {
   type DetailState,
 } from '../lib_ui/job-detail-model';
 import { PRIMARY_PLATFORM, pickPlatform } from '../lib_ui/platform-model';
+import { mergeLoginState } from '../lib_ui/login-model';
 import {
   EMPTY_QUEUE,
   clearErrors,
@@ -187,6 +190,12 @@ const detailJob = computed<Job | null>(() => {
 const platform = ref(PRIMARY_PLATFORM);
 const login = shallowRef<LoginStatus | null>(null);
 const loginBusy = ref(false);
+/** 最近一次「保存登录 / 退出登录」还没回来（两个按钮共用，防连点）。 */
+const loginActionBusy = ref(false);
+/** `login-state` 的退订函数；未订阅/已退订时为 `null`。 */
+let unlistenLogin: UnlistenFn | null = null;
+/** 组件已卸载：挡住「订阅还没 await 回来就卸载」的悬挂监听。 */
+let disposed = false;
 
 const themeLabel = ref(readInitialTheme() === 'dark' ? '深色' : '浅色');
 
@@ -488,6 +497,39 @@ async function refreshLogin(): Promise<void> {
   }
 }
 
+/**
+ * 订阅 `login-state`（后端 `lib.rs:508` 的旁路推送，500ms 粒度）。
+ *
+ * 事件只带 `(platform, state, logged_in)`，缺 `running` / `saved` / `message`，
+ * 所以一律走 `mergeLoginState` 合并进权威状态（未知态不覆盖已知态），
+ * 而不是整份替换——否则「已登录」会被一条迟到的推送降级成「未知」。
+ *
+ * 非 Tauri 环境（vitest / 浏览器预览）`listenLoginState` 直接返回 no-op，
+ * 这里不判断运行时。
+ */
+async function subscribeLoginState(): Promise<void> {
+  if (unlistenLogin !== null) return;
+  try {
+    const off = await listenLoginState(
+      (payload) => {
+        login.value = mergeLoginState(login.value, payload);
+        // 登录成功那一拍补一次权威查询：`saved` / `message` 只在查询里有。
+        if (payload.state === 'logged_in') void refreshLogin();
+      },
+      () => undefined,
+    );
+    // 订阅是 await 的，期间组件可能已卸载：那就立刻退订，别留悬挂监听。
+    if (disposed) {
+      off();
+      return;
+    }
+    unlistenLogin = off;
+  } catch {
+    // 订阅失败只影响实时性，兜底查询与 5s tick（`refreshLogin`）仍在。
+    unlistenLogin = null;
+  }
+}
+
 async function onLogin(id: string): Promise<void> {
   if (loginBusy.value) return;
   platform.value = pickPlatform(platform.value, id);
@@ -501,6 +543,54 @@ async function onLogin(id: string): Promise<void> {
   } finally {
     loginBusy.value = false;
   }
+}
+
+/**
+ * 「保存登录」：只写一个本机标记（cookie 由持久化 profile 管）。
+ *
+ * 成功/失败都刷新一次权威状态——`saved` 与 `message` 只有查询里有。
+ * 失败进错误队列并且可重试（不静默），因为用户点它就是要一个结果。
+ */
+async function onSaveLogin(): Promise<void> {
+  if (loginActionBusy.value) return;
+  loginActionBusy.value = true;
+  try {
+    const reply = await loginSave(platform.value);
+    if (!reply.ok) {
+      filterNote.value = reply.error === '' ? '保存登录失败' : `保存登录失败：${reply.error}`;
+      fail(filterNote.value, 'login_save', { label: '重试', run: () => void onSaveLogin() });
+    } else {
+      filterNote.value = reply.saved ? '登录状态已保存' : '没有可保存的登录状态';
+    }
+  } catch (e) {
+    fail(`保存登录失败：${errText(e)}`, 'login_save', { label: '重试', run: () => void onSaveLogin() });
+  } finally {
+    loginActionBusy.value = false;
+    await refreshLogin();
+  }
+}
+
+/**
+ * 「退出登录」：清标记，运行中的会话会让 sidecar 一起关掉
+ * （`LogoutReply.closed`）。退出后立刻把徽标拉回权威状态。
+ */
+async function onLogout(): Promise<void> {
+  if (loginActionBusy.value) return;
+  loginActionBusy.value = true;
+  try {
+    await logout(platform.value);
+    filterNote.value = '已退出登录';
+  } catch (e) {
+    fail(`退出登录失败：${errText(e)}`, 'logout', { label: '重试', run: () => void onLogout() });
+  } finally {
+    loginActionBusy.value = false;
+    await refreshLogin();
+  }
+}
+
+/** WebView 从挂起恢复：`setTimeout` / 事件都可能断过，补一次权威查询。 */
+function onVisibilityChange(): void {
+  if (document.visibilityState === 'visible') void refreshLogin();
 }
 
 async function onGreet(jobId: string): Promise<void> {
@@ -677,12 +767,16 @@ onMounted(() => {
   void refreshProgress();
   void loadLogs();
   void refreshLogin();
+  void subscribeLoginState();
+  document.addEventListener('visibilitychange', onVisibilityChange);
   void loadExpects();
   // C16：setInterval 在 WebView 挂起时同样不触发；恢复后下一次立即生效。
   // 同一个 tick 兼管进度与事件流：运行中才真的发命令（见 refreshProgress）。
   tickTimer = setInterval(() => {
     void refreshCounts();
     void refreshProgress();
+    // 5s tick 兼做登录态兜底：事件断流（emit 失败/会话重启）时也不会长期显示旧态。
+    void refreshLogin();
   }, TICK_MS);
   const pollLogs = (): void => {
     logTimer = setTimeout(() => {
@@ -694,6 +788,12 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+  if (unlistenLogin !== null) {
+    unlistenLogin();
+    unlistenLogin = null;
+  }
   if (tickTimer !== null) clearInterval(tickTimer);
   if (logTimer !== null) clearTimeout(logTimer);
   if (saveTimer !== null) clearTimeout(saveTimer);
@@ -721,8 +821,11 @@ watch(
       :selected="platform"
       :login="login"
       :login-busy="loginBusy"
+      :action-busy="loginActionBusy"
       @pick="onPickPlatform"
       @login="onLogin"
+      @save="onSaveLogin"
+      @logout="onLogout"
     />
 
     <TopbarTail
