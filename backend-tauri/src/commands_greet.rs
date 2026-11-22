@@ -26,7 +26,7 @@ type CmdResult<T> = Result<T, String>;
 #[derive(Debug, Deserialize)]
 pub struct GreetArgs {
     /// 已入库岗位的 id；为空则用 `title/company/jd` 临时造一个 Job
-    #[serde(default)]
+    #[serde(default, alias = "jobId")]
     pub job_id: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
@@ -40,7 +40,7 @@ pub struct GreetArgs {
     pub jd: Option<String>,
     /// 是否用大模型。默认 true——用户点「生成话术」就是想要模型写，
     /// 没配 key 时 `write_greeting` 会自动降级到规则话术并给出原因。
-    #[serde(default = "default_true")]
+    #[serde(default = "default_true", alias = "useLlm")]
     pub use_llm: bool,
 }
 
@@ -212,6 +212,23 @@ mod tests {
     #[test]
     fn split_skills_drops_blank_entries() {
         assert!(split_skills("  ,  、 \n ").is_empty());
+    }
+
+    /// 前端发驼峰（`jobId` / `useLlm`）：serde 对未知字段不报错，
+    /// 漏了 alias 会让「按库内岗位生成话术」静默退化成临时 JD（AGENTS.md 2.2）。
+    #[test]
+    fn greet_args_accept_camel_case() {
+        let a: GreetArgs =
+            serde_json::from_str(r#"{"jobId":"boss:1","useLlm":false}"#).expect("驼峰应能反序列化");
+        assert_eq!(a.job_id.as_deref(), Some("boss:1"));
+        assert!(!a.use_llm);
+        let snake: GreetArgs =
+            serde_json::from_str(r#"{"job_id":"boss:2","use_llm":false}"#).unwrap();
+        assert_eq!(snake.job_id.as_deref(), Some("boss:2"));
+        assert!(!snake.use_llm);
+        let d: GreetArgs = serde_json::from_str("{}").unwrap();
+        assert!(d.use_llm, "缺省应走大模型");
+        assert!(d.job_id.is_none());
     }
 
     /// 没配 `skills` 时要退回画像自带技能，否则话术会退化成「后端与全栈」这种通用词。

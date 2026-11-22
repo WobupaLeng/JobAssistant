@@ -466,7 +466,7 @@ pub struct RescoreArgs {
     #[serde(default)]
     pub filters: Option<String>,
     /// 是否往 `jd_decisions` 写一条审计日志，默认 true
-    #[serde(default = "default_true")]
+    #[serde(default = "default_true", alias = "logChanges")]
     pub log_changes: bool,
 }
 
@@ -921,12 +921,13 @@ mod tests {
     fn rescore_args_accept_both_camel_and_snake_case() {
         // serde 对未知字段不报错：漏了 alias 会让界面设的开关被静默丢弃
         let camel: RescoreArgs =
-            serde_json::from_str(r#"{"useLlm":true,"llmPrefilter":30,"afterJobId":"j9"}"#)
+            serde_json::from_str(r#"{"useLlm":true,"llmPrefilter":30,"afterJobId":"j9","logChanges":false}"#)
                 .expect("驼峰应能被反序列化");
         let o = camel.into_options();
         assert!(o.use_llm);
         assert_eq!(o.llm_prefilter, 30);
         assert_eq!(o.after_job_id.as_deref(), Some("j9"));
+        assert!(!o.log_changes, "logChanges:false 不得被静默丢弃成默认 true");
     }
 
     #[test]

@@ -19,6 +19,7 @@
 //! | 子模块 | 内容 |
 //! |---|---|
 //! | `launch` | `resolve_script_dir` / `ScrapeJobSpec` / `launch_session` / `ensure_session_locked` / `DEFAULT_PLATFORM` |
+//! | `filters` | `ScrapeFilters` / `filters_from_defaults` / `exclude_rules_from_defaults`（scrape_defaults → 筛选快照 + 排除规则，纯函数） |
 //! | `sink` | `make_sink` / `make_lookup`（`IngestPort` 实现与敏感库查询器） |
 //! | `restart` | `MAX_AUTO_RESTARTS` / `RestartAction` / `restart_decision` / `plan_restart` / `restart_session` / `FALLBACK_STOP_REASON` / `finalize_idle_progress` |
 //! | `tests` | 单元测试（原样搬移，断言零改动） |
@@ -26,12 +27,14 @@
 //! 对外路径 `core::scrape::*` 保持不变：下面把每个公开项都 re-export 到本模块根，
 //! `commands_scrape.rs` 等调用方一行 `use` 都不用改。
 
+mod filters;
 mod launch;
 mod restart;
 mod sink;
 #[cfg(test)]
 mod tests;
 
+pub use filters::{exclude_rules_from_defaults, filters_from_defaults, ScrapeFilters};
 pub use launch::{
     ensure_session_locked, launch_session, resolve_script_dir, ScrapeJobSpec, DEFAULT_PLATFORM,
 };

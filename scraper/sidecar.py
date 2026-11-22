@@ -192,6 +192,9 @@ def _run_scrape(payload: dict[str, Any]) -> None:
             scale=list(payload.get("scale") or []),
             stage=list(payload.get("stage") or []),
             industry=list(payload.get("industry") or []),
+            # 协议新增键（与 protocol.rs Command::ScrapeStart 逐字对齐）：
+            # 1901 全职 / 1902 兼职 / 1903 实习；缺省空串 = 不限。
+            job_type=payload.get("job_type") or "",
             max_pages=int(payload.get("max_pages") or 5),
             max_cards=int(payload.get("max_cards") or 100),
             daily_limit=int(payload.get("daily_limit") or 100),

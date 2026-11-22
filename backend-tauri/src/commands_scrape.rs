@@ -283,6 +283,13 @@ pub fn scrape_start(
     let store = store_handle(&store)?;
     let script_dir = resolve_script_dir(exe_dir())?;
 
+    // C12：筛选条件持久化在 scrape_defaults，前端不重发全部筛选——
+    // 开抓时后端自己读出来，快照进 spec（崩溃重启照原样重发）。
+    // 映射是领域规则，在 core::scrape::filters 里；这里只搬键值对。
+    let defaults = crate::core::domain::app_config::collect_scrape_defaults(
+        &store.config_pairs().map_err(store_err)?,
+    );
+
     let keywords: Vec<String> = args
         .keywords
         .unwrap_or_default()
@@ -319,6 +326,8 @@ pub fn scrape_start(
         keywords: keywords.clone(),
         max_jd: args.max_jd.unwrap_or(0),
         min_score,
+        filters: scrape::filters_from_defaults(&defaults),
+        rules: scrape::exclude_rules_from_defaults(&defaults),
     };
     let mut session = scrape::launch_session(&spec, store)?;
     let pid = session.pid();

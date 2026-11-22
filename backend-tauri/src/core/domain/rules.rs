@@ -74,6 +74,30 @@ impl ExcludeRules {
     pub fn require_double_weekend(&self) -> bool {
         self.weekend.as_deref() == Some("double")
     }
+
+    /// 用用户排除词构造名称否决规则（逗号/顿号/分号/斜杠/空白分隔）。
+    ///
+    /// 解析后为空则回退 [`Default`]（保留内置否决词）：空串更可能是
+    /// 「还没配置」而不是「明确要求不排除」，前端草稿的默认值本身就是
+    /// 一份非空词表。其余规则项保持默认，由调用方按需填充
+    /// （见 `core::scrape::filters::exclude_rules_from_defaults`）。
+    pub fn from_keywords(raw: &str) -> Self {
+        let words: Vec<String> = raw
+            .split(|c: char| {
+                matches!(c, ',' | '，' | '、' | ';' | '；' | '/' | '\n') || c.is_whitespace()
+            })
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if words.is_empty() {
+            Self::default()
+        } else {
+            Self {
+                name_words: words,
+                ..Self::default()
+            }
+        }
+    }
 }
 
 /// 待判定岗位的输入。字段名与 `reject()` 参数一一对应。

@@ -4,12 +4,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::core::domain::profile::DEFAULT_PROFILE;
+use crate::core::domain::rules::ExcludeRules;
 use crate::core::infra::SqliteStore;
 use crate::core::sidecar::ingest::IngestConfig;
 use crate::core::sidecar::process::SidecarConfig;
 use crate::core::sidecar::protocol::Command;
 use crate::core::sidecar::session::SidecarSession;
 
+use super::filters::ScrapeFilters;
 use super::sink::{make_lookup, make_sink};
 
 /// 默认平台标识（`scrape_start` / `login_start` / `session_open` 的缺省值）。
@@ -50,6 +52,11 @@ pub struct ScrapeJobSpec {
     /// `0` = 交给 sidecar 的默认上限
     pub max_jd: u32,
     pub min_score: u8,
+    /// 用户筛选条件快照（来自 `scrape_defaults`，见 [`super::filters`]）。
+    /// 崩溃重启时照原样重发，不做二次解释。
+    pub filters: ScrapeFilters,
+    /// 排除规则快照：否决判定留在 Rust core（`ingest`），绝不下放 sidecar。
+    pub rules: ExcludeRules,
 }
 
 impl ScrapeJobSpec {
@@ -60,6 +67,15 @@ impl ScrapeJobSpec {
             keywords: self.keywords.clone(),
             max_jd: self.max_jd,
             min_score: self.min_score,
+            city: self.filters.city.clone(),
+            salary: self.filters.salary.clone(),
+            experience: self.filters.experience.clone(),
+            degree: self.filters.degree.clone(),
+            scale: self.filters.scale.clone(),
+            stage: self.filters.stage.clone(),
+            industry: self.filters.industry.clone(),
+            job_type: self.filters.job_type.clone(),
+            max_pages: self.filters.max_pages,
         }
     }
 }
@@ -80,7 +96,8 @@ pub fn launch_session(
     };
     let icfg = IngestConfig {
         min_score: spec.min_score,
-        ..Default::default()
+        // 用户自定义排除词在此生效：不再恒用 ExcludeRules::default()
+        rules: spec.rules.clone(),
     };
     SidecarSession::start(
         scfg,
@@ -117,6 +134,8 @@ pub fn ensure_session_locked(
             keywords: Vec::new(),
             max_jd: 0,
             min_score: crate::core::scoring::SCORE_MIN_DEFAULT,
+            filters: ScrapeFilters::default(),
+            rules: ExcludeRules::default(),
         };
         let session = launch_session(&spec, store)?;
         eprintln!("[sidecar] 已启动 pid={}", session.pid());

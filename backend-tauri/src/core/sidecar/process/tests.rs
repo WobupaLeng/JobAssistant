@@ -25,6 +25,15 @@ use super::handle::SidecarError;
             keywords: vec!["java".into()],
             max_jd: 40,
             min_score: 70,
+            city: Some("101020100".into()),
+            salary: vec!["406".into()],
+            experience: Vec::new(),
+            degree: Vec::new(),
+            scale: Vec::new(),
+            stage: Vec::new(),
+            industry: Vec::new(),
+            job_type: None,
+            max_pages: Some(3),
         };
         let line = protocol_line("c1", &c).unwrap();
         let v: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -32,6 +41,9 @@ use super::handle::SidecarError;
         assert_eq!(v["cmd"], "scrape.start");
         assert_eq!(v["keywords"][0], "java");
         assert_eq!(v["min_score"], 70);
+        assert_eq!(v["city"], "101020100");
+        assert_eq!(v["salary"][0], "406");
+        assert_eq!(v["max_pages"], 3);
         assert!(v.get("params").is_none(), "参数必须平铺，Python 侧按平铺读取");
     }
 

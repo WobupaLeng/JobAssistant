@@ -75,6 +75,32 @@ pub enum Command {
         keywords: Vec<String>,
         max_jd: u32,
         min_score: u8,
+        /// Boss 城市编码（如 `101020100` 上海）。缺省 = sidecar 默认城市。
+        ///
+        /// 以下筛选键与 `scraper/sidecar.py::_run_scrape` 读取的 payload 键
+        /// **逐字对齐**（`scale`/`stage`，不是配置键 `company_scale`/`finance_stage`）。
+        /// 全部 `#[serde(default)]` + 空值不序列化：旧四字段载荷仍可反序列化，
+        /// 未设置筛选时线上形状与旧版完全一致。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        city: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        salary: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        experience: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        degree: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        scale: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        stage: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        industry: Vec<String>,
+        /// `1901` 全职 / `1902` 兼职 / `1903` 实习；缺省 = 不限。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        job_type: Option<String>,
+        /// 翻页次数；缺省 = sidecar 默认（5）。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_pages: Option<u32>,
     },
     #[serde(rename = "scrape.stop")]
     ScrapeStop,
@@ -325,12 +351,83 @@ mod tests {
             keywords: vec!["python".into()],
             max_jd: 40,
             min_score: 70,
+            city: Some("101020100".into()),
+            salary: vec!["406".into()],
+            experience: Vec::new(),
+            degree: Vec::new(),
+            scale: Vec::new(),
+            stage: Vec::new(),
+            industry: Vec::new(),
+            job_type: None,
+            max_pages: Some(3),
         };
         let s = serde_json::to_string(&c).unwrap();
         let back: Command = serde_json::from_str(&s).unwrap();
         match back {
-            Command::ScrapeStart { min_score, .. } => assert_eq!(min_score, 70),
+            Command::ScrapeStart { min_score, city, salary, max_pages, .. } => {
+                assert_eq!(min_score, 70);
+                assert_eq!(city.as_deref(), Some("101020100"));
+                assert_eq!(salary, vec!["406".to_string()]);
+                assert_eq!(max_pages, Some(3));
+            }
             _ => panic!("类型不匹配"),
+        }
+    }
+
+    /// 筛选键必须平铺、蛇形、与 sidecar `_run_scrape` 的 payload 键逐字一致。
+    /// 名字写错不会报错，只会让用户的城市/薪资筛选静默失效（AGENTS.md 2.2）。
+    #[test]
+    fn scrape_start_serializes_filters_flat_with_sidecar_key_names() {
+        let c = Command::ScrapeStart {
+            platform: "boss".into(),
+            keywords: vec!["Java".into()],
+            max_jd: 0,
+            min_score: 70,
+            city: Some("101280600".into()),
+            salary: vec!["406".into()],
+            experience: vec!["104".into()],
+            degree: vec!["203".into()],
+            scale: vec!["303".into()],
+            stage: vec!["803".into()],
+            industry: vec!["100020".into()],
+            job_type: Some("1901".into()),
+            max_pages: Some(3),
+        };
+        let v = serde_json::to_value(&c).unwrap();
+        assert_eq!(v["cmd"], "scrape.start");
+        assert_eq!(v["city"], "101280600");
+        assert_eq!(v["salary"][0], "406");
+        assert_eq!(v["experience"][0], "104");
+        assert_eq!(v["degree"][0], "203");
+        assert_eq!(v["scale"][0], "303");
+        assert_eq!(v["stage"][0], "803");
+        assert_eq!(v["industry"][0], "100020");
+        assert_eq!(v["job_type"], "1901");
+        assert_eq!(v["max_pages"], 3);
+        assert!(v.get("params").is_none(), "参数必须平铺");
+        assert!(v.get("company_scale").is_none(), "协议键是 scale 不是配置键");
+        assert!(v.get("finance_stage").is_none(), "协议键是 stage 不是配置键");
+    }
+
+    /// 旧四字段载荷必须仍能反序列化；筛选全空时序列化不得多出任何键。
+    #[test]
+    fn scrape_start_without_filters_keeps_legacy_shape() {
+        let back: Command = serde_json::from_str(
+            r#"{"cmd":"scrape.start","platform":"boss","keywords":["Java"],"max_jd":0,"min_score":70}"#,
+        )
+        .unwrap();
+        match &back {
+            Command::ScrapeStart { city, salary, max_pages, job_type, .. } => {
+                assert!(city.is_none());
+                assert!(salary.is_empty());
+                assert!(max_pages.is_none());
+                assert!(job_type.is_none());
+            }
+            _ => panic!("类型不匹配"),
+        }
+        let v = serde_json::to_value(&back).unwrap();
+        for key in ["city", "salary", "experience", "degree", "scale", "stage", "industry", "job_type", "max_pages"] {
+            assert!(v.get(key).is_none(), "空筛选不得序列化出 {key}");
         }
     }
 

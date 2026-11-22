@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::core::domain::job::Job;
+use crate::core::domain::rules::ExcludeRules;
 use crate::core::infra::SqliteStore;
 use crate::core::sidecar::protocol::Command;
 use crate::core::sidecar::session::{IngestPort, ScrapeProgress, STOPPED_BY_USER};
@@ -45,6 +46,8 @@ fn spec() -> ScrapeJobSpec {
         keywords: vec!["Java".into()],
         max_jd: 10,
         min_score: 70,
+        filters: ScrapeFilters::default(),
+        rules: ExcludeRules::default(),
     }
 }
 
@@ -112,14 +115,71 @@ fn plan_replays_recorded_spec_on_crash() {
             keywords,
             max_jd,
             min_score,
+            city,
+            salary,
+            experience,
+            degree,
+            scale,
+            stage,
+            industry,
+            job_type,
+            max_pages,
         } => {
             assert_eq!(platform, "boss");
             assert_eq!(keywords, vec!["Java".to_string()]);
             assert_eq!(max_jd, 10);
             assert_eq!(min_score, 70);
+            assert_eq!(city, None);
+            assert!(salary.is_empty());
+            assert!(experience.is_empty());
+            assert!(degree.is_empty());
+            assert!(scale.is_empty());
+            assert!(stage.is_empty());
+            assert!(industry.is_empty());
+            assert_eq!(job_type, None);
+            assert_eq!(max_pages, None);
         }
         other => panic!("实际 {other:?}"),
     }
+}
+
+/// 用户筛选快照必须随崩溃重启原样重发；排除规则只留 Rust 侧，不进协议。
+#[test]
+fn spec_replays_user_filters_after_crash_and_keeps_rules_in_core() {
+    let defaults = serde_json::json!({
+        "city": "101280600",
+        "salary": ["406"],
+        "company_scale": ["303"],
+        "finance_stage": ["803"],
+        "job_type": "1901",
+        "max_pages": 3,
+        "exclude_keywords": "外包,培训",
+        "hr_active": "3",
+        "work_weekend": "double",
+        "jd_degree": ["硕士"],
+        "min_years": "5"
+    });
+    let mut s = spec();
+    s.filters = filters_from_defaults(&defaults);
+    s.rules = exclude_rules_from_defaults(&defaults);
+
+    let plan = plan_restart(&exited("抓取进程异常退出，退出码 1"), 0, Some(1), "boom", Some(&s));
+    assert_eq!(plan, RestartPlan::Restart(s.clone()), "筛选快照必须照原样重放");
+
+    let v = serde_json::to_value(s.start_command()).unwrap();
+    assert_eq!(v["city"], "101280600");
+    assert_eq!(v["salary"][0], "406");
+    assert_eq!(v["scale"][0], "303");
+    assert_eq!(v["stage"][0], "803");
+    assert_eq!(v["job_type"], "1901");
+    assert_eq!(v["max_pages"], 3);
+    // 排除规则不下放 sidecar：协议里不得出现任何规则键
+    for key in ["exclude_keywords", "hr_active", "work_weekend", "jd_degree", "min_years", "rules"] {
+        assert!(v.get(key).is_none(), "规则键 {key} 不得进协议");
+    }
+    assert_eq!(s.rules.name_words, vec!["外包".to_string(), "培训".to_string()]);
+    assert_eq!(s.rules.exclude_hr_active_days, Some(3));
+    assert_eq!(s.rules.weekend.as_deref(), Some("double"));
 }
 
 #[test]
