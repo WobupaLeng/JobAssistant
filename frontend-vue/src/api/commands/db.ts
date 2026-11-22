@@ -76,21 +76,27 @@ export function migrateScores(): Promise<boolean> {
 /**
  * 对一份 JD 现场打分（不进库）。
  *
- * **例外**：载荷是 `ScoreArgs` 本体，没有 `args` 层。`ScoreArgs` 带
- * `#[serde(rename_all = "snake_case")]`，所以键名一律蛇形。
+ * 后端签名是 `fn score_job(llm: State<..>, args: ScoreArgs)`——`args` 是
+ * **struct 参数**，Tauri 2 的命令参数 key 恒取参数的 lowerCamelCase 名，
+ * 所以要包一层 `{ args: {...} }`。此前这里平铺发送，缺 `args` 键会被
+ * tauri-macros 直接拒掉（`command score_job missing required key args`）。
+ * 结构体内的键名沿用 `ScoreArgs` 的 `rename_all = "snake_case"`，故内层仍是蛇形。
  */
 export function scoreJob(args: ScoreArgs): Promise<ScoreReply> {
-  return invokeFlat<ScoreReply>('score_job', args);
+  return invokeArgs<ScoreReply>('score_job', args);
 }
 
 /**
  * 用**给定门槛**判断一份 JD 是否过线（不入库、不调用大模型）。
  *
- * 平铺：`ScoreArgs` 的字段 + `min_score`。门槛由调用方从 `get_scoring_spec`
- * 取来（AGENTS.md C10：前端不得硬编码门槛）。
+ * 后端签名 `fn passes_threshold(args: ScoreArgs, min_score: u8)`：两个都是
+ * **标量/结构体参数本身**（没有 `State` 参），Tauri 2 按参数名拆成平铺的
+ * lowerCamelCase 键——结构体字段仍平铺在这一层（`company`/`title`/…），
+ * 标量 `min_score` 的键是 `minScore`。**这里没有 `args` 包裹层。**
+ * 门槛由调用方从 `get_scoring_spec` 取来（AGENTS.md C10：前端不得硬编码门槛）。
  */
 export function passesThreshold(args: ScoreArgs, minScore: number): Promise<boolean> {
-  return invokeFlat<boolean>('passes_threshold', { ...args, min_score: minScore });
+  return invokeFlat<boolean>('passes_threshold', { ...args, minScore });
 }
 
 /**

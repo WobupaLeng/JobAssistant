@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BACKEND_KEYS,
+  BACKEND_READ_KEYS,
   DRAFT_KEY,
   SAVE_DEBOUNCE_MS,
   activeCount,
@@ -157,14 +158,16 @@ describe('applyBackend（后端权威优先，C12）', () => {
 
   it('合法字段被采纳，脏字段被挡下', () => {
     const d = createDraft();
-    // 后端 `scrape_defaults` 的键是驼峰（C3），这里必须写 maxPages / jobType / minYears。
+    // `get_app_config.scrape_defaults` 回显的是**蛇形**键（collect_scrape_defaults
+    // 去掉 `scrape_defaults.` 前缀后的相对键，见 app_config.rs:310 / KEY_SCRAPE_*）。
+    // 写入走驼峰，读取走蛇形——这里刻意用蛇形，否则就等于没测到回读。
     const n = applyBackend(d, {
       city: '101020100',
-      jobType: '',
-      maxPages: 7,
+      job_type: '',
+      max_pages: 7,
       degree: ['202', '999'],
-      hrActive: 'oops',
-      minYears: '5',
+      hr_active: 'oops',
+      min_years: '5',
     });
     expect(d.city).toBe('101020100');
     expect(d.job_type).toBe('');
@@ -178,8 +181,65 @@ describe('applyBackend（后端权威优先，C12）', () => {
 
   it('数字型字符串也能被接受（旧数据写成 "10"）', () => {
     const d = createDraft();
-    expect(applyBackend(d, { maxPages: '10' })).toBe(1);
+    expect(applyBackend(d, { max_pages: '10' })).toBe(1);
     expect(d.max_pages).toBe(10);
+  });
+
+  // 回归：9 个多词键曾经按驼峰名读（src[name]），而回显是蛇形 → 重启后全部回读不中。
+  // 单字键（city/salary/experience/degree/industry）两种写法相同，把缺陷掩盖了很久。
+  it('蛇形回显 → 9 个多词键全部命中（重启后筛选条件不丢）', () => {
+    const d = createDraft();
+    const n = applyBackend(d, {
+      company_scale: ['303'],
+      finance_stage: ['806'],
+      job_type: '1902',
+      max_pages: 8,
+      exclude_keywords: '外包,驻场',
+      hr_active: '3',
+      work_weekend: 'double',
+      jd_degree: ['本科'],
+      min_years: '4',
+    });
+    expect(d.scales).toEqual(['303']);
+    expect(d.stages).toEqual(['806']);
+    expect(d.job_type).toBe('1902');
+    expect(d.max_pages).toBe(8);
+    expect(d.exclude).toBe('外包,驻场');
+    expect(d.hr_active).toBe('3');
+    expect(d.weekend).toBe('double');
+    expect(d.veto_degrees).toEqual(['本科']);
+    expect(d.founded).toBe('4');
+    expect(n).toBe(9);
+  });
+
+  it('驼峰回显不再被当作有效输入（写入/读取两个方向不混用）', () => {
+    const d = createDraft();
+    // 驼峰是 set_scrape_defaults 的入参名，不是 get_app_config 的回显名。
+    expect(applyBackend(d, { companyScale: ['303'], maxPages: 8, minYears: '4' })).toBe(0);
+    expect(d.scales).toEqual([]);
+    expect(d.max_pages).toBe(3);
+    expect(d.founded).toBe('');
+  });
+
+  it('BACKEND_READ_KEYS 与 BACKEND_KEYS 一一对应，且多词键与后端 KEY_SCRAPE_* 逐字对齐', () => {
+    expect(Object.keys(BACKEND_READ_KEYS).sort()).toEqual(BACKEND_KEYS.map((k) => k.name).sort());
+    // 与 backend-tauri/src/core/domain/app_config.rs 的 14 条 `scrape_defaults.<key>` 常量逐字一致。
+    expect(BACKEND_READ_KEYS).toEqual({
+      city: 'city',
+      salary: 'salary',
+      experience: 'experience',
+      degree: 'degree',
+      companyScale: 'company_scale',
+      financeStage: 'finance_stage',
+      industry: 'industry',
+      jobType: 'job_type',
+      maxPages: 'max_pages',
+      excludeKeywords: 'exclude_keywords',
+      hrActive: 'hr_active',
+      workWeekend: 'work_weekend',
+      jdDegree: 'jd_degree',
+      minYears: 'min_years',
+    });
   });
 
   it('草稿里缺的字段保留默认值，不被清空', () => {

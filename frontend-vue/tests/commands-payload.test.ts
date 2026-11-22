@@ -216,19 +216,27 @@ describe('commands_db · 平铺的一类', () => {
     });
   });
 
-  it('passes_threshold：ScoreArgs 字段 + min_score，无 args 层', async () => {
+  // tauri 2 的命令参数 key 恒为参数的 lowerCamelCase 名：
+  //   fn passes_threshold(args: ScoreArgs, min_score: u8)
+  // → 两个参数都平铺在顶层；结构体字段照 `rename_all = "snake_case"` 原样平铺，
+  //   标量 `min_score` 的 key 是 `minScore`（不是 `min_score`）。
+  it('passes_threshold：ScoreArgs 字段平铺 + minScore（无 args 层，门槛键为驼峰）', async () => {
     await db.passesThreshold({ company: 'A', title: 'B', salary: 'C', experience: 'D', jd: 'E' }, 70);
     expect(last()).toEqual({
       cmd: 'passes_threshold',
-      payload: { company: 'A', title: 'B', salary: 'C', experience: 'D', jd: 'E', min_score: 70 },
+      payload: { company: 'A', title: 'B', salary: 'C', experience: 'D', jd: 'E', minScore: 70 },
     });
+    expect('args' in (last().payload as Record<string, unknown>)).toBe(false);
+    // 蛇形 min_score 会被 serde 当未知字段静默忽略 → 门槛变 0，必须钉死不能回退。
+    expect('min_score' in (last().payload as Record<string, unknown>)).toBe(false);
   });
 
-  it('score_job：整份 ScoreArgs 就是载荷（例外，没有 args 层）', async () => {
+  // fn score_job(llm: State<..>, args: ScoreArgs) —— `args` 是结构体参数，
+  // tauri 要求 top-level 存在 `args` 键，所以必须包一层（此前平铺实现是错的）。
+  it('score_job：必须包一层 { args: ScoreArgs }（结构体参数）', async () => {
     const args = { company: 'A', title: 'B', salary: 'C', experience: 'D', jd: 'E', use_llm: true };
     await db.scoreJob(args);
-    expect(last()).toEqual({ cmd: 'score_job', payload: args });
-    expect('args' in (last().payload as Record<string, unknown>)).toBe(false);
+    expect(last()).toEqual({ cmd: 'score_job', payload: { args } });
   });
 });
 

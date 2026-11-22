@@ -323,6 +323,34 @@ export const BACKEND_KEYS: readonly BackendKey[] = [
   { field: 'founded', name: 'minYears' },
 ];
 
+/**
+ * 写入用 `name`（驼峰，`set_scrape_defaults` 的 `ScrapeDefaultsArgs` 别名），
+ * 读取用的却是**蛇形**键——`get_app_config.scrape_defaults` 是
+ * `collect_scrape_defaults()` 按库里 `scrape_defaults.<snake>` 去掉前缀后拼的
+ * （`backend-tauri/src/core/domain/app_config.rs:310-330`，
+ * `KEY_SCRAPE_COMPANY_SCALE = "scrape_defaults.company_scale"` 等 14 条）。
+ *
+ * 两个方向**不是**同一个字符串：驼峰写、蛇形读。9 个多词键曾经因此重启后回读不中，
+ * 单字键（city/salary/experience/degree/industry）恰好两种写法相同，掩盖了这个缺陷。
+ * 这张表与 `BACKEND_KEYS` 一一对应，改一处必须改一处。
+ */
+export const BACKEND_READ_KEYS: Readonly<Record<keyof ScrapeDefaultsArgs, string>> = {
+  city: 'city',
+  salary: 'salary',
+  experience: 'experience',
+  degree: 'degree',
+  companyScale: 'company_scale',
+  financeStage: 'finance_stage',
+  industry: 'industry',
+  jobType: 'job_type',
+  maxPages: 'max_pages',
+  excludeKeywords: 'exclude_keywords',
+  hrActive: 'hr_active',
+  workWeekend: 'work_weekend',
+  jdDegree: 'jd_degree',
+  minYears: 'min_years',
+};
+
 /** 单个字段 → 后端 JSON 值。数组给数组，数字给数字，空 `founded` 给 `null`。 */
 function backendValue(d: FilterDraft, field: keyof FilterDraft): unknown {
   switch (field) {
@@ -419,7 +447,9 @@ export function applyBackend(d: FilterDraft, backend: unknown): number {
   const src = backend as Record<string, unknown>;
   let n = 0;
   for (const { field, name } of BACKEND_KEYS) {
-    const raw = src[name as string];
+    // 回显是蛇形键（见 BACKEND_READ_KEYS 的注释）；驼峰名只用于写入。
+    // 单字键两种写法相同，所以这里必须走映射表，不能想当然用 name。
+    const raw = src[BACKEND_READ_KEYS[name]];
     if (raw === undefined || raw === null) continue;
     switch (field) {
       case 'city': {
