@@ -30,15 +30,17 @@ import {
 } from '../api/commands/db';
 import { listLogs } from '../api/commands/logs';
 import { getScoringSpec } from '../api/commands/shell';
-import { scrapeProgress, scrapeStart, scrapeStop } from '../api/commands/scrape';
-import { getAppConfig, setScrapeDefaults } from '../api/commands/config';
+import { scrapeDrain, scrapeProgress, scrapeStart, scrapeStop } from '../api/commands/scrape';
+import { getAppConfig, setLimit, setScrapeDefaults } from '../api/commands/config';
 import { sensitiveList, sensitiveRemove } from '../api/commands/sensitive';
 import { loginStart, loginStatus } from '../api/commands/scrape';
+import { listExpectations } from '../api/commands/chat';
 import type {
   AppConfigReply,
   Job,
   JobTabCounts,
   LoginStatus,
+  Expectation,
   SensitivePage,
 } from '../api/types';
 import { setGreetDraft } from '../features/chat/greet-draft';
@@ -70,8 +72,12 @@ import {
   type TimerHandle,
 } from '../lib_ui/longpress';
 import {
+  MAX_JD_CEILING,
   buttonState,
   fromProgress,
+  toFeedLine,
+  trimFeed,
+  type FeedLine,
   scoreModeSegs,
   startDisabled,
   tokenText,
@@ -83,6 +89,8 @@ import {
   diffArgs,
   encode,
   applyBackend,
+  KW_REQUIRED_NOTE,
+  searchKeywords,
   type FilterDraft,
 } from '../lib_ui/scrape-filter-model';
 import { loadDraft, saveDraft } from '../features/scrape/filter';
@@ -149,6 +157,12 @@ const draft = ref<FilterDraft>(createDraft());
 const savedKnown = ref<Record<string, unknown>>({});
 const saving = ref(false);
 const filterNote = ref('');
+/** 搜索关键词：进 `scrape_start.keywords`，**不进** `set_scrape_defaults`。 */
+const keywords = ref<string[]>([]);
+const expects = shallowRef<readonly Expectation[]>([]);
+
+/** 抓取事件流（`scrape_drain` 增量），入库行首 `✔`（C9）。 */
+const feed = shallowRef<FeedLine[]>([]);
 
 const logLines = shallowRef<LogLine[]>([]);
 const logSince = ref<number>(0);
@@ -260,14 +274,18 @@ async function refreshProgress(): Promise<void> {
   } catch {
     /* 同上：进度是辅助信息 */
   }
+  // 运行中才拉事件流；停了立刻不再拉（Leptos 的 drain 定时器同口径）。
+  if (progress.value.running) await drainFeed();
 }
 
 async function loadLogs(): Promise<void> {
   try {
     const reply = await listLogs(logSince.value);
+    // C14 / 日志游标：`LogRing::since` 是闭区间，边界那一毫秒会重送一条，
+    // 按 `(ts, level, message)` 多重集去重（不是按 ts 丢）。
     const incoming = reply.items
       .map((r) => ({ ts: r.ts, seq: r.seq, level: parseLogLevel(r.level), message: r.message }))
-      .filter((r) => r.ts > logSince.value || logSince.value === 0);
+      .filter((r) => r.ts >= logSince.value);
     if (incoming.length > 0) {
       const seen = new Set(logLines.value.map((l) => `${l.ts}|${l.level}|${l.message}`));
       const merged = [...logLines.value, ...incoming.filter((l) => !seen.has(`${l.ts}|${l.level}|${l.message}`))];
@@ -276,6 +294,27 @@ async function loadLogs(): Promise<void> {
     }
   } catch {
     /* 日志失败不提示：它本身就是诊断通道 */
+  }
+}
+
+/**
+ * 事件流：`scrape_drain(50)` 取增量，转成行追加（`panel.rs` 的 drain 同口径）。
+ *
+ * 只在**运行中**拉：空闲时拉是白烧 CPU（Leptos 注释原话）。失败静默——
+ * 事件流是辅助信息，不该盖住真正的错误。
+ */
+async function drainFeed(): Promise<void> {
+  try {
+    const updates = await scrapeDrain(50);
+    if (updates.length === 0) return;
+    const lines: FeedLine[] = [];
+    for (const u of updates) {
+      const line = toFeedLine(u);
+      if (line) lines.push(line);
+    }
+    if (lines.length > 0) feed.value = trimFeed([...feed.value, ...lines]);
+  } catch {
+    /* 同上 */
   }
 }
 
@@ -342,7 +381,21 @@ function resetFilter(): void {
 }
 
 function onReadExpect(): void {
-  filterNote.value = '期望职位来自配置页，本轮未接线';
+  void loadExpects();
+}
+
+/**
+ * 读求职期望（`list_expectations`）。失败进错误队列但**不挡操作**：
+ * 期望只是关键词的推荐来源，读不到不影响手填。
+ */
+async function loadExpects(): Promise<void> {
+  try {
+    const list = await listExpectations();
+    expects.value = list;
+    filterNote.value = `已读取 ${list.length} 条求职期望`;
+  } catch (e) {
+    fail(`读取期望职位失败：${errText(e)}`, 'list_expectations', { label: '重试', run: () => void loadExpects() });
+  }
 }
 
 // ---------------------------------------------------------------- 写：列表操作
@@ -517,19 +570,25 @@ function onGridClick(e: MouseEvent): void {
 
 async function onStart(): Promise<void> {
   if (startDisabled(starting.value, progress.value.running)) return;
+  // 搜索词只认 `keywords`。为空就拦下来，交给后端回落默认词表会
+  // 让用户以为"我填的排除词生效了"——其实一个搜索词都没发出去。
+  const kws = searchKeywords(keywords.value);
+  if (kws.length === 0) {
+    filterNote.value = KW_REQUIRED_NOTE;
+    filterOpen.value = true;
+    return;
+  }
   starting.value = true;
   try {
     await scrapeStart({
       platform: platform.value,
-      keywords: draft.value.exclude
-        .split(/[\s,，、;；|]+/)
-        .map((s) => s.trim())
-        .filter((s) => s !== ''),
+      keywords: kws,
       maxJd: maxJd.value,
       minScore: minScore.value ?? 0,
     });
     pausedByUser.value = false;
     await refreshProgress();
+    filterNote.value = `已启动抓取 · 关键词 ${kws.join(' / ')} · 门槛 ${minScore.value ?? 0} 分`;
   } catch (e) {
     fail(`启动抓取失败：${errText(e)}`, 'scrape_start', { label: '重试', run: () => void onStart() });
   } finally {
@@ -544,6 +603,40 @@ async function onStop(): Promise<void> {
     await refreshProgress();
   } catch (e) {
     fail(`停止抓取失败：${errText(e)}`, 'scrape_stop');
+  }
+}
+
+/**
+ * 两处限额输入框的保存动作（Leptos `on_max_jd` / `on_min_score` 同口径）。
+ *
+ * 只走 `set_limit`——`min_score` 与 `max_jd` 都不在 `set_app_config` 的
+ * `WRITABLE_KEYS` 里，塞进 patch 会被**静默跳过**（C11）。
+ */
+async function onMaxJd(v: number): Promise<void> {
+  const next = Math.min(MAX_JD_CEILING, Math.max(1, Math.trunc(v)));
+  try {
+    const reply = await setLimit(next, null);
+    maxJd.value = reply.max_jd;
+    filterNote.value = `有效 JD 上限已设为 ${reply.max_jd} 条`;
+  } catch (e) {
+    fail(`保存 JD 上限失败：${errText(e)}`, 'set_limit', { label: '重试', run: () => void onMaxJd(next) });
+  }
+}
+
+async function onMinScore(v: number): Promise<void> {
+  const max = scoreMax.value;
+  if (max === null) {
+    // 满分还没下发时算不出合法区间，宁可不写也不猜一个上限。
+    fail('打分口径还没加载完，稍后再试', 'get_scoring_spec', { label: '重试', run: () => void loadSpecAndConfig() });
+    return;
+  }
+  const next = Math.min(max, Math.max(0, Math.trunc(v)));
+  try {
+    const reply = await setLimit(null, next);
+    minScore.value = reply.min_score;
+    filterNote.value = `门槛已设为 ${reply.min_score} 分`;
+  } catch (e) {
+    fail(`保存门槛失败：${errText(e)}`, 'set_limit', { label: '重试', run: () => void onMinScore(next) });
   }
 }
 
@@ -584,8 +677,13 @@ onMounted(() => {
   void refreshProgress();
   void loadLogs();
   void refreshLogin();
+  void loadExpects();
   // C16：setInterval 在 WebView 挂起时同样不触发；恢复后下一次立即生效。
-  tickTimer = setInterval(() => void refreshCounts(), TICK_MS);
+  // 同一个 tick 兼管进度与事件流：运行中才真的发命令（见 refreshProgress）。
+  tickTimer = setInterval(() => {
+    void refreshCounts();
+    void refreshProgress();
+  }, TICK_MS);
   const pollLogs = (): void => {
     logTimer = setTimeout(() => {
       void loadLogs();
@@ -661,16 +759,19 @@ watch(
       @toggle-filter="filterOpen = !filterOpen"
       @start="onStart"
       @stop="onStop"
-      @update:max-jd="maxJd = $event"
-      @update:min-score="minScore = $event"
+      @update:max-jd="onMaxJd"
+      @update:min-score="onMinScore"
     />
 
     <div v-if="filterOpen" class="card scrape-filter-bar" data-testid="scrape-filter-bar">
       <FilterPanel
         :draft="draft"
+        :keywords="keywords"
+        :expects="expects"
         :saving="saving"
         :note="filterNote"
         @update:draft="onDraft"
+        @update:keywords="keywords = $event"
         @apply="applyNow"
         @cancel="filterOpen = false"
         @reset="resetFilter"
@@ -698,12 +799,15 @@ watch(
         @check-all="selection = setChecked(selection.checked.length > 0 ? [] : jobs.map((j) => j.job_id))"
         @batch="batch"
         @greet="onGreet"
+        @empty-filter="filterOpen = true"
+        @empty-start="onStart"
       />
     </div>
 
     <LogCard
       :progress="progress"
       :lines="logLines"
+      :feed="feed"
       :score-max="scoreMax"
       :min-score="minScore"
       :live="true"

@@ -8,6 +8,9 @@
  *   `update:draft`——因为"上次保存的 known"在父级手里。
  * - **C15**：所有选项表来自 `lib_ui/options.ts`，组件内不写字面量表。
  * - 城市用现成的 `CityPicker`（全量 373 城市 + 拼音搜索）。
+ * - **搜索关键词与排除关键词是两块**：搜索词进 `scrape_start.keywords`
+ *   （页面持有，不进 `set_scrape_defaults` 的 14 键），排除词进草稿的
+ *   `exclude` → `excludeKeywords`。两者共用一个输入框就会把排除词当搜索词发。
  */
 import { computed, ref } from 'vue';
 import CityPicker from './CityPicker.vue';
@@ -28,10 +31,15 @@ import {
   WEEKEND_OPTIONS,
   isCustomSalary,
   salaryLabel,
+  tidSafe,
 } from '../lib_ui/options';
 import {
+  KW_DUPLICATE_NOTE,
+  KW_PLACEHOLDER,
   activeCount,
   customSalaryText,
+  mergeKeywordList,
+  normalizeKeywords,
   toggleCode,
   type FilterDraft,
 } from '../lib_ui/scrape-filter-model';
@@ -39,15 +47,20 @@ import {
 const props = withDefaults(
   defineProps<{
     draft: FilterDraft;
+    /** 搜索关键词（页面持有，直接进 `scrape_start.keywords`）。 */
+    keywords?: readonly string[];
+    /** 求职期望 chips（`list_expectations` 的结果，页面读取后传进来）。 */
+    expects?: readonly { name: string; city: string; salary: string }[];
     /** 摘要里显示的生效项数（父级算好传进来，避免两处各算一遍）。 */
     saving?: boolean;
     note?: string;
   }>(),
-  { saving: false, note: '' },
+  { keywords: () => [], expects: () => [], saving: false, note: '' },
 );
 
 const emit = defineEmits<{
   (e: 'update:draft', draft: FilterDraft): void;
+  (e: 'update:keywords', keywords: string[]): void;
   (e: 'apply'): void;
   (e: 'cancel'): void;
   (e: 'reset'): void;
@@ -55,6 +68,8 @@ const emit = defineEmits<{
 }>();
 
 const kwInput = ref('');
+/** 关键词那一排的本地提示（重复词），与保存态的 `note` 分开。 */
+const kwNote = ref('');
 
 const count = computed(() => activeCount(props.draft));
 const salaryText = computed(() => customSalaryText(props.draft.salary_low, props.draft.salary_high));
@@ -91,15 +106,40 @@ function toggleVeto(name: string): void {
   });
 }
 
-function addKeyword(): void {
-  const kw = kwInput.value.trim();
-  if (kw === '') return;
-  patch({ exclude: props.draft.exclude.trim() === '' ? kw : `${props.draft.exclude.trim()} ${kw}` });
+/** 关键词入口：写 `keywords`，**绝不写 `draft.exclude`**。 */
+function addKeywords(raw: string): void {
+  if (raw.trim() === '') return;
+  const { list, added } = mergeKeywordList(props.keywords, raw);
+  if (added.length === 0) {
+    kwNote.value = KW_DUPLICATE_NOTE;
+    return;
+  }
+  kwNote.value = '';
+  emit('update:keywords', list);
   kwInput.value = '';
 }
 
+function addKeyword(): void {
+  addKeywords(kwInput.value);
+}
+
 function addRecommend(kw: string): void {
-  patch({ exclude: props.draft.exclude.trim() === '' ? kw : `${props.draft.exclude.trim()} ${kw}` });
+  addKeywords(kw);
+}
+
+function removeKeyword(kw: string): void {
+  kwNote.value = '';
+  emit(
+    'update:keywords',
+    props.keywords.filter((x) => x !== kw),
+  );
+}
+
+/** 期望职位 chip：并入搜索关键词（去重，重复不报错——它只是推荐入口）。 */
+function addExpect(name: string): void {
+  const { list } = mergeKeywordList(props.keywords, name);
+  kwNote.value = '';
+  emit('update:keywords', normalizeKeywords(list));
 }
 
 function addSalaryRange(): void {
@@ -141,6 +181,90 @@ function salaryCodeLabel(code: string): string {
     </div>
 
     <div class="f-body">
+      <!-- 搜索关键词（进 scrape_start.keywords，不进 set_scrape_defaults） -->
+      <div class="f-group f-group-kw">
+        <span class="f-glabel">关键词（可多个，逐个搜索）</span>
+        <span class="f-glabel-sub">{{ kwNote || '回车添加；可空格或逗号一次填多个' }}</span>
+        <div class="f-gbody">
+          <div class="f-chips" data-testid="filter-pos-chips">
+            <span
+              v-for="kw in keywords"
+              :key="kw"
+              class="f-chip is-on"
+              data-testid="scrape-filter-kw-chip"
+              :title="kw"
+            >
+              {{ kw }}
+              <button
+                class="f-chip-x"
+                type="button"
+                :data-testid="`scrape-filter-kw-del-${tidSafe(kw)}`"
+                :aria-label="`删除关键词 ${kw}`"
+                @click="removeKeyword(kw)"
+              >
+                ×
+              </button>
+            </span>
+            <span v-if="keywords.length === 0" class="f-emptychip" data-testid="filter-kw-empty">
+              还没有关键词，回车添加或点下面的推荐
+            </span>
+          </div>
+          <div class="f-line">
+            <input
+              v-model="kwInput"
+              class="input f-kw-input"
+              type="text"
+              :placeholder="KW_PLACEHOLDER"
+              aria-label="添加搜索关键词"
+              data-testid="scrape-keywords"
+              data-alias="scrape-filter-kw-input"
+              @keydown.enter.prevent="addKeyword"
+            />
+            <button class="btn btn-sm btn-ghost" type="button" data-testid="scrape-filter-kw-add-btn" @click="addKeyword">
+              添加
+            </button>
+            <button
+              class="btn btn-sm btn-ghost"
+              type="button"
+              data-testid="scrape-filter-expect-btn"
+              @click="emit('read-expect')"
+            >
+              读取期望职位
+            </button>
+          </div>
+          <div v-if="expects.length > 0" class="f-chips" data-testid="scrape-filter-expect-list">
+            <button
+              v-for="(e, i) in expects"
+              :key="`${e.name}-${i}`"
+              class="f-chip"
+              type="button"
+              :title="`${e.city} · ${e.salary}`"
+              :data-testid="`scrape-filter-expect-${i}`"
+              @click="addExpect(e.name)"
+            >
+              {{ e.name }}
+            </button>
+          </div>
+          <div class="f-line" data-testid="filter-suggest">
+            <span class="spacer"></span>
+            <span class="dim filter-mini">推荐</span>
+          </div>
+          <div class="f-chips">
+            <button
+              v-for="(kw, i) in RECOMMEND_KEYWORDS"
+              :key="kw"
+              class="f-chip"
+              type="button"
+              :data-kw="kw"
+              :data-testid="`scrape-filter-recommend-${i}`"
+              @click="addRecommend(kw)"
+            >
+              {{ kw }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- 排除关键词 -->
       <div class="f-group">
         <span class="f-glabel">排除关键词</span>
@@ -154,33 +278,6 @@ function salaryCodeLabel(code: string): string {
             aria-label="排除关键词"
             @input="patch({ exclude: ($event.target as HTMLTextAreaElement).value })"
           ></textarea>
-          <span class="f-hint">推荐：</span>
-          <div class="f-chips filter-suggest">
-            <button
-              v-for="(kw, i) in RECOMMEND_KEYWORDS"
-              :key="kw"
-              class="f-chip"
-              type="button"
-              :data-testid="`filter-rec-${i}`"
-              @click="addRecommend(kw)"
-            >
-              {{ kw }}
-            </button>
-          </div>
-          <div class="f-line">
-            <input
-              v-model="kwInput"
-              class="input"
-              type="text"
-              placeholder="补充一个关键词后回车"
-              data-testid="filter-pos-input"
-              aria-label="补充排除关键词"
-              @keydown.enter.prevent="addKeyword"
-            />
-            <button class="btn btn-sm btn-ghost" type="button" data-testid="filter-read-expect-btn" @click="emit('read-expect')">
-              读取期望
-            </button>
-          </div>
         </div>
       </div>
 
@@ -228,7 +325,7 @@ function salaryCodeLabel(code: string): string {
         <span class="f-glabel">薪资</span>
         <span class="f-glabel-sub">多选，命中任一档即可</span>
         <div class="f-gbody">
-          <span class="f-count" data-testid="filter-salary-count">{{ draft.salaries.length }} 档</span>
+          <span class="f-count" data-testid="filter-salary-count">已选 {{ draft.salaries.length }}</span>
           <div class="f-chips" data-testid="filter-group-salary">
             <button
               v-for="([code, name], i) in SALARY_OPTIONS"

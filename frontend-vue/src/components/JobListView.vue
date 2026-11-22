@@ -55,6 +55,9 @@ const emit = defineEmits<{
   (e: 'batch', op: 'reject' | 'allow'): void;
   (e: 'greet', jobId: string): void;
   (e: 'open', jobId: string): void;
+  /** 空态里的两个入口：展开筛选 / 直接开始抓取（原型 `job-empty-*-btn`）。 */
+  (e: 'empty-filter'): void;
+  (e: 'empty-start'): void;
 }>();
 
 const visible = computed(() => visibleJobs(props.jobs, props.tab, props.showAll));
@@ -99,11 +102,11 @@ function onSort(field: SortField): void {
           type="button"
           role="tab"
           :aria-selected="!showAll && t.key === tab"
-          :data-testid="`job-tab-${t.slug}`"
+          :data-testid="`job-tab-${t.slug}-tab`"
           @click="onTab(t.key)"
         >
           {{ t.label }}
-          <span class="pill-count" :data-testid="`job-tab-count-${t.slug}`">{{ tabCount(counts, t.key) }}</span>
+          <span class="pill-count" :data-testid="`job-tab-${t.slug}-count`">{{ tabCount(counts, t.key) }}</span>
         </button>
         <button
           class="pill"
@@ -138,12 +141,12 @@ function onSort(field: SortField): void {
           @click="onSort(s.key)"
         >
           {{ s.label }}
-          <span v-if="s.key === sortField" class="sort-arrow">{{ sortArrow(sortDescending) }}</span>
+          <span v-if="s.key === sortField" class="sort-arrow" data-testid="job-sort-arrow">{{ sortArrow(sortDescending) }}</span>
         </button>
       </div>
     </div>
 
-    <div class="job-batch">
+    <div class="job-batch" data-testid="job-batch-bar">
       <label class="batch-check">
         <input
           type="checkbox"
@@ -186,8 +189,16 @@ function onSort(field: SortField): void {
       </div>
       <div v-else-if="visible.length === 0" class="job-state" data-testid="job-state-empty">
         <span class="state-glyph">∅</span>
-        <span class="state-title">这个页签下还没有岗位</span>
-        <span class="state-sub">先在上面展开筛选面板，填关键词后开始抓取。</span>
+        <span class="state-title" data-testid="job-empty-title">这个页签下还没有岗位</span>
+        <span class="state-sub" data-testid="job-empty-sub">先在上方展开筛选条件并点击开始抓取</span>
+        <span class="state-actions">
+          <button class="btn btn-sm" type="button" data-testid="job-empty-filter-btn" @click="emit('empty-filter')">
+            展开筛选条件
+          </button>
+          <button class="btn btn-sm btn-primary" type="button" data-testid="job-empty-start-btn" @click="emit('empty-start')">
+            开始抓取
+          </button>
+        </span>
       </div>
       <template v-else>
         <JobCard

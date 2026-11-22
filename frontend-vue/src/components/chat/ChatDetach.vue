@@ -36,7 +36,7 @@ const emit = defineEmits<{ (e: 'close'): void }>();
     :aria-hidden="props.open ? 'false' : 'true'"
     :hidden="!props.open"
   >
-    <div class="chat-detach-head">
+      <div class="chat-detach-head" data-testid="chat-detach-head">
       <span class="card-title" data-testid="chat-detach-title">
         {{ CHAT_DETACH_TITLE }}
         <span class="chip" data-testid="chat-detach-count">{{ props.count }}</span>

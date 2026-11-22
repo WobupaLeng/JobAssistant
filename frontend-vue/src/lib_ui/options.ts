@@ -1,15 +1,16 @@
 /**
  * 抓取筛选的选项常量。
  *
- * **唯一真源是 `docs/ui/UI-SPEC-web-align.md` 第 3 节**（逐字摘录自旧版
- * `web/src/api.ts`）。这里一个值都不许自己编、不许增删、不许改顺序——
+ * **唯一真源是冻结原型 `prototypes/ui-v1/index.html`**（UI_READY 视觉与交互
+ * 口径），以及 Leptos 版逐字搬过来的 `features/scrape/options.rs`
+ * （Leptos 版已退役，见 git 历史，提交 53d05cb 之前）。
+ * 这里一个值都不许自己编、不许增删、不许改顺序——
  * 这些 code 是 Boss 直聘的城市 / 经验 / 学历 / 规模 / 阶段 / 行业编码，
  * 写错只会表现为「筛不出岗位」，不会报错。
  *
- * 位置说明：Leptos 版放在 `features/scrape/options.rs`；Vue 版下沉到
- * `lib_ui/`，因为 `features/jobs/cards.rs:17 → scrape/options::platform_name`
- * 那条**同层横向依赖**在 AGENTS.md §2 里被点名要消除，而 `lib_ui` 是
- * 允许被任何层引用（不含反向引用）的最底层。
+ * 位置说明：Vue 版下沉到 `lib_ui/`，因为 `features/jobs/cards.rs:17 →
+ * scrape/options::platform_name` 那条**同层横向依赖**在 AGENTS.md §2.3 里被
+ * 点名要消除，而 `lib_ui` 是允许被任何层引用（不含反向引用）的最底层。
  */
 
 /** 选项：`[编码, 显示名]`。`code` 一律是字符串——有的是数字编码，有的形如 `sal:8-12`。 */
@@ -160,7 +161,9 @@ export interface PlatformOpt {
 export const PLATFORMS: readonly PlatformOpt[] = [
   { id: 'boss', name: 'Boss直聘', ready: true },
   { id: 'zhilian', name: '智联招聘', ready: false },
-  { id: '51job', name: '前程无忧', ready: false },
+  // 展示名逐字照抄原型（`prototypes/ui-v1/index.html:1379` 写的就是 51job 这个
+  // 品牌名，不是它的中文全称）：写成中文全称会让按名字定位元素的断言落空。
+  { id: '51job', name: '51job', ready: false },
 ];
 
 /** 平台 id → 显示名。找不到时原样回显 id（旧版 `platformName`）。 */

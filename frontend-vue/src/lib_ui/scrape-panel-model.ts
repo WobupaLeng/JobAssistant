@@ -6,7 +6,7 @@
  * 再点「继续抓取」会重新 `scrape_start`。所以本文件只负责**显示成什么**
  * 与**点了发哪条命令**，不负责真正的抓取编排。
  */
-import type { ScrapeProgress } from '../api/types';
+import type { ScrapeProgress, ScrapeUpdate } from '../api/types';
 
 export type ScrapeButtonState = 'idle' | 'running' | 'paused';
 
@@ -170,4 +170,47 @@ export function scoreModeSegs(selected: 'rule' | 'llm'): ScoreModeSeg[] {
 export function tokenText(n: number): string {
   const v = Math.max(0, Math.trunc(n));
   return v.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+// ---------------------------------------------------------------- 事件流
+
+/** 事件流里一行。`tag` 是行首标记，`tone` 决定颜色（`panel.rs` 的 FeedLine）。 */
+export interface FeedLine {
+  readonly tag: string;
+  readonly msg: string;
+  readonly tone: '' | 'ok' | 'skip' | 'warn' | 'bad';
+}
+
+/**
+ * 入库标记。**这不是装饰**（C9）：E2E 用 `feed.count("✔")` 统计入库条数，
+ * 改字符等于把那条断言弄瞎。
+ */
+export const FEED_ACCEPTED_TAG = '✔';
+
+/** 被规则跳过的标记（`panel.rs` to_feed_line 的另一半）。 */
+export const FEED_SKIPPED_TAG = '跳过';
+
+/** 事件流最多留多少行（超出从头部丢，`FEED_MAX`）。 */
+export const FEED_MAX = 300;
+
+/**
+ * `ScrapeUpdate` → 事件流一行（`panel.rs` 的 `to_feed_line`）。
+ *
+ * 只把「岗位」这一型转成行：日志/登录/畸形/退出/重启各有自己的去处
+ * （日志走 `list_logs`，其余进提示），混进事件流会淹掉进度信息。
+ */
+export function toFeedLine(u: ScrapeUpdate): FeedLine | null {
+  if (u.kind !== 'job') return null;
+  const summary = String(u.summary ?? '').trim();
+  if (u.accepted) {
+    const score = typeof u.score === 'number' ? `${u.score} 分 · ` : '';
+    return { tag: FEED_ACCEPTED_TAG, msg: `${score}${summary}`, tone: 'ok' };
+  }
+  return { tag: FEED_SKIPPED_TAG, msg: summary, tone: 'skip' };
+}
+
+/** 事件流只留最后 `FEED_MAX` 行。 */
+export function trimFeed(lines: readonly FeedLine[], max = FEED_MAX): FeedLine[] {
+  if (lines.length <= max) return lines.slice();
+  return lines.slice(lines.length - max);
 }

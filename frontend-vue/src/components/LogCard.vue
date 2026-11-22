@@ -13,6 +13,7 @@ import {
   lastTitleText,
   progressStats,
   srSummary,
+  type FeedLine,
   type ScrapeProgressLike,
 } from '../lib_ui/scrape-panel-model';
 import { fmtLogTime, type LogLevel } from '../lib_ui/logfmt';
@@ -32,8 +33,10 @@ const props = withDefaults(
     scoreMax?: number | null;
     minScore?: number | null;
     live?: boolean;
+    /** 抓取事件流（`scrape_drain` 增量），入库行首 `✔`。 */
+    feed?: readonly FeedLine[];
   }>(),
-  { scoreMax: null, minScore: null, live: true },
+  { scoreMax: null, minScore: null, live: true, feed: () => [] },
 );
 
 const emit = defineEmits<{
@@ -74,10 +77,18 @@ const spec = computed(() =>
         <li v-if="lines.length === 0" class="empty" data-testid="log-empty">
           尚无事件。点击「开始抓取」后这里会滚动显示进度。
         </li>
-        <li v-for="l in lines" :key="`${l.ts}-${l.seq}`" class="log-row" :data-level="l.level">
+        <li v-for="l in lines" :key="`${l.ts}-${l.seq}`" class="log-row" data-testid="log-row" :data-level="l.level">
           <span class="log-time">{{ fmtLogTime(l.ts) }}</span>
           <span class="log-level" :class="`is-${l.level}`">{{ l.level.toUpperCase() }}</span>
           <span class="log-msg">{{ l.message }}</span>
+        </li>
+      </ol>
+      <!-- 事件流（`scrape_drain` 的岗位行）。入库行首标记 `✔` 逐字（C9），
+           E2E 靠 feed.count("✔") 数入库条数。 -->
+      <ol class="job-feed" data-testid="scrape-feed">
+        <li v-for="(line, i) in feed" :key="i" class="feed-line" :class="`is-${line.tone}`">
+          <span class="feed-tag">{{ line.tag }}</span>
+          <span class="feed-msg">{{ line.msg }}</span>
         </li>
       </ol>
     </div>

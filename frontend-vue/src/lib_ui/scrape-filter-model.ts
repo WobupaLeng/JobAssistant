@@ -14,8 +14,16 @@
  *    防抖放在调用方（`debounce`），这里只提供纯函数。
  *
  * 选项表全部来自 `lib_ui/options.ts`（C15：常量表只有一份）。
+ *
+ * **搜索关键词不在草稿里**（`exclude` 是「排除关键词」，两回事）：
+ * 搜索词直接进 `scrape_start` 的 `keywords`，不进 `ScrapeDefaultsArgs` 的
+ * 14 个键——Leptos 版把 `keywords` 放在页面层持有，`BACKEND_KEYS` 表里
+ * 只有 `排除关键词 → excludeKeywords`。把两者混成一条，界面会把「排除词」
+ * 当搜索词发出去，搜不到任何东西且不报错。本文件的 `searchKeywords()`
+ * 是这条边界的唯一出口。
  */
 import type { ScrapeDefaultsArgs } from '../api/types';
+import { splitList } from './text';
 import {
   CITIES,
   CITY_DEFAULT,
@@ -564,3 +572,49 @@ export function customSalaryText(low: string, high: string): string {
 
 /** 薪资上限哨兵值：与 SALARY_OPEN_HIGH 同源，别另写 9999。 */
 export const SALARY_OPEN = SALARY_OPEN_HIGH;
+
+// ---------------------------------------------------------------- 搜索关键词
+
+/** 关键词输入框的提示（`filter.rs` 的 KeywordBox 逐字）。 */
+export const KW_PLACEHOLDER = '输入后回车添加（可空格/逗号分隔多个）';
+
+/** 关键词重复时的提示（`filter.rs` commit() 的 fail 文案）。 */
+export const KW_DUPLICATE_NOTE = '这个关键词已经在列表里了';
+
+/** 关键词为空时的提示（`panel.rs` on_start 的 fail 文案）。 */
+export const KW_REQUIRED_NOTE = '请先填关键词，多个关键词用逗号或顿号分隔';
+
+/**
+ * 把一段自由文本并进关键词列表：按分隔符切开、trim、去空、**保留原有顺序**去重。
+ *
+ * 与 `splitList` 的唯一差别是「在已有列表基础上追加」，并明确报告
+ * 「追加了几个」——界面靠 `added.length === 0` 判断要不要提示重复。
+ */
+export function mergeKeywordList(
+  current: readonly string[],
+  incoming: string,
+): { list: string[]; added: string[] } {
+  const list = current.slice();
+  const added: string[] = [];
+  for (const kw of splitList(incoming)) {
+    if (list.includes(kw)) continue;
+    list.push(kw);
+    added.push(kw);
+  }
+  return { list, added };
+}
+
+/** 关键词整理：去空、去重、保留顺序。界面上的任何入口都先过这一层。 */
+export function normalizeKeywords(raw: readonly string[]): string[] {
+  return mergeKeywordList([], raw.join(',')).list;
+}
+
+/**
+ * `scrape_start` 的 `keywords` 载荷：**只来自搜索关键词列表**。
+ *
+ * 严禁在这里读 `draft.exclude`——排除词是「命中即否决」的过滤条件，
+ * 当搜索词发出去等于搜一堆本来要排除的东西。
+ */
+export function searchKeywords(keywords: readonly string[]): string[] {
+  return normalizeKeywords(keywords);
+}

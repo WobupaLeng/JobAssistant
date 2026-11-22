@@ -24,8 +24,8 @@ frontend-vue/
       invoke.ts            invoke 封装（prune：删 undefined、留 null）
       commands/            按领域拆的命令封装，命令名逐字对抄后端
     lib_ui/                纯函数与 composables（无 DOM 依赖优先，可单测）
-    components/            AppShell / Card / Stat / Chip / StatusDot / SkeletonRows / Banner / ErrorBar / Field / Collapsible / EmptyState
-    features/              auto / chat / config / jobs / logs / score / scrape / sensitive
+    components/            纯展示组件（21 个 .vue）：根级 AppShell / CityPicker / AppErrorBar / FilterPanel / JobCard / JobListView / JobDetailDrawer / LogCard / PlatformCard / ScrapeBar / SensitivePanel / TopbarTail；子目录 chat/（AutoApplyBar / ChatCompose / ChatDetach / ChatThread / ExpectRow / FriendList）、config/（ConfigSection）、logs/（DecisionRow / RunLine）
+    features/              只留编排（5 文件）：auto/queue.ts · chat/greet-draft.ts · config/model.ts · logs/model.ts · scrape/filter.ts。视图模型/纯状态机已下沉 lib_ui/（见 §2.5 推论）；jobs/score/sensitive 无独立 feature 目录
     pages/                 dashboard / chat / config / logs
   styles/                  14 份 CSS（11 份契约序 + vue-dashboard/vue-chat/vue-pages 追加在末尾），顺序见 C4
   .agents/skills/          15 个技能，来源见 SOURCES.md

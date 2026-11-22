@@ -59,7 +59,7 @@ const specText = computed(() =>
       class="btn btn-sm btn-ghost"
       type="button"
       :aria-pressed="sensitiveOpen"
-      data-testid="sensitive-open-btn"
+      data-testid="sensitive-open"
       @click="emit('toggle-sensitive')"
     >
       敏感库

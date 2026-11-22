@@ -48,13 +48,16 @@ function unreadPrefix(prefix: 'chat-rail' | 'chat-detach-rail'): string {
 
 const listEl = ref<HTMLElement | null>(null);
 
+/**
+ * 根节点的 `chat-rail` 由页面里的 `aside.chat-rail` 承担（全站恰好一处），
+ * 本组件不再重复挂同一个 testid——重复会让 `[data-testid="chat-rail"]`
+ * 一次匹配到两个元素，选择器类断言（E2E / QA）随之失效。
+ */
 const ids = computed(() => ({
-  root: props.prefix,
   count: `${props.prefix}-count`,
   refreshBtn: `${props.prefix}-refresh-btn`,
   searchInput: `${props.prefix}-search-input`,
   bodySlot: `${props.prefix}-body-slot`,
-  body: `${props.prefix}-body`,
   list: `${props.prefix}-list`,
   empty: `${props.prefix}-empty`,
   error: `${props.prefix}-error`,
@@ -77,7 +80,7 @@ defineExpose({ listEl });
 </script>
 
 <template>
-  <div class="rail-panel" :data-testid="ids.root">
+  <div class="rail-panel" :data-prefix="props.prefix">
     <div class="rail-head">
       <span class="rail-title">{{ props.title }}</span>
       <span class="chip" :data-testid="ids.count">{{ props.friends.length }}</span>
