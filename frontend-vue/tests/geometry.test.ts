@@ -168,17 +168,52 @@ describe('三窗固定高 / 敏感库 720 / A54 方块', () => {
     );
   });
 
-  it('A54：打招呼方块 min-width = --fs-sm × 4.6，高 = 两行正文 + 12px', () => {
+  it('A53：打招呼方块 min-width = --fs-sm × 4.6，高 = 两行正文 + 12px', () => {
     const css = stripComments(read('styles/vue-dashboard.css'));
     expect(css).toContain('min-width: calc(var(--fs-sm) * 4.6)');
     expect(css).toContain('height: calc(var(--fs-sm) * 1.55 * 2 + 12px)');
     expect(css).toContain('aspect-ratio: 1 / 1');
   });
 
+  // A54（states.md:809）：≤1599 展开态 `.job-card { min-width: calc(320px * var(--ui-scale)) }`。
+  // 曾经是「占位待裁决」的反向守卫，用户裁决「补齐实现·规格不动」后已反转为正向断言。
+  it('A54：≤1599 展开态 .job-card 有 320×scale 下限，且网格不靠 overflow-x 掩盖', () => {
+    const css = stripComments(read('styles/vue-dashboard.css'));
+    expect(css).toContain('min-width: calc(320px * var(--ui-scale))');
+    // 选择器必须挂在展开态、且落在 ≤1599 的媒体查询里（不是全局撒一条）。
+    const opened = css.indexOf('.app-shell.is-chat-open .job-card');
+    expect(opened).toBeGreaterThan(-1);
+    const mediaBefore = css.lastIndexOf('@media (max-width: 1599px)', opened);
+    expect(mediaBefore).toBeGreaterThan(-1);
+
+    // `.job-grid` 与展开态 `.job-grid` 都不得用 overflow-x: hidden 掩盖溢出。
+    const gridBlocks = [
+      ...css.matchAll(/\.app-shell\.is-chat-open \.job-grid\s*\{([^}]*)\}/g),
+      ...css.matchAll(/(?:^|\n)\.job-grid\s*\{([^}]*)\}/g),
+    ].map((m) => m[1]);
+    expect(gridBlocks.length).toBeGreaterThan(0);
+    for (const block of gridBlocks) expect(block).not.toContain('overflow-x: hidden');
+
+    // 打印并断言推断表：三档下「1 列 / 2 列」可用宽度都 ≥ 320px，下限只是兜底。
+    const table: Array<{ w: number; mode: string; cols: number; card: number }> = [];
+    for (const w of [1200, 1440, 1600]) {
+      const detach = Math.round(Math.min(Math.max(w * 0.5, 600), w * 0.8));
+      const main = w - detach; // 展开态右栏让位，主列 = 窗宽 − 对话框
+      const cols = w < 1600 ? 1 : 2;
+      const card = Math.floor((main - 10 * (cols - 1) - 28) / cols); // 10px gap + 14px×2 内边距
+      table.push({ w, mode: `${detach} 对话框 / ${main} 主列`, cols, card });
+      expect(card).toBeGreaterThanOrEqual(320);
+    }
+    // 顺手把推断值钉住（若将来断点/内边距变化会立刻报警）。
+    expect(table.map((r) => r.cols)).toEqual([1, 1, 2]);
+    expect(table.every((r) => r.card >= 320)).toBe(true);
+  });
+
   it('右栏宽兜底与对话框兜底都在样式里，且右栏乘 scale', () => {
     const css = stripComments(read('styles/vue-chat.css'));
     expect(css).toContain('--rail-w: calc(300px * var(--ui-scale))');
-    expect(css).toContain('--detach-w: 720px');
+    // 兜底与原型 :root 一致为 0px（规格 A36）：聊天默认收起，expand 时由 canvas.ts 写行内值。
+    expect(css).toContain('--detach-w: 0px');
   });
 });
 
@@ -186,7 +221,7 @@ describe('产物 CSS（dist/）包含几何契约', () => {
   const assets = join(FRONTEND, 'dist', 'assets');
   const built = existsSync(assets);
 
-  it.skipIf(!built)('dist CSS 含 --ui-scale、5 档 --fs-*、敏感库 720 与 A54 min-width', () => {
+  it.skipIf(!built)('dist CSS 含 --ui-scale、5 档 --fs-*、敏感库 720 与 A53 方块尺寸', () => {
     const files = readFileSync(join(FRONTEND, 'dist', 'index.html'), 'utf8').match(/assets\/[^"]+\.css/g) ?? [];
     expect(files.length).toBeGreaterThan(0);
     const css = files.map((f) => readFileSync(join(FRONTEND, 'dist', f), 'utf8')).join('\n');

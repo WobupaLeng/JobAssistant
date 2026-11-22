@@ -382,9 +382,10 @@ function salaryCodeLabel(code: string): string {
       <!-- 工作经验 -->
       <div class="f-group">
         <span class="f-glabel">工作经验</span>
+              <span class="f-glabel-sub" data-testid="filter-exp-count">{{ draft.experiences.length }}</span>
         <span class="f-glabel-sub">多选</span>
         <div class="f-gbody">
-          <div class="f-chips">
+          <div class="f-chips" data-testid="filter-group-exp">
             <button
               v-for="([code, name], i) in EXPERIENCE_OPTIONS"
               :key="code"
@@ -409,7 +410,7 @@ function salaryCodeLabel(code: string): string {
         <span class="f-glabel">学历</span>
         <span class="f-glabel-sub">多选</span>
         <div class="f-gbody">
-          <div class="f-chips">
+          <div class="f-chips" data-testid="filter-group-edu">
             <button
               v-for="([code, name], i) in DEGREE_OPTIONS"
               :key="code"
@@ -429,9 +430,10 @@ function salaryCodeLabel(code: string): string {
       <!-- 公司规模 -->
       <div class="f-group">
         <span class="f-glabel">公司规模</span>
+              <span class="f-glabel-sub" data-testid="filter-scale-count">{{ draft.scales.length }}</span>
         <span class="f-glabel-sub">多选</span>
         <div class="f-gbody">
-          <div class="f-chips">
+          <div class="f-chips" data-testid="filter-group-scale">
             <button
               v-for="([code, name], i) in SCALE_OPTIONS"
               :key="code"
@@ -456,7 +458,7 @@ function salaryCodeLabel(code: string): string {
         <span class="f-glabel">融资阶段</span>
         <span class="f-glabel-sub">多选</span>
         <div class="f-gbody">
-          <div class="f-chips">
+          <div class="f-chips" data-testid="filter-group-finance">
             <button
               v-for="([code, name], i) in STAGE_OPTIONS"
               :key="code"
@@ -478,7 +480,7 @@ function salaryCodeLabel(code: string): string {
         <span class="f-glabel">行业</span>
         <span class="f-glabel-sub">多选；也可直接填行业代码</span>
         <div class="f-gbody">
-          <div class="f-chips">
+          <div class="f-chips" data-testid="filter-group-industry">
             <button
               v-for="([code, name], i) in INDUSTRY_OPTIONS"
               :key="code"

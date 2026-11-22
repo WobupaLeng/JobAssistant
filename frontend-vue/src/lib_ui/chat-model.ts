@@ -156,6 +156,9 @@ export const CHAT_SEND_LABEL = '发送';
 export const CHAT_RAIL_TITLE = 'BOSS 消息';
 export const CHAT_DETACH_TITLE = 'Boss 消息';
 export const CHAT_DETACH_RAIL_TITLE = 'Boss 列表';
+/** 两处 aria-live 汇报区共用同一句（右栏 `chat-rail-state-announce` 与
+ * 对话框 `chat-detach-state-announce`），避免两处字面量各自漂移。 */
+export const CHAT_STATE_ANNOUNCE_TEXT = '会话列表';
 
 /* ------------------------------------------------------------------ *
  * 线程

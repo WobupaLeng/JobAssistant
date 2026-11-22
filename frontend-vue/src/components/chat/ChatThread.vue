@@ -14,6 +14,7 @@ import type { ChatMessage, Friend, GreetReply, ResumeItem } from '../../api/type
 import {
   CHAT_DETACH_EMPTY_SUB,
   CHAT_DETACH_EMPTY_TITLE,
+  CHAT_STATE_ANNOUNCE_TEXT,
   RECALL_TEXT,
   TYPING_TEXT,
   headSub,
@@ -178,7 +179,9 @@ function confirmRecall(): void {
             </div>
           </template>
         </div>
-        <span class="sr-only" data-testid="chat-detach-state-announce" aria-live="polite">聊天区</span>
+        <span class="sr-only" data-testid="chat-detach-state-announce" aria-live="polite">{{
+          CHAT_STATE_ANNOUNCE_TEXT
+        }}</span>
       </div>
 
       <div v-if="props.greet !== null" class="greet-box" data-testid="chat-greet-box">

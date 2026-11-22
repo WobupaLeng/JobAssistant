@@ -49,6 +49,7 @@ import {
 import { startAutoQueue, type AutoQueue } from '../features/auto/queue';
 import {
   CHAT_RAIL_TITLE,
+  CHAT_STATE_ANNOUNCE_TEXT,
   FRIENDS_EMPTY_NOTE,
   FRIENDS_FAIL_PREFIX,
   GREET_SENT_NOTE,
@@ -550,6 +551,11 @@ defineExpose({
         @retry="loadFriends"
         @search="search = $event"
       />
+      <!-- 右栏 aria-live 汇报区（SPEC §4.2 的 chat-rail-state-announce）：
+           与对话框里的 chat-detach-state-announce 同源，文案都由常量给出，不复制字面量。 -->
+      <span class="sr-only" data-testid="chat-rail-state-announce" aria-live="polite">{{
+        CHAT_STATE_ANNOUNCE_TEXT
+      }}</span>
     </aside>
 
     <!-- ===== 对话框：点 Boss 才展开 ===== -->

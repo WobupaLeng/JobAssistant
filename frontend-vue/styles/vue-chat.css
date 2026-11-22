@@ -24,9 +24,10 @@
   /* 右栏基线宽：≥1280 为 300，1280 以下收窄到 260（原型 --rail-w 的等价物），
    * 两者都乘 --ui-scale。运行期真实值来自 canvas.ts 的行内 style。 */
   --rail-w: calc(300px * var(--ui-scale));
-  /* 对话框宽由 syncDetachWidth() 的 clamp(600px, 50vw, 80vw) 算好写进行内样式；
-   * 这里是与原型 :root 一致的 720px 兜底（注意：**不乘 scale**，见 canvas.ts 的说明）。 */
-  --detach-w: 720px;
+  /* 对话框宽由 syncCanvas() 的 clamp(600px, 50vw, 80vw) 算好写进行内样式；
+   * 兜底值与原型 :root 一致为 0px（聊天默认收起、不渲染 detach，见规格 A36）。
+   * 注意：**不乘 scale**，见 canvas.ts 的说明。 */
+  --detach-w: 0px;
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;

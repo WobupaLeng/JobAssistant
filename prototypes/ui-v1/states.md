@@ -393,7 +393,7 @@ activeFriend  ∈ { null, uid }        初始 null —— 收起时不清空
 | A1 | 默认态 `chat-detach` 带 `hidden`、`chatOpen === false` —— **默认不可见**，无自动弹出路径 | `_smoke.mjs` A1 |
 | A2 | 默认态右栏可见且全宽：300（≥1280）/ 260（1200–1279） | — |
 | A3 | 点**任意** Boss（6 条逐个试）⇒ 立刻展开且 `activeFriend` 为该 uid | — |
-| A4 | 展开几何 **`detachW ≈ 0.5 × innerWidth`（±2px）**：1200→640（下限）/ 1280→640 / 1440→720 / 1600→800；且 `chatRailW = 300 / 260`、`chatW = detachW − chatRailW ≥ 320` | — |
+| A4 | 展开几何 **`detachW ≈ 0.5 × innerWidth`（±2px）**：1200→600（下限）/ 1280→640 / 1440→720 / 1600→800；且 `chatRailW = 300 / 260`、`chatW = detachW − chatRailW ≥ 320` | — |
 | A5 | 非浮层：`getComputedStyle(chat-detach).position === 'static'`，且主列宽度展开后明显变小 | — |
 | A6 | 收起后 **50% 归还主列**：右栏恢复 300 / 260，主列 ≥ 0.97 × 窗口宽 | — |
 | A7 | 收起不清选中：`activeFriend` 保留，右栏该条目 `.is-active` | — |
@@ -599,7 +599,7 @@ activeFriend  ∈ { null, uid }        初始 null —— 收起时不清空
 
 ### 12A7.4 与既有裁决的兼容（**不得破坏的三条**）
 
-1. **`.chat-detach` = 50vw 不变**：`syncDetachWidth()` 仍是 `Math.min(Math.max(innerWidth * 0.5, 640), innerWidth * 0.8)`，`--detach-w` 默认仍是 `0px`。缩放只影响「640 下限」这个**常量**的解释，不改变百分比关系 —— 1920 下依然是「对话框整体 960 + 主列 960」。实测：`A36` 断言公式原样。
+1. **`.chat-detach` = 50vw 不变**：`syncDetachWidth()` 仍是 `Math.min(Math.max(innerWidth * 0.5, 600), innerWidth * 0.8)`，`--detach-w` 默认仍是 `0px`。缩放只影响「600 下限」这个**常量**的解释，不改变百分比关系 —— 1920 下依然是「对话框整体 960 + 主列 960」。实测：`A36` 断言公式原样。
 2. **三窗固定尺寸 + 内部滚动不变**：三窗外框从 `min(640px, …)` 变成 `min(calc(640px * scale), …)`，**仍然是固定高度**（不是 `max-height`），在 scale=1 与 scale=1.5 下都不随内容塌陷；滚动仍只发生在 `.cfg-body` / `.sen-grid` / `.dl-rows`。实测：`A35` 断言三窗形状。
 3. **断点语义保留（v9.1 更新）**：`≥1900`（统计组全展开）、`≤1599`（网格 2 列）、`≤1279`（右栏 260）、`1360–1599`（隐藏 `.rail-stat` 与分隔线）。网格列数断点从 `1279` 改为 `1599` 是**用户裁决**，其余未改
 
@@ -609,7 +609,7 @@ activeFriend  ∈ { null, uid }        初始 null —— 收起时不清空
 | --- | --- |
 | **A34** | `--ui-scale` 五档计算值 `1200→1 / 1440→1 / 1920→1 / 2560→1.333 / 3840→1.5`；源码公式必须是 `Math.min(Math.max(innerWidth / 1920, 1), 1.5)`；`--ui-scale` 全文引用 ≥3 处 |
 | **A35** | 三窗（`.decisions-modal` 620 / `.config-modal` 640 / `.sensitive.floater` 720）高度均为 `min(calc(Xpx * var(--ui-scale)), calc(100vh − k))` 形状，scale=1 与 1.5 下仍固定 |
-| **A36** | `.chat-detach` 仍是 `Math.min(Math.max(innerWidth * 0.5, 640), innerWidth * 0.8)`；`--detach-w` 默认 `0px` |
+| **A36** | `.chat-detach` 仍是 `Math.min(Math.max(innerWidth * 0.5, 600), innerWidth * 0.8)`；`--detach-w` 默认 `0px` |
 | **A37** | 硬编码 `font-size: Npx` 全文命中 **0** |
 
 实测输出：

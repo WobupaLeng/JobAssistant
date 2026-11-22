@@ -93,7 +93,7 @@ function onSort(field: SortField): void {
   <div class="card job-list" data-testid="job-list-card">
     <div class="job-tabs-row">
       <div class="job-tabs" role="tablist" aria-label="岗位页签">
-        <span class="card-title">岗位列表</span>
+        <span class="card-title" data-testid="job-list-title">岗位列表</span>
         <button
           v-for="t in LIST_TABS"
           :key="t.key"
@@ -137,7 +137,7 @@ function onSort(field: SortField): void {
           type="button"
           role="radio"
           :aria-checked="s.key === sortField"
-          :data-testid="`job-sort-${sortSlug(s.key)}`"
+          :data-testid="`job-sort-${sortSlug(s.key)}-btn`"
           @click="onSort(s.key)"
         >
           {{ s.label }}
@@ -186,6 +186,17 @@ function onSort(field: SortField): void {
         <span class="state-glyph is-bad">!</span>
         <span class="state-title" data-testid="job-state-error-title">岗位列表加载失败</span>
         <span class="state-sub">{{ error }}</span>
+        <!-- 原型 :2171 的错误态带一个重试按钮，接线到页面现有的刷新逻辑。 -->
+        <span class="state-actions">
+          <button
+            class="btn btn-sm btn-primary"
+            type="button"
+            data-testid="job-state-error-retry-btn"
+            @click="emit('refresh')"
+          >
+            重试
+          </button>
+        </span>
       </div>
       <div v-else-if="visible.length === 0" class="job-state" data-testid="job-state-empty">
         <span class="state-glyph">∅</span>

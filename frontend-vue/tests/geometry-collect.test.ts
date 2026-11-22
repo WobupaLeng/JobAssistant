@@ -114,10 +114,10 @@ describe('--detach-w / --rail-w：单一来源是 canvas.ts', () => {
     }
   });
 
-  it('AppShell 负责接线，样式表保留静态兜底（首帧不塌成 0 宽）', () => {
+  it('AppShell 负责接线，样式表保留静态兜底（与原型 :root 同为 0px）', () => {
     expect(shell).toContain('useCanvasScale()');
     expect(css).toContain('flex-basis: var(--detach-w)');
-    expect(css).toContain('--detach-w: 720px');
+    expect(css).toContain('--detach-w: 0px');
   });
 });
 

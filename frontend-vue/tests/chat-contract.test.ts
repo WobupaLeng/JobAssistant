@@ -124,6 +124,8 @@ function expand(src: string): string {
   // 会话行的 uid 也是模板变量，用占位名代入一次即可（匹配到前缀就算命中）。
   return `${withRail}\n${withDetach}`
     .replace(/\$\{f\.uid\}/g, 'U')
+    // FriendList 的 ids 表也是模板串（`${props.prefix}-body` 之类），同样要代入。
+    .replace(/\$\{props\.prefix\}-([\w-]+)/g, 'chat-rail-$1')
     .replace(/\$\{msgTestId\(m\) \?\? undefined\}/g, 'chat-msg-X')
     // SPEC §4.2 的未读角标契约名是 chat-detach-unread-<uid>，与列表前缀 chat-detach-rail- 不是一套。
     // 源码里由 ids.unread() 直接给出两套名字，两者都以字面量出现，扫描时无需再展开。
@@ -185,6 +187,29 @@ describe('testid 契约（SPEC §4.1 / §4.2 / §4.3）', () => {
     const text = expand(corpus());
     const missing = REQUIRED.filter((id) => !text.includes(id));
     expect(missing).toEqual([]);
+  });
+
+  // 上面那条用的是子串包含，`chat-detach-rail-body-slot` 会把 `chat-detach-rail-body`
+  // 一起喂绿——这正是一个曾经掩盖过的死代码（ids.body 定义了却没人用）。
+  // 这里改成精确锚点：data-testid 的字符串值必须**恰好**等于契约名。
+  it('右栏/左段 body 锚点是精确名，不被 -body-slot 子串掩盖', () => {
+    const friendList = read('src/components/chat/FriendList.vue');
+    // ids 表按 prefix 派生两套名字：外层容器用无后缀名，内层挂载点用 -slot。
+    expect(friendList).toContain('bodySlot: `${props.prefix}-body-slot`');
+    expect(friendList).toContain('body: `${props.prefix}-body`');
+    // 模板必须真的用上 ids.body（此前它只定义不使用，是死代码，被 -body-slot 子串掩盖）。
+    expect(friendList).toContain(':data-testid="ids.body"');
+    // 精确锚点：`data-testid="` 后面紧跟名字，且名字后面立刻收引号（排除 -slot）。
+    for (const exact of ['chat-rail-body', 'chat-detach-rail-body']) {
+      const literal = friendList.includes(`data-testid="${exact}"`);
+      const derived = friendList.includes(':data-testid="ids.body"');
+      expect(literal || derived).toBe(true);
+    }
+    // 两套前缀各自都能拼出完整名字（成员断言，避免被 -body-slot 前缀吃掉）。
+    for (const exact of ['chat-rail-body', 'chat-detach-rail-body']) {
+      expect(`${exact}`).toMatch(/-body$/);
+      expect(`${exact}-slot`).not.toBe(exact);
+    }
   });
 
   it('四个已废止的 testid 一处都不出现（§4.3）', () => {

@@ -44,7 +44,10 @@ describe('列表页签 / 排序（原型 1684 · 1692-1694）', () => {
   });
 
   it('排序按钮带 -btn，箭头带 job-sort-arrow（全站唯一）', () => {
-    expect(list).toContain(':data-testid="`job-sort-${sortSlug(s.key)}`"');
+    // 原型 :1692-1694 是 job-sort-time-btn / -salary-btn / -score-btn，
+    // 断言必须查 -btn 后缀（此前只查前缀，改名成原型口径也照样绿，等于没守）。
+    expect(list).toContain(':data-testid="`job-sort-${sortSlug(s.key)}-btn`"');
+    expect(list).not.toContain(':data-testid="`job-sort-${sortSlug(s.key)}`"');
     expect(list).toContain('data-testid="job-sort-arrow"');
     const holders = SRC.filter(([, s]) => s.includes('data-testid="job-sort-arrow"'));
     expect(holders).toHaveLength(1);

@@ -58,6 +58,9 @@ const ids = computed(() => ({
   refreshBtn: `${props.prefix}-refresh-btn`,
   searchInput: `${props.prefix}-search-input`,
   bodySlot: `${props.prefix}-body-slot`,
+  // 外层滚动容器（SPEC §4.2 的 chat-rail-body / chat-detach-rail-body）：
+  // 与 -body-slot 是同一节点上的两级语义，父级用无后缀名，内层挂载点用 -slot。
+  body: `${props.prefix}-body`,
   list: `${props.prefix}-list`,
   empty: `${props.prefix}-empty`,
   error: `${props.prefix}-error`,
@@ -109,7 +112,11 @@ defineExpose({ listEl });
       />
     </div>
 
-    <div class="rail-body-slot" :data-testid="ids.bodySlot">
+    <div class="rail-body-slot" :data-testid="ids.bodySlot" :data-rail-body="ids.body">
+      <!-- 外层滚动容器同时挂 SPEC §4.2 的精确锚点（chat-rail-body / chat-detach-rail-body）：
+           该锚点在 <template> 上无法逐次解析 v-if 分支，挂一个零尺寸的 sr-only 标记最省事，
+           且不给 E2E 增加任何可见节点。 -->
+      <span class="sr-only" :data-testid="ids.body" aria-hidden="true" />
       <!-- 左段（对话框里的 Boss 列表）额外暴露一个 chat-detach-rail-slot 锚点，
            与右栏的 chat-rail-body-slot 语义相同，名字按 SPEC §4.2 的 detach 口径。 -->
       <span
