@@ -3,17 +3,17 @@
 > **本文件只写「现状 / 坑 / 下一步」**，不写历史、不写用例数、不写版本变化。
 > 目录结构与分层约定见 [`AGENTS.md`](AGENTS.md)，跨模块约束见根 [`AGENTS.md`](../AGENTS.md)。
 
-**最后更新**：2026-11-22
+**最后更新**：2026-11-23
 
 ---
 
 ## 1. 现状
 
-`app/` 完全可用，是当前三个模块中唯一不需要施工的。命令面、领域规则、存储、协议、会话编排都已落地并有测试覆盖。
+命令面、领域规则、存储、协议、会话编排都已落地并有测试覆盖；工作树干净（`git status` 0）。
 
-**唯一未验证的路径**是 sidecar 在真实 Tauri 窗口里拉起 Chrome，见根 `AGENTS.md` 7.2 第 1 项（阻塞项，根因在 WebView2，不在本模块代码）。
+**本轮功能接线完成**（提交 d3cd57d / b6bebde）：① `scrape_defaults` 运行时消费——`Command::ScrapeStart` 协议扩 9 个可选字段（city/salary/experience/degree/scale/stage/industry/job_type/max_pages，蛇形、`skip_serializing_if` 向后兼容，与 `scraper/sidecar.py` payload 键逐字对齐），`ScrapeJobSpec` 同步扩展 + `start_command()` 透传，`scrape_start` 读库填 spec（前端 args 优先、`ScrapeArgs` 契约零改动），新增 `core/scrape/filters.rs`（`filters_from_defaults`/`exclude_rules_from_defaults`），用户排除词经 `ExcludeRules::from_keywords` 注入 `IngestConfig`（留 Rust core，禁下放 sidecar）；② serde alias 补缺（`GreetArgs` jobId/useLlm、`RescoreArgs` logChanges）；③ 登录链——`lib.rs` setup 起 `login-state-watcher` 线程 500ms 轮询 `ScrapeState`，`(platform,state)` 变化即 `app.emit("login-state", {platform,state,logged_in})`（蛇形冻结契约，纯函数 `login_snapshot`/`login_emit_decision` 去重 + 会话消失补播 closed），`session.rs` `ScrapeProgress` 增 `login_platform` 并在 consume/adopt 继承，`login_status` 查询结论写回 progress。`cargo test --lib` 392 passed。
 
-**工作区里有未提交改动**（`lib.rs`、`Cargo.toml`、`Cargo.lock`、`tauri.conf.json`），其中 `lib.rs` 的毛玻璃实现改动（`apply_blur` 改为 `apply_system_glass` + 纯色兜底，新增 `BLUR_TINT`）来自用户本地手工调整，**不是任何 lane 所为，提交前须问用户**。
+**唯一未验证的路径**是 sidecar 在真实 Tauri 窗口里拉起 Chrome，见根 `AGENTS.md` 7.2 第 1 项（阻塞项，根因在 WebView2，不在本模块代码）。**已知小缺口**：`work_weekend=no_bigweek`（大小周）`rules.rs` 只实现 `double` 分支；`login_status.saved` 恒 false（不读 `platform_login:{platform}` marker）。
 
 ---
 
@@ -37,7 +37,7 @@
 - **单实例互斥体句柄不能 `CloseHandle`**：设计上故意泄漏到进程退出。
 - **`domain` 里的注释写着 `reqwest`，实际依赖是 `ureq`**：这是文案漂移，改到那里顺手修正。
 - **`tauri.conf.json` 的 `version` 是 `0.2.0`，`Cargo.toml` 是 `0.1.0`**：两者不一致，改版本号时两个文件都要动。
-- **`beforeDevCommand` / `beforeBuildCommand` 都是空串**：Tauri 不由它拉起前端，构建编排在根 `build.bat`。**没有 Tauri 侧兜底意味着 `tauri.conf.json` 的 csp 是唯一来源**（见根 `AGENTS.md` 3.4）。
+- **`beforeDevCommand` / `beforeBuildCommand` 已设为 `npm --prefix ../frontend-vue run dev` / `run build`**（Vue 重写后接线；`backend-tauri/package.json` 锚 `@tauri-apps/cli` 修 cwd，否则 `../frontend-vue` 解析到仓库外 ENOENT）。`tauri.conf.json` 的 csp 仍是唯一来源（`script-src 'self'`，`wasm-unsafe-eval` 已删，见根 `AGENTS.md` 3.1）。
 
 ### 2.3 契约面
 

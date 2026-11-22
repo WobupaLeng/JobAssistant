@@ -3,13 +3,13 @@
 > **本文件只写「现状 / 坑 / 下一步」**，不写历史记录与用例明细。
 > 目录结构、分层约定、17 条迁移契约见 [`AGENTS.md`](AGENTS.md)，跨模块约束见根 [`AGENTS.md`](../AGENTS.md)。
 
-**最后更新**：2026-11-22
+**最后更新**：2026-11-23
 
 ---
 
 ## 1. 现状
 
-`frontend-vue/` 已进入 **Vue 3 + Vite + TypeScript 原地重写**：ARCH-003 **阶段 0–3 完成**——`src/api/**` 覆盖全部 48 条命令（`tests/commands-payload.test.ts` 守卫）、四页全部接线（`App.vue` 分发：概览常挂 + 聊天/配置/日志浮层）、`npm run typecheck` 0 错、`npm run build` 通过、vitest 全绿。
+`frontend-vue/` 已进入 **Vue 3 + Vite + TypeScript 原地重写**：ARCH-003 **阶段 0–4 完成 + 后端功能接线对齐 + 登录接线**——`src/api/**` 覆盖全部 48 条命令（`tests/commands-payload.test.ts` 守卫）、四页全部接线（`App.vue` 分发：概览常挂 + 聊天/配置/日志浮层）、`npm run typecheck` 0 错、`npm run build` 通过、vitest 全绿。
 
 **Leptos 0.8 `.rs` 已全部退役**（阶段 4 完成，用户裁决「先删除」）：`src/` 下 `.rs` 计数 **0**（pages 5 + 第一批 41 + 第二批 15，含 `lib.rs`/`main.rs`/两个 `mod.rs`；git 历史可取回，提交 53d05cb 之前）。注释溯源统一改写为「Leptos 版已退役，见 git 历史」。后端 `backend-tauri/` 不动。方案见 [`ARCH-003`](../docs/architecture/ARCH-003-vue-frontend-migration.md)。
 
@@ -17,11 +17,15 @@
 
 **M5 补遗完成**：`JobDetailDrawer.vue`（kv 十行/JD 四态/chips/单条 reject↔allow 同位单按钮/Esc 摘除）、`PlatformCard.vue`（三平台、boss 登录已接 `login_start`/`login_status`，智联/51job `is-off`）、`AppErrorBar.vue` 改 FIFO 队列（上限 5 + dropped 计数 + 逐条关闭 + aria-live）；视图模型 `lib_ui/{job-detail-model,platform-model,error-queue}.ts`。
 
-**测试现状**：`npx vitest run` 全量全绿（31 文件 519 用例）。秒/毫秒判据已修为 `1e11`（见 §2.3）。
+**测试现状**：`npx vitest run` 全量全绿（34 文件 565 用例）。秒/毫秒判据已修为 `1e11`（见 §2.3）。
 
 **几何契约补齐完成**（用户裁决「补齐实现，规格不动」）：原型 v7/v8 响应式几何已搬进 Vue——`tokens.css` 追加 `--ui-scale`（`lib_ui/canvas.ts` 的 `computeUiScale = clamp(1, innerWidth/1920, 1.5)`）+ 5 档 `--fs-{2xs,xs,sm,md,lg}`（11/12/13/15/20px × scale）；`lib_ui/use-canvas-scale.ts` 在 AppShell onMounted/resize（rAF 合并）按 `--ui-scale→--rail-w→--detach-w` 顺序写变量；**全部 174 处 font-size 声明用 var()，产物裸 px 字号归零**（vue 系 + 10 份契约 CSS 共享控件均收口）；三窗固定高乘 scale（config 640 / decisions 620 / sensitive 720），对话框宽 `clamp(600,50vw,80vw)` 不乘 scale，A54 job-greet 方块公式落地；`--detach-w` 单一来源（ChatPage 行内绑定已删，只留 syncCanvas + vue-chat.css 静态兜底）；敏感库居中窗规则从 vue-pages.css 覆写迁回 sensitive.css 本体。**残留非阻塞**：契约 CSS 160 处颜色字面量（vue 系已零，全量收口需另轮新增语义令牌）；非字号定值（.job-check/.score-box 等）原型本就是定值，未乘 scale。
 
-**QA 修复轮完成**（qa-verify 判 QA_FAILED 后用户裁决「全部修」）：① 严重——搜索词与排除词彻底分离，`lib_ui/scrape-filter-model.ts` 新增 `searchKeywords()` 唯一出口，`DashboardPage.onStart` 只发 `keywords`（空则拦下不静默回落），推荐 chip/读期望进 keywords 不进 exclude；② `set_limit` 接线持久化上限/门槛（`onMaxJd`/`onMinScore`，失败走 AppErrorBar 带重试，门槛上限取 `get_scoring_spec` 不硬编码）；③ C9 入库 feed 补齐（`scrape-panel-model.ts` 的 `toFeedLine`/`FEED_ACCEPTED_TAG='✔'`/`FEED_SKIPPED_TAG='跳过'`，`DashboardPage.drainFeed` 调 `scrapeDrain(50)`，LogCard 每行 `log-row`）；④ testid 对齐冻结原型（job-tab/sort/batch-bar/空态四件、sensitive-open-btn、chat-detach-head、chat-rail 去重恰 1 处）；⑤ 51job 显示名对齐原型、注释溯源修正。新增 5 个回归文件 41 用例（qa-{keywords,limits,feed,testids,provenance}）。**低#1-3 后端 alias 潜伏缺口未动**（另轮路由）。**已知例外**：`lib_ui/theme.ts` 仍直接触碰 `localStorage`/`matchMedia`/`document`（首帧主题入口，Leptos `lib_ui/theme.rs` 同样如此，C7 遗产）；拆纯函数+副作用会改启动路径，留待后续裁决，不算 §2.5 违例（§2.2 禁的是反向 import，不是 DOM）。
+**QA 修复轮完成**（qa-verify 判 QA_FAILED 后用户裁决「全部修」）：① 严重——搜索词与排除词彻底分离，`lib_ui/scrape-filter-model.ts` 新增 `searchKeywords()` 唯一出口，`DashboardPage.onStart` 只发 `keywords`（空则拦下不静默回落），推荐 chip/读期望进 keywords 不进 exclude；② `set_limit` 接线持久化上限/门槛（`onMaxJd`/`onMinScore`，失败走 AppErrorBar 带重试，门槛上限取 `get_scoring_spec` 不硬编码）；③ C9 入库 feed 补齐（`scrape-panel-model.ts` 的 `toFeedLine`/`FEED_ACCEPTED_TAG='✔'`/`FEED_SKIPPED_TAG='跳过'`，`DashboardPage.drainFeed` 调 `scrapeDrain(50)`，LogCard 每行 `log-row`）；④ testid 对齐冻结原型（job-tab/sort/batch-bar/空态四件、sensitive-open-btn、chat-detach-head、chat-rail 去重恰 1 处）；⑤ 51job 显示名对齐原型、注释溯源修正。新增 5 个回归文件 41 用例（qa-{keywords,limits,feed,testids,provenance}）。**低#1-3 后端 alias 已补**（提交 d3cd57d：`jobId`/`useLlm`/`logChanges`）。**已知例外**：`lib_ui/theme.ts` 仍直接触碰 `localStorage`/`matchMedia`/`document`（首帧主题入口，Leptos `lib_ui/theme.rs` 同样如此，C7 遗产）；拆纯函数+副作用会改启动路径，留待后续裁决，不算 §2.5 违例（§2.2 禁的是反向 import，不是 DOM）。
+
+**后端功能接线对齐 + 登录接线完成**（提交链 d3cd57d→0cc998d→b6bebde→603de63）：① 载荷形状按 tauri 2 参数规则修正——`score_job` 收 `ScoreArgs` struct 改 `invokeArgs`（`args` 包裹）、`passes_threshold` 标量门槛键 `min_score`→`minScore`；② `scrape-filter-model.ts` 新增 `BACKEND_READ_KEYS`（14 条驼峰→蛇形，与后端 `KEY_SCRAPE_*` 逐字对齐），`applyBackend` 改蛇形回读（9 个多词键重启后正确回显），写入方向仍驼峰；③ 登录接线——`src/api/events.ts` `listenLoginState` 经 `window.__TAURI_INTERNALS__`（`plugin:event|listen` + `transformCallback`，零 `@tauri-apps/*` 依赖，非 Tauri 降级 no-op）消费冻结事件 `login-state`（payload 蛇形 `{platform,state,logged_in}`）；`lib_ui/login-model.ts`（`mergeLoginState` 未知态不覆盖已知态 + `loginBadge` + 保存/退出按钮派生 + `scanFlagVisible`）；`PlatformCard.vue` 新增 `platform-login-save-btn`/`platform-logout-btn`/`resolve-scan-flag`（waiting 态二维码，`data:image/` 才画）；`DashboardPage.vue` onMounted 订阅/onBeforeUnmount 退订 + visibilitychange/5s tick `login_status` 兜底。新增 login-{events,model,page} 41 用例。**`resolve-scan-flag` 无真源**（冻结规格仅裸名），按「waiting 态平台卡内显示二维码」推断落地，lead 已追认（可逆）。
+
+**最终集成产物冒烟通过**（release-smoke @0225c3c）：`tauri build --no-bundle` 独占 jt-release3 exit 0（4m45s），exe 7,241,216 B SHA256 `22F31652BA65795CB0F524FB0EB640FCFE6105F3B4C371F72730095E99103C46`；工作区外 jt-release-smoke3 启动无 os error 5、WebView2 renderer 拉起、CDP 取证仪表盘 28 岗位 + 分值 + 打招呼 + 筛选城市深圳 + 配置掩码 ****1883 不回写 + 敏感库 20；CSP 内嵌 `wasm-unsafe-eval`=0；`login-state` 经真实 `plugin:event|emit` 验证 listen→merge→渲染链路（save/logout 按钮 1ms 渲染），登录 DOM 门控以披露式合成态注入取证（prod `__TAURI_INTERNALS__.invoke` 冻结不可桩）。证据 `%TEMP%\jt-release-smoke3\cdp-{dashboard,filter-city,scan-flag,login-buttons}.png`。**真实扫码/抓取仍受根 §6.2 Chrome 阻塞**。
 
 ---
 
@@ -46,7 +50,7 @@
 ### 2.3 契约与文案
 
 - **驼峰参数写错名字不会有任何提示**：serde 对未知字段静默不报错。
-- **载荷形状两类且有例外**（`score_job` 整包；`auto_greet_next` 包 `args` 而 `auto_greet_pause` 平铺）——**照抄，不要「统一化」**。
+- **载荷形状按 tauri 2 参数规则**：struct 参数（`score_job`/`scrape_start`/`set_limit`/`rescore_jobs` 等）需 `args` 包裹（`invokeArgs`）；标量参数平铺、键名取参数名 lowerCamelCase（`passes_threshold` 门槛键 `minScore`、`auto_greet_pause` 平铺）；`ScoreArgs` 内层字段蛇形（`rename_all`）。**照抄后端真源签名，不要「统一化」**。
 - **`min_score` 只能走 `set_limit`**：塞进 `set_app_config` 会被静默跳过。
 - **配置保存只提交 diff**：后端 `null` 语义是「删除该键」，整份回传等于每次保存清空未设置项。
 - **进度文案是测试契约**：五段标签与 `·` 分隔逐字照抄，改字就断锚点。
