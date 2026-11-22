@@ -89,6 +89,25 @@
   --bad-soft: rgba(248, 81, 73, 0.16);
   --muted: #8b949e;
 
+  /* ---------- 语义色（成对：底色 + 前景） ----------
+   * 页面级样式表只许引用这里，不许再写字面量——深浅两套主题各自独立赋值（C7）。
+   * 取值来自冻结原型 prototypes/ui-v1/index.html，颜色本身不许改。 */
+  --on-primary: #fff; /* 主色块上的反白字（打招呼方块 / 主按钮 / 未读角标） */
+  --on-primary-deep: #04120c; /* 亮绿渐变头像上的深字 */
+  --primary-text: #6ee7b7; /* 主色系文字（高分徽标） */
+  --primary-border: rgba(16, 185, 129, 0.4);
+  --warn-text: #fbbf24; /* 警示文字（暂停按钮 / WARN 日志） */
+  --warn-bg: rgba(245, 158, 11, 0.16);
+  --warn-bg-strong: rgba(245, 158, 11, 0.24);
+  --warn-border: rgba(245, 158, 11, 0.42);
+  --bad-text: #ff6b6b; /* 错误文字（ERROR 日志 / 空态图标） */
+  --bad-text-soft: #ffb4b0; /* 错误条正文 */
+  --bad-text-softer: #ffd9d6; /* 错误条图标上的字 */
+  --bad-bg: rgba(255, 107, 107, 0.14);
+  --bad-bg-strong: rgba(255, 107, 107, 0.3);
+  --bad-border: rgba(255, 107, 107, 0.42);
+  --on-bad: #fff; /* 未读角标在 --bad 底上的字 */
+
   /* ---------- 圆角 ----------
    * Liquid Glass 的圆角比常规 UI 大：玻璃边缘要留出高光宽度。
    * 8px 圆角配 1px 高光等于没有玻璃厚度。 */
@@ -175,6 +194,23 @@
   --accent-soft: rgba(37, 99, 235, 0.12);
   --warn-soft: rgba(210, 153, 34, 0.14);
   --bad-soft: rgba(248, 81, 73, 0.12);
+
+  /* 语义色：浅底上要压深一档才有对比（原型已给浅色分支取值）。 */
+  --on-primary: #fff;
+  --on-primary-deep: #04120c;
+  --primary-text: #047857;
+  --primary-border: rgba(16, 185, 129, 0.4);
+  --warn-text: #92650a;
+  --warn-bg: rgba(245, 158, 11, 0.16);
+  --warn-bg-strong: rgba(245, 158, 11, 0.24);
+  --warn-border: rgba(245, 158, 11, 0.42);
+  --bad-text: #ff6b6b;
+  --bad-text-soft: #ffb4b0;
+  --bad-text-softer: #ffd9d6;
+  --bad-bg: rgba(255, 107, 107, 0.14);
+  --bad-bg-strong: rgba(255, 107, 107, 0.3);
+  --bad-border: rgba(255, 107, 107, 0.42);
+  --on-bad: #1a1208;
 
   /* 浅底投影必须更重：没有暗部托住，轻影会让卡片「浮不起来」 */
   --shadow-near: 0 1px 3px rgba(15, 23, 42, 0.10);

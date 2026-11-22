@@ -18,15 +18,16 @@ frontend-vue/
   tsconfig.json            严格模式
   src/
     main.ts                挂载点
-    App.vue                顶栏 + 页面分发插槽（不要在这里 import 各页面）
+    App.vue                页面分发插槽（**唯一** import 各页面的地方，C13）
     api/                   契约类型 + invoke 封装（唯一允许触碰 @tauri-apps/api 的层）
       types.ts             DTO，无运行时代码
-      invocations.ts       命令封装，命令名逐字对抄后端
+      invoke.ts            invoke 封装（prune：删 undefined、留 null）
+      commands/            按领域拆的命令封装，命令名逐字对抄后端
     lib_ui/                纯函数与 composables（无 DOM 依赖优先，可单测）
     components/            AppShell / Card / Stat / Chip / StatusDot / SkeletonRows / Banner / ErrorBar / Field / Collapsible / EmptyState
     features/              auto / chat / config / jobs / logs / score / scrape / sensitive
     pages/                 dashboard / chat / config / logs
-  styles/                  11 份 CSS，顺序见 C4
+  styles/                  14 份 CSS（11 份契约序 + vue-dashboard/vue-chat/vue-pages 追加在末尾），顺序见 C4
   .agents/skills/          15 个技能，来源见 SOURCES.md
   AGENTS.md  HANDOFF.md
 ```
@@ -45,9 +46,11 @@ pages → features → components → lib_ui
 
 1. **`api` 是横切层**：`features` / `components` / `pages` 都可直接引用。**这是既定事实，不是违例**。不要为了「纯净」把 `api` 下沉。
 2. **`lib_ui` 不得反向引用** `api` / `pages` / `features` / `components`，只允许内部互引。
+   **唯一例外：`import type` 引用 `api/types` 的 DTO 形状**。契约类型的单一真源在 `api/types.ts`，`lib_ui` 的纯函数需要这些形状做标注；复制一份 DTO 进 `lib_ui` 会造出双份真源（serde 静默失效的温床）。**运行时** import `api` 仍禁。
 3. **禁止同层横向依赖**：`features` 下不同领域不得互相 import。Leptos 版有两处既有违例（`features/jobs/cards.rs:17` → `features/scrape/options::platform_name`；`features/scrape/panel.rs:23` → `features/auto::AutoBar`），Vue 版**必须消除**——公共部分下沉到 `lib_ui/` 或 `components/`。
 4. **页面分发是插槽**：`AppShell` 里**不得 import 任何页面**；由 `App.vue` 作为 dispatch 插槽传入（或 `<router-view>`）。
-5. **`components` / `pages` 不得 import `features`**：这两层只往 `lib_ui` 与 `api` 走。一个状态机若要被展示组件消费，它就该住 `lib_ui/`，哪怕业务上属于某个 feature——先例是 `lib_ui/city-picker.ts`（城市选择器的开合与键盘规则，消费方是 `components/CityPicker.vue`；放 `features/scrape/` 会造成向上引用）。
+5. **`components` 不得 import `features`**：展示组件只往 `lib_ui` 与 `api` 走。一个状态机若要被展示组件消费，它就该住 `lib_ui/`，哪怕业务上属于某个 feature——先例是 `lib_ui/city-picker.ts`（城市选择器的开合与键盘规则，消费方是 `components/CityPicker.vue`；放 `features/scrape/` 会造成向上引用）。**`pages` 可以 import `features`**——那是 §2 箭头 `pages → features` 的正向编排（先例：`DashboardPage` → `features/scrape/filter`、`ChatPage` → `features/chat/chat-model`、`ConfigPage` → `features/config/model`）；页面把 features 算好的视图模型传给纯展示组件，组件自己不碰 features。
+   **推论（视图模型归属）**：标签常量、派生视图（CardView / 文案 / 禁用规则）、纯状态机只要被展示组件消费，就住 `lib_ui/`；`features/` 只留**编排**（invoke、localStorage 持久化、定时链、跨命令事务）。先例：`lib_ui/city-picker.ts`、`lib_ui/chat-model.ts`、`lib_ui/job-list-model.ts`。`features` 内部互引编排模块允许，但**跨领域**仍禁（§2.3）。
 
 ---
 
@@ -78,9 +81,9 @@ pages → features → components → lib_ui
 
 **C3 入参一律驼峰**：`jobId` / `jobIds` / `maxPages` 等。`features/scrape/filter.rs` 有 14 条 `BACKEND_KEYS` 蛇形→驼峰映射。serde 对未知字段**静默不报错**，写错名字不会有任何提示。
 
-**C4 `index.html` 的 CSS 顺序**：11 条，精确顺序
+**C4 `index.html` 的 CSS 顺序**：14 条 = 11 条契约序 + 3 条 Vue 追加（`vue-dashboard → vue-chat → vue-pages`，只许追加在末尾），契约序精确为
 `tokens → layout → controls → jobs → drawer → motion → scrape → pages → sensitive → auto → filter`。
-另有 3 条内联 `<style>`：`html{background:transparent}`、`body{margin:0}`、`body:not(:has(#root > *)){overflow:hidden}`——**防首帧闪白**，不要挪进外部文件。
+另有 3 条内联 `<style>`：`html{background:transparent}`、`body{margin:0}`、`body:not(:has(#app > *)){overflow:hidden}`——**防首帧闪白**，不要挪进外部文件（挂载点是 `#app`，不是 Leptos 的 `#root`）。
 
 **C5 整页背景透明**：`tokens.css:204` 的 `body` 必须 `background: transparent`，否则毛玻璃失效（全项目 13 处）。
 

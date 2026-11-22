@@ -9,13 +9,13 @@
 
 ## 1. 现状
 
-`frontend-vue/` 已进入 **Vue 3 + Vite + TypeScript 原地重写**：ARCH-003 的**阶段 0（脚手架）与阶段 1（契约层 + 纯函数）完成**——`src/api/**` 覆盖全部 48 条命令（`tests/commands-payload.test.ts` 守卫）、`src/lib_ui/**` 纯函数就位、`src/components/AppShell.vue` 外壳可用、`npm run typecheck` 0 错、`npm run build` 通过。
+`frontend-vue/` 已进入 **Vue 3 + Vite + TypeScript 原地重写**：ARCH-003 **阶段 0–3 完成**——`src/api/**` 覆盖全部 48 条命令（`tests/commands-payload.test.ts` 守卫）、四页全部接线（`App.vue` 分发：概览常挂 + 聊天/配置/日志浮层）、`npm run typecheck` 0 错、`npm run build` 通过、vitest 全绿。
 
-**Leptos 0.8 `.rs` 已部分退役**（用户裁决「先删除」）：`src/pages/*.rs` 五个页面文件、`lib.rs` 的 `mod pages`/`pages::Page` 引用、`features/scrape/filter.rs` 的旧城市 `<select>` 均已删除（git 历史可取回）；`src/pages/` 现在只有 `DashboardPage.vue`。**其余 `.rs`（api/components/features/lib_ui）仍是阶段 2/3 的行为对照**，阶段 4 整体退役。后端 `backend-tauri/` 不动。方案见 [`ARCH-003`](../docs/architecture/ARCH-003-vue-frontend-migration.md)。
+**Leptos 0.8 `.rs` 已部分退役**（用户裁决「先删除」）：`src/pages/*.rs` 五个页面文件、`lib.rs` 的 `mod pages`/`pages::Page` 引用、`features/scrape/filter.rs` 的旧城市 `<select>` 均已删除（git 历史可取回）。**其余 `.rs`（api/components/features/lib_ui，约 40 个）仍是行为对照基线**，阶段 4 整体退役。后端 `backend-tauri/` 不动。方案见 [`ARCH-003`](../docs/architecture/ARCH-003-vue-frontend-migration.md)。
 
-**已接线**：概览页 `pages/DashboardPage.vue` 消费 `components/CityPicker.vue`（城市两级联动 + 搜索，373 城），筛选状态在 `features/scrape/filter.ts`（本轮只有 `city` 单字段）；`App.vue` 的 `dashboard` 槽渲染该页，其余三页仍是占位。**未接线**：其余筛选控件（薪资/经验/学历/规模/阶段/职位类型/行业/关键词）、`scrape_start`、本地草稿与防抖——阶段 3。
+**已接线**：概览页（CityPicker 373 城 + 全筛选控件 + C12 草稿 400ms 防抖 + 抓取三态 + 岗位网格/长按多选/批量 + 敏感库浮层 + 顶栏 token）、聊天页（Boss 列表 + 抽屉 v3 布局 + 自动投递三态队列 + 打招呼草稿）、配置页（三卡 + 掩码 + diff 保存）、日志页（决策/运行双视图 + seq 游标增量）。**分层整改已完成**：被展示组件消费的视图模型全部住 `lib_ui/`（chat-model / auto-model / job-list-model / longpress / scrape-panel-model / sensitive-model / scrape-filter-model），`features/` 只留编排（`features/scrape/filter.ts` 仅剩 loadDraft/saveDraft）；三条越层 grep 归零。
 
-**测试现状**：`npx vitest run` = **130 passed / 0 failed**（8 文件）。秒/毫秒判据已修为 `1e11`（见 §2.3），原 4 条红全部转绿。
+**测试现状**：`npx vitest run` 全量全绿（21 文件）。秒/毫秒判据已修为 `1e11`（见 §2.3）。**已知例外**：`lib_ui/theme.ts` 仍直接触碰 `localStorage`/`matchMedia`/`document`（首帧主题入口，Leptos `lib_ui/theme.rs` 同样如此，C7 遗产）；拆纯函数+副作用会改启动路径，留待阶段 4 一并裁决，不算 §2.5 违例（§2.2 禁的是反向 import，不是 DOM）。
 
 ---
 
@@ -35,6 +35,7 @@
 | 测「关闭后清空」时 `Unable to get [data-testid=...]` | 面板 `v-if` 已卸载，DOM 不存在 | 断言重开后的值，不要查已卸载的元素 |
 | `npm run build` 打印 `✓ built` 但样式大面积丢失 | `styles/pages.css` 的块注释里用反引号包了 `*/`，注释提前闭合，**其后四份样式表整体失效**，只报一条 `[css-syntax-error] Unexpected "\`"` | 改完 CSS **去产物里数选择器**：`(Select-String dist/assets/*.css -Pattern '\.xxx').Count`，不要只看构建成功 |
 | `npm install` 报 `EBUSY ... node_modules/esbuild.exe` 或 SSL 失败 | 残留 `node` 进程持有 exe；直连 npmjs 被代理拦 | 先 `Remove-Item node_modules -Recurse -Force`，再 `npm install --registry https://registry.npmmirror.com` |
+| 批量改源码后出现 `from '../../api/types.'`、`.idle. | .running.` 这类怪串 | PowerShell `.Replace()` 把替换串里的单引号吃掉（根 AGENTS §6 明禁） | 批量字面量替换一律 Python `str.replace` 或 `edit` 工具；改完全仓扫 `(?<![\.\w])\.\.(?![\./\w])` 复核 |
 
 ### 2.3 契约与文案
 
@@ -43,7 +44,7 @@
 - **`min_score` 只能走 `set_limit`**：塞进 `set_app_config` 会被静默跳过。
 - **配置保存只提交 diff**：后端 `null` 语义是「删除该键」，整份回传等于每次保存清空未设置项。
 - **进度文案是测试契约**：五段标签与 `·` 分隔逐字照抄，改字就断锚点。
-- **`index.html` 的 11 份 CSS 顺序**：乱序会导致层级覆盖错误（`pages` 必须早于 `filter`）。
+- **`styles/index.css` 的 14 份 CSS 顺序**：11 份契约序乱序会导致层级覆盖错误（`pages` 必须早于 `filter`）；3 份 Vue 追加（vue-dashboard/vue-chat/vue-pages）只许在末尾。
 - **CSS 里写 `//!` 或 `///` 会让整份样式表被静默丢弃**，表现为「变量生效、组件样式全无」。Leptos 版当前 0 违规。
 - **时间戳秒/毫秒判据是「`|ts| < 1e11`（10 位及以下）就当秒」**：`lib_ui/time.ts` 与 Leptos 的 `time.rs::to_ms` 同一判据（C14），**改一处必须同改另一处**。取 1e11 后秒覆盖到公元 5138 年、毫秒从 **1973-03-03** 起，`time.time()` 与 `Date.now()` 两个数据源都在各自区间内。**旧判据 1e12 有真缺陷**（2001-09-10 之前的毫秒戳被误乘 1000，例如 2000-02-29 显示成 32129 年），已随本轮修正，`tests/time.test.ts` 全绿。唯一判不了的是 1973 年以前的毫秒值（`|ts| < 1e11` 时与秒不可区分，信息已丢失），不要用「猜日期」的办法补救。
 

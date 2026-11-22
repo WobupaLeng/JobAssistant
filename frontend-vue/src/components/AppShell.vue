@@ -24,8 +24,21 @@ const props = withDefaults(
   defineProps<{
     /** 当前页面。由 `App.vue`（页面分发槽）持有与切换，外壳只读。 */
     nav?: Nav;
+    /**
+     * 聊天抽屉是否展开。展开时列表列数 = 收起时 − 1（SPEC §16.9 裁决 X），
+     * 靠 `.app-shell.is-chat-open` 这一层 class 承接，规则写在 `styles/vue-dashboard.css`。
+     */
+    isChatOpen?: boolean;
+    /**
+     * 顶栏右侧是否渲染内置的导航页签。
+     *
+     * 冻结原型（`prototypes/ui-v1`）的顶栏是「品牌 | 分段 | 敏感库 | …」，
+     * **没有导航行**：概览页顶栏承载计分模式与敏感库入口，页签属于内页。
+     * 所以默认在概览页隐藏、在内页显示，由 `App.vue` 传。
+     */
+    showNav?: boolean;
   }>(),
-  { nav: 'dashboard' },
+  { nav: 'dashboard', isChatOpen: false, showNav: true },
 );
 
 const emit = defineEmits<{
@@ -35,10 +48,17 @@ const emit = defineEmits<{
 
 const theme = ref<Theme>(readInitialTheme());
 
+/**
+ * 主题切换。`theme-toggle` 在原型里位于顶栏最右，但概览页的顶栏尾巴由
+ * `TopbarTail` 渲染（它自带开关）——同一时刻只能有一个 `theme-toggle`，
+ * 否则 E2E 的 `getByTestId` 会撞车。所以外壳只在 `showNav` 时渲染它。
+ */
 function toggleTheme(): void {
   theme.value = flipTheme(theme.value);
   applyTheme(theme.value);
 }
+
+defineExpose({ toggleTheme, theme });
 
 function go(key: Nav): void {
   emit('navigate', key);
@@ -50,14 +70,18 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="app-shell" data-testid="app-root">
+  <div
+    class="app-shell"
+    :class="{ 'is-chat-open': props.isChatOpen }"
+    data-testid="app-root"
+  >
     <header class="topbar" data-testid="topbar">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">职</span>
         AI 求职助手
       </div>
 
-      <div :class="NAV_CLASS">
+      <div v-if="props.showNav" :class="NAV_CLASS">
         <nav class="tabs nav-tabs" role="tablist" aria-label="主导航">
           <button
             v-for="item in NAV_LIST"
@@ -84,6 +108,7 @@ onMounted(() => {
       <slot name="topbar-status" />
 
       <button
+        v-if="props.showNav"
         type="button"
         class="btn btn-sm btn-ghost"
         data-testid="theme-toggle"

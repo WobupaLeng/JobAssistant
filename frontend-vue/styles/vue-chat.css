@@ -1,0 +1,518 @@
+/*
+ * Boss 消息页（M2）样式：右栏 chat-rail + 对话框 chat-detach + 自动投递条。
+ *
+ * 口径：冻结原型 prototypes/ui-v1 的 class 与尺寸逐条照抄（v3–v10 全部裁决），
+ * 只做两处本仓库适配：
+ *   1. tokens.css 没有 `--fs-*` 字号族，也没有 `--ui-scale` / `--rail-w` / `--detach-w`，
+ *      所以字号沿用 app.css 既有的 px 口径（12.5px 正文级、11.5px 辅助级），
+ *      宽度变量在 .page-chat 上就地定义；
+ *   2. 原型把自动投递条在展开时搬进对话框头，这里由页面用 v-if 两处二选一渲染，
+ *      同一个 rail-auto-bar 与 auto-apply-bar 规则两处都适用。
+ *
+ * 禁止事项（C6 同族）：本文件不得出现 //! 或 /// 注释；
+ * 块注释正文里不得出现反引号包起来的星号斜杠（会提前闭合注释、丢掉整份样式表）。
+ * 颜色一律取 tokens，不写字面色值（两处 light 主题微调除外，均带注释说明来源）。
+ */
+
+/* ============================================================ *
+ * 页面骨架：右栏 + 对话框 + 期望行
+ * ============================================================ */
+
+.page-chat {
+  /* 右栏基线宽：≥1280 为 300，1280 以下收窄到 260（原型 --rail-w 的等价物）。 */
+  --rail-w: 300px;
+  /* 对话框宽由页面按公式算好写进行内样式；这里只给兜底，防公式缺席时宽为 0。 */
+  --detach-w: 720px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 10px;
+  min-height: 0;
+}
+
+@media (max-width: 1279px) {
+  .page-chat {
+    --rail-w: 260px;
+  }
+}
+
+/* ------------------------------------------------------------ 右栏 */
+
+.chat-rail {
+  flex: 0 0 var(--rail-w);
+  width: var(--rail-w);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+ border-radius: var(--radius);
+ border: 1px solid var(--hairline);
+ background: var(--glass-1);
+  box-shadow: var(--shadow-card);
+ overflow: hidden;
+}
+
+/* 展开态：主对话框接管，右栏让位（原型里的 .app-shell.is-chat-open .chat-rail{display:none}）。 */
+.app-shell.is-chat-open .chat-rail {
+  display: none;
+}
+
+.rail-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.rail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  height: 44px;
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.rail-title {
+  font-size: 15px;
+  font-weight: 620;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+
+.rail-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rail-search {
+  flex: 0 0 auto;
+  padding: 8px 12px 4px;
+}
+
+.rail-search .input {
+  width: 100%;
+  height: 32px;
+  border-radius: var(--radius-pill);
+}
+
+.rail-body-slot {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.rail-body {
+  overflow-y: auto;
+  padding: 4px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* ------------------------------------------------------------ 会话行 */
+
+.chat-rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 10px 10px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.friend {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-1);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+
+.friend:hover {
+  background: var(--glass-2);
+}
+
+.friend.is-active {
+  background: var(--primary-soft);
+  border-color: var(--hairline-strong);
+}
+
+.avatar {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: linear-gradient(145deg, var(--primary) 0%, var(--accent) 140%);
+  /* 深色文字压在亮绿渐变上（语义令牌 --on-primary-deep）。 */
+  color: var(--on-primary-deep);
+  font-size: 12.5px;
+  font-weight: 620;
+}
+
+.friend-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.friend-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.friend-msg {
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.friend-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+
+.friend-time {
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.unread {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--bad);
+  color: var(--on-bad);
+  font-size: 10.5px;
+  font-weight: 620;
+}
+
+/* ------------------------------------------------------------ 列表态 */
+
+.rail-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 18px 12px;
+  text-align: center;
+  color: var(--text-3);
+}
+
+.rail-state .state-title {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.state-sub,
+.rail-guide {
+  font-size: 11.5px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+.state-glyph {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.rail-error {
+  margin: 6px 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline-strong);
+  background: var(--bad-soft);
+  box-shadow: inset 3px 0 0 var(--bad);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.rail-error-head {
+  font-size: 12.5px;
+  font-weight: 620;
+  color: var(--bad);
+}
+
+.rail-err-msg {
+  font-size: 11.5px;
+  color: var(--text-2);
+  word-break: break-word;
+}
+
+.skel-line {
+  display: block;
+  width: 100%;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-2);
+}
+
+/* ============================================================ *
+ * 对话框：宽度走 flex-basis 过渡（禁止 translateX，A15 要求 position: static）
+ * ============================================================ */
+
+.chat-detach {
+  flex: 0 0 0;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius);
+  border: 1px solid var(--hairline);
+  background: var(--glass-1);
+  box-shadow: var(--shadow-card);
+  transition: flex-basis var(--dur) var(--ease-glass), opacity var(--dur) var(--ease-glass);
+}
+
+.chat-detach.is-open {
+  flex-basis: var(--detach-w);
+  width: var(--detach-w);
+  opacity: 1;
+}
+
+.chat-detach[hidden] {
+  display: none;
+}
+
+.chat-detach-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 6px 12px 6px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.chat-detach-sub {
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.chat-detach-body {
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.chat-detach-rail {
+  flex: 0 0 var(--rail-w);
+  width: var(--rail-w);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--hairline);
+}
+
+.chat-detach-chat {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chat-detach-compose {
+  flex: 0 0 auto;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.chat-detach-compose .textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  resize: none;
+}
+
+/* 聊天流：撑满剩余高度并自己滚动（复用 styles/pages.css 的 .chat-feed/.bubble 视觉）。 */
+.chat-detach-chat .chat-feed {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px;
+}
+
+/* ============================================================ *
+ * 自动投递条（`auto-apply-bar`）
+ * ============================================================ */
+
+.auto-apply-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--glass-input);
+  flex-wrap: wrap;
+}
+
+.rail-auto-bar {
+  margin: 8px 10px 2px;
+}
+
+.chat-detach-head .auto-apply-bar {
+  margin: 0 2px 0 8px;
+  flex: 0 1 auto;
+}
+
+.auto-apply-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.auto-apply-label::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--text-3);
+}
+
+.auto-apply-label.is-running {
+  color: var(--primary);
+}
+
+.auto-apply-label.is-running::before {
+  background: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.auto-apply-label.is-paused {
+  color: var(--warn);
+}
+
+.auto-apply-label.is-paused::before {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px var(--warn-soft);
+}
+
+.auto-apply-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.auto-apply-counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.auto-apply-counts b {
+  color: var(--text-1);
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+}
+
+/* idle：结束按钮不出现（原型用 data-mode 选择器隐藏，这里用 v-if，规则留作兜底）。 */
+.auto-apply-bar[data-mode='idle'] [data-testid='auto-greet-stop-btn'] {
+  display: none;
+}
+
+/* 「暂停」主按钮的警示色（原型 .btn-pause；controls.css 未定义，在此补齐）。 */
+.btn-pause {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+
+.btn-pause:hover {
+  filter: brightness(1.08);
+}
+
+/* ============================================================ *
+ * 求职期望 + 提示行
+ * ============================================================ */
+
+.expect-row {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 2px;
+}
+
+.chat-note {
+  flex: 1 1 100%;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ============================================================ *
+ * 窄屏：右栏与对话框各自占满一行（不引入新的断点体系，只做堆叠兜底）
+ * ============================================================ */
+
+@media (max-width: 900px) {
+  .chat-rail,
+  .chat-detach.is-open {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .chat-detach-rail {
+    flex: 0 0 200px;
+    width: 200px;
+  }
+}

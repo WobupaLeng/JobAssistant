@@ -1,0 +1,852 @@
+/*
+ * 概览页（M1）专用样式。
+ *
+ * 为什么单独一份、而不是改 styles/*.css：
+ * `styles/` 那 11 份是 Leptos 版冻结的正文（C4 的引入顺序也是契约）。原型
+ * `prototypes/ui-v1/index.html` 的卡片已经换成「五行卡 + 打招呼方块」，
+ * 用的类名（.pill / .job-card-top / .job-info / .job-greet / .score-box）
+ * 与 Leptos 的 .job-tab / .jc-* 是两套东西，混在一份里必然互相覆盖。
+ * 所以：**原型特有的类名全部落在这里**，那一份正文一行不动，
+ * 本文件在 `styles/index.css` 里排在 11 条 @import 之后（后加载、优先级更高）。
+ *
+ * 字号说明：`styles/` 里没有 --fs-* 令牌族（也没有 --ui-scale），
+ * 原型的 calc(var(--fs-sm) * …) 无处可依。这里统一按同比例换成 px，
+ * 与 app.css 的既有写法保持一致；将来补上令牌族时只改本文件的头部常量。
+ *
+ * 红线（AGENTS.md §3 第 5 条）：本文件不得出现 `//!` 或 `///`；
+ * 注释正文里也不得出现反引号包住的「星号斜杠」——块注释被提前闭合会让
+ * 后面几份样式表整片失效，而构建照样打印成功。
+ */
+
+.job-dashboard {
+  --vd-fs-2xs: 10.5px;
+  --vd-fs-xs: 11.5px;
+  --vd-fs-sm: 12.5px;
+  --vd-fs-md: 15px;
+}
+
+/* ---------- 岗位列表卡：整卡吃满高度，网格自己滚 ---------- */
+.job-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.job-tabs-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px 6px;
+}
+
+.job-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hairline);
+  background: var(--glass-0);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 560;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.pill:hover {
+  color: var(--text-1);
+  border-color: var(--hairline-strong);
+}
+
+.pill.is-active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--text-1);
+}
+
+.pill-count {
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.pill.is-active .pill-count {
+  color: var(--text-1);
+}
+
+.job-sorts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sort-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.sort-pill:hover {
+  color: var(--text-1);
+}
+
+.sort-pill.is-active {
+  color: var(--text-1);
+  border-color: var(--hairline);
+  background: var(--glass-0);
+}
+
+.sort-arrow {
+  font-size: 10px;
+  color: var(--primary);
+}
+
+/* ---------- 批量条 ---------- */
+.job-batch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  padding: 5px 14px;
+  background: var(--glass-0);
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  font-size: 12px;
+}
+
+.batch-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.batch-count,
+.batch-total {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-actions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.batch-actions[hidden] {
+  display: none;
+}
+
+/* ---------- 卡片网格：3 列 → 2 列 → 1 列（唯一断点是 1599px） ---------- */
+.job-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-content: start;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 14px 14px;
+}
+
+@media (max-width: 1599px) {
+  .job-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* 聊天抽屉展开时列数 = 收起时 − 1。顺序必须在断点之后（SPEC §16.9 裁决 X）。 */
+.app-shell.is-chat-open .job-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 1599px) {
+  .app-shell.is-chat-open .job-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- 卡片本体 ---------- */
+.job-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--glass-0);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+.job-card:hover {
+  border-color: var(--hairline-strong);
+}
+
+.job-card.is-checked {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.job-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 勾选框默认不占位；只有 .job-grid.is-selecting 时才出现（裁决 S）。 */
+.job-check-slot {
+  display: none;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.job-grid.is-selecting .job-check-slot {
+  display: flex;
+}
+
+.job-check {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.job-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--vd-fs-sm, 12.5px);
+  font-weight: 620;
+  color: var(--text-1);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-salary {
+  flex: 0 0 auto;
+  font-size: var(--vd-fs-sm, 12.5px);
+  font-weight: 620;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.job-meta {
+  font-size: var(--vd-fs-xs, 11.5px);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 地址行（上）+ 分值（左下）+ 打招呼方块（右侧跨两行）。 */
+.job-info {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  row-gap: 6px;
+  align-items: center;
+  margin-top: auto;
+}
+
+.job-info .job-addr {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.job-info .score-box {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: start;
+}
+
+.job-addr {
+  min-width: 0;
+  font-size: var(--vd-fs-2xs, 10.5px);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-addr.is-empty {
+  opacity: 0.5;
+}
+
+.score-box {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  background: var(--glass-3);
+  color: var(--text-1);
+  font-size: var(--vd-fs-md, 15px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 20px;
+}
+
+.score-box i {
+  font-size: var(--vd-fs-2xs, 10.5px);
+  font-style: normal;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.score-box.is-hi {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+  color: var(--primary-text);
+}
+
+/* 打招呼方块：正方、跨两行、主色底白字（裁决 W2）。 */
+.job-greet {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(var(--vd-fs-sm, 12.5px) * 1.55 * 2 + 12px);
+  min-width: calc(var(--vd-fs-sm, 12.5px) * 4.6);
+  aspect-ratio: 1 / 1;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: var(--vd-fs-sm, 12.5px);
+  font-weight: 620;
+  line-height: 1.55;
+  cursor: pointer;
+}
+
+.job-greet:hover {
+  filter: brightness(1.08);
+}
+
+.job-greet:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ---------- 骨架 / 空态 / 错误态 ---------- */
+.job-card.is-skeleton {
+  cursor: default;
+  gap: 7px;
+}
+
+.job-card.is-skeleton:hover {
+  border-color: var(--hairline);
+}
+
+.skel-line {
+  display: block;
+  height: 10px;
+  border-radius: 4px;
+  background: var(--glass-2);
+  animation: vd-skel 1.4s ease-in-out infinite;
+}
+
+@keyframes vd-skel {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+.job-state {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 36px 12px;
+  text-align: center;
+}
+
+.state-glyph {
+  font-size: 22px;
+  color: var(--text-3);
+}
+
+.state-glyph.is-bad {
+  color: var(--bad-text);
+}
+
+.state-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.state-sub {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* ---------- 抓取条 ---------- */
+.scrape-card {
+  flex: 0 0 auto;
+}
+
+.scrape-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+}
+
+.btn-pause {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  color: var(--warn-text);
+}
+
+.btn-pause:hover:not(:disabled) {
+  background: var(--warn-bg-strong);
+}
+
+.scrape-limit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.scrape-limit .input {
+  width: 64px;
+  height: 24px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.scrape-brief {
+  font-size: 11.5px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.scrape-total {
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.scrape-last {
+  margin: 0;
+  padding: 0 14px 10px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 筛选面板（原型 .f-* 一套） ---------- */
+.scrape-filter-bar {
+  flex: 0 0 auto;
+  padding: 0;
+}
+
+.filter-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.f-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.f-title {
+  font-size: 13px;
+  font-weight: 620;
+  color: var(--text-1);
+}
+
+.f-title2 {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.f-count {
+  font-size: 11.5px;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.f-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  max-height: min(58vh, 560px);
+  overflow-y: auto;
+}
+
+.f-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.f-glabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.f-glabel-sub {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.f-gbody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.f-grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.f-tri {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.f-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.f-cell-label {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.f-select,
+.f-num {
+  height: 28px;
+  font-size: 12px;
+}
+
+.f-textarea {
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.f-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.f-line .input {
+  height: 26px;
+  font-size: 12px;
+}
+
+.f-dash {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.f-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.f-chip {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hairline);
+  background: var(--glass-0);
+  color: var(--text-2);
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.f-chip:hover {
+  color: var(--text-1);
+  border-color: var(--hairline-strong);
+}
+
+.f-chip.is-on {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--text-1);
+}
+
+.f-clear {
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11.5px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.f-clear:hover {
+  color: var(--text-1);
+}
+
+.f-hint {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.f-subblock {
+  padding-top: 10px;
+  border-top: 1px dashed var(--hairline);
+}
+
+.f-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--hairline);
+}
+
+.f-note {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+/* ---------- 顶栏尾段（概览页） ---------- */
+.tb-tail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hairline);
+  background: var(--glass-0);
+}
+
+.seg {
+  height: 20px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.seg.is-active {
+  background: var(--primary-soft);
+  color: var(--text-1);
+}
+
+.seg:disabled,
+.seg[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tb-tokens {
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 最近事件卡 ---------- */
+.log-card {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.log-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.log-live.is-on::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.tb-stats {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+}
+
+.log-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.log-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  padding: 1px 0;
+}
+
+.log-time {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.log-level {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--text-3);
+}
+
+.log-level.is-warn {
+  color: var(--warn-text);
+}
+
+.log-level.is-error {
+  color: var(--bad-text);
+}
+
+.log-msg {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 页面级错误条 ---------- */
+.app-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  margin-bottom: 2px;
+  border-radius: var(--radius);
+  border: 1px solid var(--bad-border);
+  background: var(--bad-bg);
+  color: var(--bad-text-soft);
+  font-size: 12px;
+}
+
+.app-error-ico {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bad-bg-strong);
+  color: var(--bad-text-softer);
+  font-weight: 700;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.app-error-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.app-error-text code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+/* ---------- 窄屏兜底 ---------- */
+@media (max-width: 900px) {
+  .f-tri,
+  .f-grid2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .job-tabs-row {
+    gap: 6px;
+  }
+}

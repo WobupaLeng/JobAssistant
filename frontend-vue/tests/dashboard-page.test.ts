@@ -1,105 +1,74 @@
 // @vitest-environment jsdom
 /**
- * 概览页：抓取筛选栏 + 城市槽位接线。
+ * 概览页结构契约。
  *
- * 本轮只验「城市接进去了」：容器 testid 由 `pageTestId('dashboard')` 派生、
- * 筛选栏存在、`CityPicker` 在栏内且显示默认城市、选中后落到页面持有的筛选状态上。
- * 薪资 / 经验 等其余槽位与 `scrape_start` 属后续阶段，这里断言它们**还没有**，
- * 防止有人提前把它们塞回来却没人接线。
+ * 与 M1 之前的版本相比，这里断言的是**迁移后的真实结构**：
+ * 整页由 `App.vue` 分发，`DashboardPage` 依赖 Tauri invoke（jsdom 里没有），
+ * 所以挂载 `AppShell` 来钉顶栏与页面锚点，而不是硬渲染整页。
  *
- * 文件级切 jsdom 而不是改全局 `environment`：本仓库其余用例都是纯函数，漏写这一行
- * 会报 `document is not defined`。
+ * 不变的那条最重要的约束：**整份 DOM 里 page-* 锚点只能有一个**——
+ * 外壳与页面各渲染一次就会有两个，E2E 的 `getByTestId('page-dashboard')`
+ * 会直接抛「resolved to 2 elements」。
  */
-import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { describe, expect, it } from 'vitest';
 
-import DashboardPage from '../src/pages/DashboardPage.vue';
-import CityPicker from '../src/components/CityPicker.vue';
-import { createFilter, filterPayload, isDefaultFilter } from '../src/features/scrape/filter';
-import { CITY_DEFAULT } from '../src/lib_ui/options';
-import { cityName } from '../src/lib_ui/data/cities';
-import { NAV_ALL, pageTestId } from '../src/lib_ui/nav';
+import AppShell from '../src/components/AppShell.vue';
+import { pageTestId, navTestId } from '../src/lib_ui/nav';
+import { createDraft, decode, encode } from '../src/lib_ui/scrape-filter-model';
 
-const tid = (id: string) => `[data-testid="${id}"]`;
-
-describe('概览页 · 页面容器', () => {
-  it('根容器 testid 由 pageTestId 派生，不手写字符串', () => {
-    const w = mount(DashboardPage);
-    const root = w.get(tid('page-dashboard'));
-    expect(root.element.tagName).toBe('SECTION');
-    expect(pageTestId('dashboard')).toBe('page-dashboard');
-    expect(w.find(tid('scrape-filter-bar')).exists()).toBe(true);
+describe('AppShell 结构', () => {
+  it('外壳只渲染一个 page-* 锚点，且 slug 跟当前页走', () => {
+    const w = mount(AppShell, { props: { nav: 'dashboard' } });
+    const pages = w.findAll('[data-testid^="page-"]');
+    expect(pages).toHaveLength(1);
+    expect(pages[0]!.attributes('data-testid')).toBe(pageTestId('dashboard'));
+    expect(w.find('[data-testid="app-root"]').exists()).toBe(true);
+    expect(w.find('[data-testid="topbar"]').exists()).toBe(true);
     w.unmount();
   });
 
-  it('没有新增页面别名 testid：页面级锚点只认 page-<slug> 规则', () => {
-    const w = mount(DashboardPage);
-    const ids = w.findAll('[data-testid]').map((n) => n.attributes('data-testid') ?? '');
-    const pageAnchors = ids.filter((id) => id.startsWith('page-'));
-    expect(pageAnchors).toEqual(['page-dashboard']);
-    for (const id of pageAnchors) {
-      expect(NAV_ALL.map((n) => pageTestId(n))).toContain(id);
-    }
+  it('切页只换锚点，不新增锚点', () => {
+    const w = mount(AppShell, { props: { nav: 'config' } });
+    expect(w.findAll('[data-testid^="page-"]')).toHaveLength(1);
+    expect(w.find(`[data-testid="${pageTestId('config')}"]`).exists()).toBe(true);
     w.unmount();
+  });
+
+  it('showNav=false 时不渲染导航页签与内置主题按钮（概览页顶栏由页面自理）', () => {
+    const w = mount(AppShell, { props: { nav: 'dashboard', showNav: false } });
+    expect(w.find(`[data-testid="${navTestId('chat')}"]`).exists()).toBe(false);
+    expect(w.find('[data-testid="theme-toggle"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('showNav=true 时页签齐全，点击 emit navigate 且外壳自己不切页', async () => {
+    const w = mount(AppShell, { props: { nav: 'dashboard', showNav: true } });
+    const tabs = w.findAll('[data-testid^="nav-"]');
+    expect(tabs.length).toBeGreaterThanOrEqual(4);
+    await w.find(`[data-testid="${navTestId('config')}"]`).trigger('click');
+    expect(w.emitted('navigate')?.[0]).toEqual(['config']);
+    expect(w.find(`[data-testid="${pageTestId('dashboard')}"]`).exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('is-chat-open 由 prop 驱动（列数 = 收起 − 1 的 CSS 钩子）', () => {
+    const off = mount(AppShell, { props: { nav: 'dashboard' } });
+    expect(off.find('.app-shell').classes()).not.toContain('is-chat-open');
+    off.unmount();
+    const on = mount(AppShell, { props: { nav: 'dashboard', isChatOpen: true } });
+    expect(on.find('.app-shell').classes()).toContain('is-chat-open');
+    on.unmount();
   });
 });
 
-describe('概览页 · 城市槽位', () => {
-  it('CityPicker 挂在筛选栏里，显示默认城市', () => {
-    const w = mount(DashboardPage);
-    const bar = w.get(tid('scrape-filter-bar'));
-    const picker = bar.getComponent(CityPicker);
-    expect(picker.vm.$el.tagName).toBe('DIV');
-    const trigger = bar.get(tid('scrape-filter-city'));
-    expect(trigger.element.tagName).toBe('BUTTON');
-    expect(trigger.text()).toContain(cityName(CITY_DEFAULT));
-    w.unmount();
+describe('筛选草稿的本地往返（替换旧的 createFilter/filterPayload 用例）', () => {
+  it('默认草稿能原样编码后解回来', () => {
+    const d = createDraft();
+    expect(decode(encode(d))).toEqual(d);
   });
 
-  it('点省点市 → 选中结果落到筛选状态上（而不是消失在 emit 里）', async () => {
-    const w = mount(DashboardPage);
-    const bar = w.get(tid('scrape-filter-bar'));
-    await bar.get(tid('scrape-filter-city')).trigger('click');
-    const firstProvince = bar.get('[data-testid^="city-picker-province-"]');
-    await firstProvince.trigger('click');
-    const firstCity = bar.get('[data-testid^="city-picker-city-"]');
-    const code = firstCity.attributes('data-testid')!.replace('city-picker-city-', '');
-    await firstCity.trigger('click');
-
-    // 面板关闭、触发按钮回显新城市 → 说明 v-model 真的写回了页面状态
-    expect(bar.find(tid('city-picker-panel')).exists()).toBe(false);
-    expect(bar.get(tid('scrape-filter-city')).text()).toContain(cityName(code));
-    w.unmount();
-  });
-
-  it('筛选栏里本轮只有城市一个槽位', () => {
-    const w = mount(DashboardPage);
-    const bar = w.get(tid('scrape-filter-bar'));
-    expect(bar.findAll('.scrape-filter-field').length).toBe(1);
-    expect(bar.getComponent(CityPicker).vm.$el.classList.contains('city-picker')).toBe(true);
-    w.unmount();
-  });
-});
-
-describe('概览页 · 筛选状态骨架（纯逻辑）', () => {
-  it('初始城市为 CITY_DEFAULT，且判定为默认筛选', () => {
-    const f = createFilter();
-    expect(f.city).toBe(CITY_DEFAULT);
-    expect(isDefaultFilter(f)).toBe(true);
-  });
-
-  it('createFilter 每次返回新对象', () => {
-    const a = createFilter();
-    const b = createFilter();
-    expect(a).not.toBe(b);
-    a.city = '101010100';
-    expect(b.city).toBe(CITY_DEFAULT);
-  });
-
-  it('载荷只带城市，改城市后不再是默认筛选', () => {
-    const f = { ...createFilter(), city: '101010100' };
-    expect(isDefaultFilter(f)).toBe(false);
-    expect(filterPayload(f)).toEqual({ city: '101010100' });
-    expect(Object.keys(filterPayload(f))).toEqual(['city']);
+  it('没有本地草稿时 decode(null) 给出默认值，而不是抛错', () => {
+    expect(decode(null)).toEqual(createDraft());
   });
 });

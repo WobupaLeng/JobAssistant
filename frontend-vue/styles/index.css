@@ -18,3 +18,11 @@
 @import './sensitive.css';
 @import './auto.css';
 @import './filter.css';
+
+/* 第 12 份之后追加：M1 概览页原型专有类名（11 条契约顺序不动，见文件头注释） */
+@import './vue-dashboard.css';
+
+/* 第 13/14 份：M2 聊天页 / M3+M4 配置与决策页专有类名。
+ * 由总控在并行派发前预挂，lane 只填各自文件，不再改本入口。 */
+@import './vue-chat.css';
+@import './vue-pages.css';

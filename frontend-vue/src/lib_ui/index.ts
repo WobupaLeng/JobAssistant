@@ -14,3 +14,23 @@ export * from './session';
 export * from './text';
 export * from './theme';
 export * from './time';
+export * from './auto-model';
+export * from './chat-model';
+export * from './job-list-model';
+export * from './longpress';
+export * from './scrape-filter-model';
+export * from './scrape-panel-model';
+export {
+  SENSITIVE_TABS,
+  allChecked,
+  countLabel,
+  deleteLabel,
+  matchesKind,
+  recordText,
+  removeIds,
+  sensitiveKind,
+  toggleRecord,
+  visibleRecords,
+  type SensitiveTab,
+  type SensitiveTabMeta,
+} from './sensitive-model';
