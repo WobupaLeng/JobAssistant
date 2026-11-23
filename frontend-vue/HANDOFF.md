@@ -68,6 +68,12 @@
 - **门禁**：typecheck 0 错；vitest 34 文件 572 全绿（新增 2 守卫：chat-contract 入场动效 + geometry body 横向出口）；build 产物 76.04 kB，`{` 计数 738 = M2 731 + 新增 7 块，新规则逐条可达；槽位 A cargo 独占 `%TEMP%\jt-m3-polish` exit 0 + compileall 0。证据 `%TEMP%\jt-m3-polish\m3-{1150-right-edge,1440}.png`。
 - **顺手发现（未动，仅报告）**：layout.css `@media(max-width:1100px)` 的 `.dashboard.is-fill-page` 降级块是死代码（Vue src 对 `.dashboard`/`is-fill-page` 零命中）；`@media(max-width:1180px)` 收紧内边距块在窄视口仍会触发（媒体查询看视口不看布局宽），是否属「<1200 不降级」口径待架构裁决。
 
+**M3 后续批 · 分项 token 读数接线完成**（Chief 派单，DTO 现成、零新增 invoke、零锚点增删）：
+- `TopbarTail.vue` props 增 `tokensGreet/tokensScore`（默认 0）；`.tb-tokens` 改 inline-flex gap 8（原型 L485-490 `.tb-stats` 语义），累计读数包成单项，新增分隔线 `.tb-sep`（1×14 hairline，原型 L487）与两枚 `.rail-stat` 分项「模型打分 / 打招呼」（数字 text-1/650，原型 L486）；1360–1599 隐藏分项与分隔线（原型 L1335-1337）；折叠 chip title 扩为全量三值「累计 N token · 模型打分 N · 打招呼 N」（原型 L1406 逐字格式）。分项 `<b>` 照原型无 testid。
+- `DashboardPage.vue` 增两个纯派生 computed 读既有 config 字段（tokens_greet/tokens_score）；新规则住 `vue-dashboard.css`（全 var() 零字面量）；`qa-testids` 增 1 守卫。
+- **数据真实性**：Rust 核心无累计写入路径（偏差②更正），读数为旧库遗留值（无 Tauri 预览下为 0），前端不造数；后端补累计排 M4 之后（Chief 顺序）。
+- **门禁**：typecheck 0 错；vitest 34 文件 573 全绿；build 76.39 kB，`{` 计数 743 = 738 + 新增 5 块，分项规则与 1360–1599 媒体块可达；槽位 A cargo 独占 `%TEMP%\jt-m3b-polish` exit 0 + compileall 0。实测 1600 分项可见（text-1/650）、1440 分项与分隔线隐藏、1150 chip title 全量三值且横向出口仍生效。证据 `%TEMP%\jt-m3-polish\m3b-1600-stats.png`。
+
 ---
 
 ## 2. 坑（踩过的，别再踩）
@@ -116,7 +122,7 @@
 2. **几何契约补齐**：✅ 已完成（用户裁决「补齐实现」，见 §1）——`--ui-scale` + 5 档 `--fs-*` 落地，174 处 font-size 全 var()、产物裸 px 归零，三窗 scale + 敏感库 720 居中窗 + A54，`--detach-w` 单一来源。残留：契约 CSS 160 处颜色字面量全量收口（非阻塞，另轮）。
 3. **槽位 C 产物冒烟**（根 AGENTS §5.3 / ARCH-003 §6 R5，用户已授权 release lane）：先删 CSP `'wasm-unsafe-eval'`（ARCH-003:248 阶段 4 遗漏，WASM 已不存在），再 `cd backend-tauri && npx tauri build --no-bundle`（独占 `CARGO_TARGET_DIR=%TEMP%\jt-release`），产物拷到**工作区外**启动，确认 Vue 真渲染（CSP 白屏唯一实测点）。
 4. **登出入口接线**：✅ 已完成（`login-state` emit + 前端订阅 + 保存/退出按钮，见 §1）。
-5. **M1 同屏编排合并**：✅ 已完成（ADR-004 / SPEC-001，见 §1 的锚点增删清单）。**M2 像素对齐** ✅（`9a60d3f`）、**M3 视觉收尾** ✅（见 §1）。下一手：**QA** 按清单重锚 + 零 Mock 验收；分项 token 展示接线＝M3 后续批（Chief 已派前端打磨，DTO 现成、不等后端）；后端补累计写入排 M4 之后（Chief 顺序）。
+5. **M1 同屏编排合并**：✅ 已完成（ADR-004 / SPEC-001，见 §1 的锚点增删清单）。**M2 像素对齐** ✅（`9a60d3f`）、**M3 视觉收尾** ✅（见 §1）。下一手：**QA** 按清单重锚 + 零 Mock 验收；分项 token 展示接线 ✅（M3 后续批，见 §1）；后端补累计写入排 M4 之后（Chief 顺序）。
 6. **Liquid Glass L2/L3**（根 §7.2 #3，待用户裁决是否开工）：规格 `git show d39bae4:docs/ui/UI-SPEC-liquid-glass-l2-l3.md`。
 7. 后端未决项（根 §7.2 #1/#4/#5）与 QA 低#1-3 alias 缺口，单独路由 legacy/backend lane。
 

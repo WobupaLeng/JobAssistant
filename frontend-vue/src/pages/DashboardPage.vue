@@ -160,6 +160,10 @@ const minScore = ref<number | null>(null);
 const maxJd = ref(0);
 const config = shallowRef<AppConfigReply | null>(null);
 const tokensTotal = computed(() => config.value?.tokens_total ?? 0);
+/* 分项读数（Chief 派单，DTO 现成）：只读既有 config 字段，零新增 invoke。
+ * Rust 核心暂无累计写入路径（见 HANDOFF 偏差②更正），读数为旧库遗留值，前端不造数。 */
+const tokensGreet = computed(() => config.value?.tokens_greet ?? 0);
+const tokensScore = computed(() => config.value?.tokens_score ?? 0);
 
 const draft = ref<FilterDraft>(createDraft());
 const savedKnown = ref<Record<string, unknown>>({});
@@ -851,6 +855,8 @@ watch(
       <TopbarTail
         :segs="segs"
         :tokens-total="tokensTotal"
+        :tokens-greet="tokensGreet"
+        :tokens-score="tokensScore"
         :sensitive-open="sensitiveOpen"
         :theme-label="themeLabel"
         @toggle-sensitive="

@@ -19,6 +19,10 @@
  *   （锚点 `token-total`），<1360 折叠成一枚 chip（锚点 `token-total-chip`，类名
  *   `.tb-token-chip`——本仓库 `.tb-stats` 已被日志卡的 C9 进度块占用）。两者各唯一一份，
  *   读数文案都是「累计 N token」，折叠 chip 的 title 给全量读数。
+ * - **分项读数**（原型 L1402-1403，Chief 派单接线）：模型打分/打招呼两枚 `rail-stat`
+ *   与分隔线住在 `.tb-tokens` 内，1360–1599 随原型隐藏；数据来自既有 config DTO
+ *   （tokens_greet/tokens_score），零新增 invoke。Rust 核心暂无累计写入路径，
+ *   读数为旧库遗留值（见 HANDOFF 偏差②更正），前端不造数。
  */
 import { tokenText, type ScoreModeSeg } from '../lib_ui/scrape-panel-model';
 
@@ -26,10 +30,12 @@ withDefaults(
   defineProps<{
     segs: readonly ScoreModeSeg[];
     tokensTotal?: number;
+    tokensGreet?: number;
+    tokensScore?: number;
     sensitiveOpen?: boolean;
     themeLabel?: string;
   }>(),
-  { tokensTotal: 0, sensitiveOpen: false, themeLabel: '深色' },
+  { tokensTotal: 0, tokensGreet: 0, tokensScore: 0, sensitiveOpen: false, themeLabel: '深色' },
 );
 
 const emit = defineEmits<{
@@ -70,16 +76,20 @@ const emit = defineEmits<{
       敏感库
     </button>
     <!-- 原型 L1400-1406：同一枚读数两种 DOM，CSS 在 1360 断点处互换显隐（A32 各唯一 1 份）。
-         config DTO 已下发 tokens_total/greet/score 三字段（commands_config.rs L58-60），但 Rust 核心
-         无累计写入路径（三键只读、greet/score 逐次 tokens 未持久化），读数仅反映旧库遗留值；
-         分项展示是否接线待派单，前端不造数，现 title 只给累计值。 -->
-    <span class="tb-tokens" :title="`累计 ${tokenText(tokensTotal)} token`">累计
-      <b class="token-total" data-testid="token-total">{{ tokenText(tokensTotal) }}</b> token</span>
+         分项（模型打分/打招呼）与分隔线住 .tb-tokens 内，1360–1599 随原型 L1335-1337 隐藏；
+         折叠 chip 的 title 给全量三值（原型 L1406 逐字格式）。数据来自既有 config DTO，
+         Rust 核心暂无累计写入路径，读数为旧库遗留值，前端不造数（见 HANDOFF 偏差②更正）。 -->
+    <span class="tb-tokens" :title="`累计 ${tokenText(tokensTotal)} token`">
+      <span>累计 <b class="token-total" data-testid="token-total">{{ tokenText(tokensTotal) }}</b> token</span>
+      <i class="tb-sep" aria-hidden="true"></i>
+      <span class="rail-stat">模型打分 <b>{{ tokenText(tokensScore) }}</b></span>
+      <span class="rail-stat">打招呼 <b>{{ tokenText(tokensGreet) }}</b></span>
+    </span>
     <span
       class="chip tb-token-chip"
       tabindex="0"
       data-testid="token-total-chip"
-      :title="`累计 ${tokenText(tokensTotal)} token`"
+      :title="`累计 ${tokenText(tokensTotal)} token · 模型打分 ${tokenText(tokensScore)} · 打招呼 ${tokenText(tokensGreet)}`"
     >累计 <b>{{ tokenText(tokensTotal) }}</b> token</span>
     <button class="btn btn-sm btn-ghost" type="button" data-testid="shell-config-btn" @click="emit('open-config')">
       配置

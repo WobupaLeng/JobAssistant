@@ -820,10 +820,42 @@ body {
   color: var(--text-3);
 }
 
+/* token 统计组（原型 L485-490 .tb-stats 语义）：inline-flex + gap 8，
+ * 累计读数一项、分隔线一项、模型打分/打招呼分项各一项；<1360 整组让位给 chip。 */
 .tb-tokens {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: var(--fs-2xs);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+}
+
+/* 原型 L487：分隔线 1×14 hairline。 */
+.tb-tokens .tb-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--hairline-strong);
+  flex: 0 0 auto;
+}
+
+/* 原型 L485-486：分项读数与累计同族，数字提亮一档 text-1/650。
+ * 字号/颜色继承 .tb-tokens（本仓库 fs-2xs 口径），不另立档位。 */
+.tb-tokens .rail-stat {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.tb-tokens .rail-stat b {
+  color: var(--text-1);
+  font-weight: 650;
+}
+
+/* 原型 L1335-1337：1360–1599 隐藏分项与分隔线，只留累计。 */
+@media (min-width: 1360px) and (max-width: 1599px) {
+  .tb-tokens .rail-stat,
+  .tb-tokens .tb-sep {
+    display: none;
+  }
 }
 
 /* token 折叠 chip（原型 L493/L501-502/L1406）：<1360 折叠成一枚 chip，≥1360 展开。
