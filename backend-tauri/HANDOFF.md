@@ -9,11 +9,15 @@
 
 ## 1. 现状
 
-命令面、领域规则、存储、协议、会话编排都已落地并有测试覆盖；工作树干净（`git status` 0）。
+命令面、领域规则、存储、协议、会话编排都已落地并有测试覆盖。
 
 **本轮功能接线完成**（提交 d3cd57d / b6bebde）：① `scrape_defaults` 运行时消费——`Command::ScrapeStart` 协议扩 9 个可选字段（city/salary/experience/degree/scale/stage/industry/job_type/max_pages，蛇形、`skip_serializing_if` 向后兼容，与 `scraper/sidecar.py` payload 键逐字对齐），`ScrapeJobSpec` 同步扩展 + `start_command()` 透传，`scrape_start` 读库填 spec（前端 args 优先、`ScrapeArgs` 契约零改动），新增 `core/scrape/filters.rs`（`filters_from_defaults`/`exclude_rules_from_defaults`），用户排除词经 `ExcludeRules::from_keywords` 注入 `IngestConfig`（留 Rust core，禁下放 sidecar）；② serde alias 补缺（`GreetArgs` jobId/useLlm、`RescoreArgs` logChanges）；③ 登录链——`lib.rs` setup 起 `login-state-watcher` 线程 500ms 轮询 `ScrapeState`，`(platform,state)` 变化即 `app.emit("login-state", {platform,state,logged_in})`（蛇形冻结契约，纯函数 `login_snapshot`/`login_emit_decision` 去重 + 会话消失补播 closed），`session.rs` `ScrapeProgress` 增 `login_platform` 并在 consume/adopt 继承，`login_status` 查询结论写回 progress。`cargo test --lib` 392 passed。
 
-**唯一未验证的路径**是 sidecar 在真实 Tauri 窗口里拉起 Chrome，见根 `AGENTS.md` 7.2 第 1 项（阻塞项，根因在 WebView2，不在本模块代码）。**已知小缺口**：`work_weekend=no_bigweek`（大小周）`rules.rs` 只实现 `double` 分支；`login_status.saved` 恒 false（不读 `platform_login:{platform}` marker）。
+**词元边界累计已接线**（ADR-005，提交 7445545）：`TokenMeter` 装饰器包住 `LlmClient::complete` 边界，greet/score 每轮成功（含重试）各计一次，`reply.tokens` 语义不变；`ConfigStore::bump_tokens` 单锁事务 upsert `tokens_total`/`tokens_greet`/`tokens_score` 三键（SQL 侧加法，遗留值只增不清）；bump 失败只 warn，绝不失败业务。
+
+**周末三档筛选已实现**（SPEC-004，提交 009c643）：`work_weekend` 支持 `double`/`no_bigweek`/`single`（double ⊂ no_bigweek ⊂ single），JD 命中按休息制度族归类（无休＞单休＞大小周，多重命中取最重族），未标注归一化为双休、三档均含；命中池补「无休」。前端 `single` 选项与 hint 校正归前端批（options.ts/types.ts），落地前两端字面量集尚未对齐。
+
+**唯一未验证的路径**是 sidecar 在真实 Tauri 窗口里拉起 Chrome，见根 `AGENTS.md` 7.2 第 1 项（阻塞项，根因在 WebView2，不在本模块代码）。**已知小缺口**：`login_status.saved` 恒 false（不读 `platform_login:{platform}` marker）。
 
 ---
 
@@ -36,6 +40,7 @@
 - **`window-vibrancy` 已不在依赖里**：毛玻璃走 `windows-sys` 动态加载 `SetWindowCompositionAttribute`。`Cargo.toml` 的注释写着原因，别再把它加回去。
 - **单实例互斥体句柄不能 `CloseHandle`**：设计上故意泄漏到进程退出。
 - **`domain` 里的注释写着 `reqwest`，实际依赖是 `ureq`**：这是文案漂移，改到那里顺手修正。
+- **`commands_auto.rs` 有 2 个既有 unused import 警告**（`GreetingProfile`/`DEFAULT_PROFILE`）：历史遗留，与功能提交分开清理。
 - **`tauri.conf.json` 的 `version` 是 `0.2.0`，`Cargo.toml` 是 `0.1.0`**：两者不一致，改版本号时两个文件都要动。
 - **`beforeDevCommand` / `beforeBuildCommand` 已设为 `npm --prefix ../frontend-vue run dev` / `run build`**（Vue 重写后接线；`backend-tauri/package.json` 锚 `@tauri-apps/cli` 修 cwd，否则 `../frontend-vue` 解析到仓库外 ENOENT）。`tauri.conf.json` 的 csp 仍是唯一来源（`script-src 'self'`，`wasm-unsafe-eval` 已删，见根 `AGENTS.md` 3.1）。
 
@@ -43,6 +48,7 @@
 
 - **驼峰 / 蛇形参数**：新增命令参数不加 `alias` 会被 serde **静默丢弃**。
 - **`min_score` 不在 `WRITABLE_KEYS`**：塞进 `set_app_config` 被静默跳过，门槛只走 `set_limit`。
+- **词元三键的累计口径**：`tokens_total`/`tokens_greet`/`tokens_score` 只经 `ConfigStore::bump_tokens` SQL 侧加法累计，遗留值只增不清，非数字 CAST→0（与读侧 `num()` 同口径）。
 - **`LineParse::Ignore` 不是解析失败**：它是「这行不该冒泡」的正常分支。
 - **`session.rs` 的预筛否决 `rule` 字段恒写 `"prescan"`**：决策日志里看不出具体命中了哪条卡片规则。
 
