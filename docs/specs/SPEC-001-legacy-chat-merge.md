@@ -1,7 +1,7 @@
 # SPEC-001-legacy · 聊天编排同屏合并（chat-merge）
 
 > 状态：**READY_FOR_IMPLEMENTATION**（规格冻结，2026-11-23）
-> 修订：**Rev 5**（2026-11-23，用户裁决·占位会话改规格不动代码——推翻 Rev 4 裁决 2，见「用户裁决」节与 UI-SPEC §19；A6 分配宽口径〔Rev 4 裁决 1〕维持；Rev 3 DOM 顺序定谳；Rev 2 撤导航用户裁决；Rev 1 首冻）
+> 修订：**Rev 6**（2026-11-23，theme 锚点定谳=`theme-toggle`〔基线 L157，v3 未覆盖〕，见 UI-SPEC §20；M2 已知偏差路由意见；Rev 5 占位会话用户裁决；Rev 4 A6 分配宽口径；Rev 3 DOM 顺序定谳；Rev 2 撤导航；Rev 1 首冻）
 > 决策依据：[`ADR-004`](../adr/ADR-004-legacy-chat-orchestration.md)（用户裁决「方案 1」：实现向 SPEC 对齐，整页化否决；§9 追加裁决：撤除二级导航）
 > 设计真源：[`UI-SPEC-chat-detach-v3`](../ui/UI-SPEC-chat-detach-v3.md)（冻结，一字不动）+ `prototypes/ui-v1/index.html`；其余条款见 `UI-SPEC-legacy-baseline.md`
 > 证据基线：HEAD `a4bb3d5`，工作区干净
@@ -196,4 +196,7 @@ M1 期间 `frontend-vue/` 单写者；M2/M3 同样单写者串行，严禁 UI �
 - 四个废止 testid 在 `src/` 命中 0（已核，保持）；`autoBarLocation` 二选一搬移机制已在 ChatPage 落地，提升后保留。
 - 本 SPEC 与 ADR-004 同日冻结；实施细化不得突破契约面与 AC，突破即熔断回存量架构设计修订。
 - 架构侧门禁快照（Rev 5，HEAD `c4913a2` + M2 在途工作树）：架构 lane 实跑槽位 A 全绿——cargo test 392 过 0 败（1 ignored=已知 sidecar_smoke）、typecheck 0 错、compileall 过。vitest 当轮 567/568，唯一失败为 `geometry.test.ts:137` hex 守卫命中 M2 在途 `.chat-rail::before` mask `#000`（非 HEAD 缺陷、非本文档所致）。**已由前端编码接手处置（M2 改派后）**：整条 `::before` 规则移进 `styles/layout.css`（与 `.card::before` 同宿主，原型 L1055–1057 数值逐字保留）；`.avatar` 顶边内高光 `rgba(255,255,255,.5)`（原型 L1158）新增语义令牌 `--spec-avatar-top` 落 `tokens.css`，vue 系改 `var()`。修后 typecheck 0 错、vitest 34 文件 568 全绿、build 通过（前端编码实跑）。
+- **theme 锚点定谳（Rev 6，前端编码提请）**：保持 `theme-toggle`——基线 L157 明文且 v3 未覆盖，v3 全文无主题锚点异名；原型 `shell-theme-toggle`（L1408/states.md L96）为 mock 内部命名，不构成下游契约。config 照 v3 §11.3 `shell-config-btn`（覆盖基线 `config-open`）。M2 现状合规，零返工；UI-SPEC §20 已澄清。
+- **M2 已知偏差（前端编码报告项，路由意见供 Chief 派单）**：① ChatThread `.chat-head` 三按钮原型无——属合法功能 additions（C 契约保行为，原型是 mock 不穷举真实功能），**保留**，C8 testid 已在；视觉融合归 M3 打磨裁量。② 顶栏「模型打分/打招呼」分项 stats 未接线——先核后端有无分项 token 数据源（疑似仅 tokens_total），**前端不得造数**；无数据源则属后端数据缺口，是否派后端由 Chief 定。③ `<1200` body overflow 裁剪 vs 原型横向滚动条——真偏差（基线 §2.3 根 min-width:1200 经 v3 §1 保留，窄窗应横向滚动不裁剪），建议 M3 修，AC 补「<1200 横向滚动条、无裁剪」。
+- M2 收口基线：`9a60d3f`（15 路径 +436/−230，ExpectRow.vue 删除），门禁全绿（typecheck 0、vitest 34 文件 570、build 75.71 kB 选择器可达、cargo exit 0、compileall 0，前端编码实跑；架构 lane 槽位 A 复核同绿）。
 - **AC5 缺口跟踪**：敏感库面板不回应 Esc（冻结 §6.1 Esc 分层含敏感库）——Chief 已派 M4 QA 重锚轮一并处理；AC5 不降标，M4 闭合前该子项记未过。

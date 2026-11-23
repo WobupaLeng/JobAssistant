@@ -644,3 +644,14 @@ var w = Math.round(Math.min(Math.max(innerWidth * 0.5, 600), innerWidth * 0.8));
 1. §16.5 补充：greet 链中 `friendUidForJob` 无公司匹配而插入的**占位会话**，展开 + 选中后走「生成打招呼」面板（`greet_draft` 生成话术），**不预填 `chat-detach-compose-input`、不要求 `focus()`**；「不自动发送」不变。**匹配到真实会话**时 §16.5 原链不变（预填 + focus、不自动发送），A48 的预填断言适用匹配情形。
 2. 本裁决推翻存量架构设计 Rev 4 裁决 2（「占位也渲染 compose 并预填」）；下游真实实现以本条为准。原型 mock 行为不改（原型中占位是普通 mock friend，compose 照常渲染）——本条约束的是接真实后端的下游实现：占位 uid 后端不认识，`chat_send` 与 `greet_one` 同走 ChatSend，无可用发送路径，发送错误如实冒泡。
 3. [`SPEC-001-legacy-chat-merge`](../specs/SPEC-001-legacy-chat-merge.md) Rev 5 同步记录（AC7 改写、代码零改动、Rev 4 补遗路由作废）。
+
+---
+
+## 20. 追加澄清：主题切换锚点口径（2026-11-23，存量架构设计裁决 · 前端编码提请）
+
+> 性质：架构澄清，**非用户裁决**；不改写既有结论，只定谳基线与原型的一处 testid 异名。
+
+1. **下游主题锚点 = `theme-toggle`**：`UI-SPEC-legacy-baseline.md` L157（#9 主题切换）明文 `theme-toggle`，本文件未声明覆盖该条（§1 覆盖清单不含），故基线口径持续有效；本文件全文无主题锚点异名。M1/M2 代码与用例（`theme-toggle` 全站恰一处）已合规，**零返工**。
+2. 原型 `shell-theme-toggle`（`index.html` L1408/L2083/L2930、`states.md` L96）为 **mock 内部命名**，不构成下游锚点契约；下游不得据原型异名改锚，QA 亦按 `theme-toggle` 验收。
+3. 配置锚点不同：本文件 §11.3 明文 `shell-config-btn`，**覆盖**基线 L156 的 `config-open`——M1 已按此落地，维持。
+4. [`SPEC-001-legacy-chat-merge`](../specs/SPEC-001-legacy-chat-merge.md) Rev 6 同步记录。
