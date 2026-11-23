@@ -189,6 +189,24 @@ def launch_context(pw: Any, data_dir: str | Path, log: LogFn):
     return ctx
 
 
+BLANK_URLS = ("about:blank", "", "chrome://newtab/")
+
+
+def reuse_or_new_page(ctx: Any) -> Any:
+    """优先复用启动时留下的空白页，没有才新建。
+
+    `launch_persistent_context` 会留下一个 about:blank 标签；直接 `ctx.new_page()`
+    会让用户先看到空白、再看到目标页。抓取启动、登录、聊天都走这一个入口。
+    """
+    for pg in ctx.pages:
+        try:
+            if (pg.url or "") in BLANK_URLS:
+                return pg
+        except Exception:
+            continue
+    return ctx.new_page()
+
+
 def find_page_for(ctx: Any, platform: str, log: LogFn | None = None) -> Any:
     """在该平台域名下找已存在的标签页，没有就新建并打开首页。
 
@@ -203,17 +221,8 @@ def find_page_for(ctx: Any, platform: str, log: LogFn | None = None) -> Any:
                 return pg
         except Exception:
             continue
-    page = None
     # 优先复用空白页，否则才新建：反复登录时不堆一堆空标签页
-    for pg in ctx.pages:
-        try:
-            if (pg.url or "") in ("about:blank", "", "chrome://newtab/"):
-                page = pg
-                break
-        except Exception:
-            continue
-    if page is None:
-        page = ctx.new_page()
+    page = reuse_or_new_page(ctx)
     page.set_default_timeout(DEFAULT_TIMEOUT_MS)
     try:
         page.goto(PLATFORM_HOME[platform],

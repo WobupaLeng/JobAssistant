@@ -251,7 +251,7 @@ def _run_scrape(payload: dict[str, Any]) -> None:
             log("error", err)
             return
 
-        page = ctx.new_page()
+        page = browser_mod.reuse_or_new_page(ctx)
         try:
             page.bring_to_front()
         except Exception:
@@ -566,6 +566,13 @@ def _run_session_open(cmd: dict[str, Any]) -> None:
                 # ChatClient.chat_page 会复用已开的 /web/geek/chat 页，
                 # 没有就新开一个并 goto——它就是唯一真源，别在这里另写一份 goto
                 chat_mod.ChatClient(log).chat_page(ctx)
+            elif not target:
+                # 无目标页时，把启动留下的 about:blank 直接导航到平台首页，
+                # 避免用户面前停着一片空白
+                home = browser_mod.PLATFORM_HOME.get(platform)
+                if home:
+                    page = browser_mod.reuse_or_new_page(ctx)
+                    page.goto(home, wait_until="domcontentloaded", timeout=45_000)
         emit({"id": cid, "ok": True, "data": {
             "logged_in": bool(logged),
             "state": "logged_in" if logged else "no_login",
