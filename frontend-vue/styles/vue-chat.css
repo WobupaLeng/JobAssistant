@@ -20,25 +20,27 @@
  * 同屏聊天层：右栏 + 对话框（.app-body 的直接 flex 子项）
  * ============================================================ */
 
-/* SPEC §2.1 把 --rail-w / --detach-w 的静态兜底挂在 .app-body 上（原型的 :root 口径）。
- * 运行期真实值仍由 lib_ui/canvas.ts 的 syncCanvas() 写到 <html>，行内优先级更高；
- * 这里只是「JS 还没跑」时的兜底，两份数值必须与 canvas.ts 同一公式。
+/* 静态兜底必须落在 `:root`，与原型逐字同一宿主（L135 --rail-w、L1085 --detach-w）。
  *
- * 宿主从 `.page-chat` 换到 `.app-body`：聊天不再是整页，那个 <section> 已随
- * ADR-004 的目标编排一起删掉（右栏与对话框直接挂在 .app-body 下，A15 要求
- * 对话框是按 .app-body 子项参与布局的 flex 项）。 */
-.app-body {
-  /* 右栏基线宽：≥1280 为 300，1280 以下收窄到 260（原型 --rail-w 的等价物），
-   * 两者都乘 --ui-scale。运行期真实值来自 canvas.ts 的行内 style。 */
+ * 为什么不是 `.app-body`（也不是退役前的 `.page-chat`）：自定义属性是**继承**的，
+ * 任何比 `<html>` 更近的祖先一旦重新声明同名变量，就会把 `syncCanvas()` 写在
+ * `documentElement` 行内 style 上的真实值整棵遮掉。行内样式只在「同一个元素」上
+ * 才赢过样式表声明。实测过一次：宿主给 `.app-body` 时展开态对话框 computed
+ * `width: var(--detach-w)` 拿到的仍是兜底 0px，产物里对话框实测只剩 1px 描边，
+ * 投递列表也不被压缩（`--rail-w` 恰好因为两档数值与媒体查询对得上而看不出来）。
+ *
+ * 这两条只是「JS 还没跑」时的兜底，数值必须与 `lib_ui/canvas.ts` 同一公式；
+ * 运行期真实来源永远是 syncCanvas() 写在 <html> 上的行内值（单一来源，REMAINING#3）。 */
+:root {
+  /* 右栏基线宽：≥1280 为 300，1280 以下收窄到 260（原型 --rail-w 的等价物），两者都乘 --ui-scale。 */
   --rail-w: calc(300px * var(--ui-scale));
-  /* 对话框宽由 syncCanvas() 的 clamp(600px, 50vw, 80vw) 算好写进行内样式；
-   * 兜底值与原型 :root 一致为 0px（聊天默认收起、不渲染 detach，见规格 A36）。
-   * 注意：**不乘 scale**，见 canvas.ts 的说明。 */
+  /* 对话框宽 = clamp(600px, 50vw, 80vw)，由 syncCanvas() 算好写进行内样式；
+   * 兜底 0px 与原型一致（聊天默认收起、不渲染 detach，规格 A36）。**不乘 scale**。 */
   --detach-w: 0px;
 }
 
 @media (max-width: 1279px) {
-  .app-body {
+  :root {
     --rail-w: calc(260px * var(--ui-scale));
   }
 }

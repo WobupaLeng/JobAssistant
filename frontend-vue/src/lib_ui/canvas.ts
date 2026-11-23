@@ -80,8 +80,10 @@ export function computeDetachWidth(innerWidth: number): number {
 /**
  * 写一次全景几何：先 `--ui-scale`，再 `--rail-w` / `--detach-w`。
  *
- * 行内样式优先于样式表，所以这三个变量在运行期的真实来源就是这里；
- * `styles/vue-chat.css` 里 `.page-chat` 上的同名字面值是「JS 还没跑」时的兜底。
+ * 行内样式优先于样式表（**只在同一个元素上**才优先），所以这三个变量在运行期的真实来源就是这里；
+ * `styles/vue-chat.css` 里 `:root` 上的同名字面值是「JS 还没跑」时的兜底。兜底一旦挂到
+ * `.app-body` 这类更近的祖先，就会把这里的行内值整棵遮住（自定义属性是继承的）——
+ * 槽位 C 产物冒烟实测到过：对话框因此只剩 1px。
  * 返回写进去的无单位数值，方便测试与调用方复用。
  */
 export function syncCanvas(innerWidth: number): { scale: number; railWidth: number; detachWidth: number } {

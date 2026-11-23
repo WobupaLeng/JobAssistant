@@ -212,6 +212,10 @@ describe('三窗固定高 / 敏感库 720 / A54 方块', () => {
   it('右栏宽兜底与对话框兜底都在样式里，且右栏乘 scale', () => {
     const css = stripComments(read('styles/vue-chat.css'));
     expect(css).toContain('--rail-w: calc(300px * var(--ui-scale))');
+    // A36 兜底的宿主必须是 :root：挂到更近的祖先（.app-body / 退役前的 .page-chat）
+    // 会把 syncCanvas() 写在 <html> 行内的真实值遮掉，展开态对话框实测只剩 1px 描边。
+    expect(css).toMatch(/(^|\n)\s*:root\s*\{[^}]*--detach-w: 0px;/);
+    expect(css).not.toMatch(/\.app-body\s*\{[^}]*--detach-w/);
     // 兜底与原型 :root 一致为 0px（规格 A36）：聊天默认收起，expand 时由 canvas.ts 写行内值。
     expect(css).toContain('--detach-w: 0px');
   });
