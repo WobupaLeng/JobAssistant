@@ -67,6 +67,12 @@ pages → features → components → lib_ui
 8. **vue 系 CSS 零颜色字面量，零例外（Chief 裁决 2026-11-23）**：`vue-dashboard / vue-chat / vue-pages` 三份禁止 hex/rgb/rgba 颜色字面量（`tests/geometry.test.ts` 守卫）。原型真值自带颜色字面量（高光、遮罩 alpha 等）时，**一律在 `tokens.css` 新增语义令牌**，vue 系只消费 `var()`；多一枚令牌是可接受代价，不允许「这一处特殊」的例外。新令牌照 C7 深浅两套独立定义；原型无浅色覆盖值时两套共用并在注释写明缘由（先例：`--spec-avatar-top`，原型 L1158 `rgba(255,255,255,.5)`，比 `--spec-top` 亮一档不可复用）。
    **宿主边界（不是例外）**：11 份契约 CSS 是原型逐字宿主，颜色字面量收口另轮（见 HANDOFF）；原型规则的同族已住契约 CSS 时，整条规则可随族宿主（先例：`.chat-rail::before` 与 `.card::before` 同在 `layout.css`，数值照原型 L1055–1057 逐字），vue 系原地留指向说明。**不得借「挪进契约 CSS」为 vue 系规则规避本红线**。
 
+**契约增量（2026-11-23，SPEC-003，Chief 派未决项 5 · Liquid Glass L2/L3）**：
+- **C4 宿主澄清**：14 条序的实际宿主是 `styles/index.css` 的 @import 链（`index.html` 无 CSS link）；本文件目录描述「index.html 引入 11 份 CSS / styles 14 份」为历史措辞，以 @import 链为准。`index.html` 的 3 条内联 `<style>` 与首帧主题脚本不动。
+- **C4 14→15 批准**：`styles/vue-glass.css` 作第 15 份追加 @import 链末尾（`vue-pages` 之后），既有 14 条相对顺序不动。本批单写者（前端编码）在 L2-1 批内追加——「总控预挂、lane 不改入口」是多 lane 并行防冲突旧约定，单写者例外经 SPEC-003 裁定 1 成立。`geometry-collect.test.ts`「14 条」守卫同提交更新为 15。
+- **红线 8 范围扩展**：`vue-glass.css` 为 vue 系第四份，零颜色字面量零例外同样适用；`geometry.test.ts` 的 `VUE_CSS` 守卫 3→4 同提交扩列。L3 canvas 颜色运行时 `getComputedStyle` 读 token 计算值，TS 无颜色字面量。
+- 冻结真源：`docs/ui/UI-SPEC-liquid-glass-l2-l3.md`（d39bae4 逐字恢复）＋ `docs/specs/SPEC-003-legacy-liquid-glass-l2-l3.md`（映射与范围）。
+
 ---
 
 ## 4. 必须保住的契约（Leptos → Vue 逐条对照）
@@ -86,6 +92,7 @@ pages → features → components → lib_ui
 **C4 `index.html` 的 CSS 顺序**：14 条 = 11 条契约序 + 3 条 Vue 追加（`vue-dashboard → vue-chat → vue-pages`，只许追加在末尾），契约序精确为
 `tokens → layout → controls → jobs → drawer → motion → scrape → pages → sensitive → auto → filter`。
 另有 3 条内联 `<style>`：`html{background:transparent}`、`body{margin:0}`、`body:not(:has(#app > *)){overflow:hidden}`——**防首帧闪白**，不要挪进外部文件（挂载点是 `#app`，不是 Leptos 的 `#root`）。
+> **增量（2026-11-23，SPEC-003）**：实际宿主＝`styles/index.css` @import 链；14→15 已批准（`vue-glass.css` 追加 `vue-pages` 之后），详见 §3 契约增量块。
 
 **C5 整页背景透明**：`tokens.css:204` 的 `body` 必须 `background: transparent`，否则毛玻璃失效（全项目 13 处）。
 
