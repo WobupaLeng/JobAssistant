@@ -13,7 +13,7 @@
 
 ## 0. 状态看板（动手前必读）
 
-**当前阶段**：`E2E_VERIFIED` —— 「Tauri 子进程拉不起真实 Chrome」硬阻塞已除（Job Object 整树回收 + sidecar 常驻单车道线程模型 + `SidecarHandle` 克隆 Drop 守卫，提交 `1f5910b`）；真实小批量抓取端到端实测通过（抓取 → 入库 → 规则打分 → 回读 → 整树回收），登录标记链（`login_save` → `saved=true` → `logout` → `saved=false`）实测通过。剩余：新设备扫码登录全流程与长时间抓取的产品级验收（见 §7.2）。
+**当前阶段**：`E2E_VERIFIED` —— 「Tauri 子进程拉不起真实 Chrome」硬阻塞已除（Job Object 整树回收 + sidecar 常驻单车道线程模型 + `SidecarHandle` 克隆 Drop 守卫，提交 `1f5910b`）；真实小批量抓取端到端实测通过（抓取 → 入库 → 规则打分 → 回读 → 整树回收），登录标记链（`login_save` → `saved=true` → `logout` → `saved=false`）实测通过。抓取自然完成信号已接线（`scrape.finished` 事件：sidecar 全出口发帧 → Rust 清 `running` 保留计数并消解手动 stop 竞态，前端靠轮询零改动；提交 `e41c7f5`，Python 端 emit 随 `aa49a13` 落库），真实小批量自然跑完 E2E 实测通过（界面转「空闲」、计数保留）。剩余：新设备扫码登录全流程与长时间抓取的产品级验收（见 §7.2）。
 
 | 层 | 状态 |
 |---|---|
@@ -157,7 +157,6 @@ python -m compileall -q scraper
 ### 7.2 未决项
 
 1. **新设备扫码登录全流程未实测**：本轮 E2E 用的是已登录的真实 profile；新设备 / 登录失效态的扫码 → 保存 → 抓取全流程待产品级验收。长时间 / 大批量抓取同样未实测。
-2. **抓取自然完成不清 `running`**：sidecar 抓取结束只发 log（`scraper/sidecar.py:258`），Rust 只在 stop/Exited 置 `running=false`（`core/sidecar/session.rs`），界面会停在「抓取中」直到用户手动停止。需协议完成信号 + 前端消费（动 `protocol.rs` 高冲突单点，必须单线程）。
-3. **预筛否决的 `rule` 字段恒写 `"prescan"`**，丢失具体命中规则。需给 `ingest::PreScan::Rule` 加承载字段（纯后端，不动前端契约）。
-4. **`set_limit` 夹值语义未定**：`max_jd > 500` 时返回错误而非静默夹住，表现为「保存失败但上限已生效」。
-5. **`tests/sidecar_smoke.rs` 常年 `#[ignore]`**（需真实 Chrome + 登录态），是唯一未被门禁覆盖的集成路径。
+2. **预筛否决的 `rule` 字段恒写 `"prescan"`**，丢失具体命中规则。需给 `ingest::PreScan::Rule` 加承载字段（纯后端，不动前端契约）。
+3. **`set_limit` 夹值语义未定**：`max_jd > 500` 时返回错误而非静默夹住，表现为「保存失败但上限已生效」。
+4. **`tests/sidecar_smoke.rs` 常年 `#[ignore]`**（需真实 Chrome + 登录态），是唯一未被门禁覆盖的集成路径。
