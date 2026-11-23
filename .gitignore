@@ -11,19 +11,15 @@ node_modules/
 .yarn/
 
 # ---------- 构建产物 ----------
-# 前端构建输出（vite build 生成；cargo tauri build 会重新生成）
-web/dist/
-# PyInstaller 输出（backend/dist/aja-backend.exe）
+# 前端构建输出（trunk / vite build 生成；tauri build 会重新生成）
+frontend-vue/dist/
 dist/
-build/
-# 内嵌用后端副本（build.bat 从 backend/dist 复制，约 63 MB）
-backend-exe/
-# Tauri sidecar 目录（旧方案残留）
-backend-sidecar/
-# Rust 编译产物（含 64 MB 的 exe，整个目录 2 GB+）
+# Rust 编译产物（单次全量构建 3.9 GB+）
 target/
-src-tauri/target/
-src-tauri/gen/schemas/
+backend-tauri/target/
+backend-tauri/gen/schemas/
+# Tauri CLI 依赖（构建走 npx tauri，不能删但也不入库）
+frontend-vue/node_modules/
 
 # ---------- Python ----------
 __pycache__/
@@ -40,8 +36,10 @@ coverage.xml
 htmlcov/
 
 # ---------- 本地运行数据（严禁入库）----------
-# data/ 里有 SQLite 数据库（含 Boss 登录 cookie）与 241 MB 的 Chrome profile
-data/
+# 只忽略仓库根的 data/（SQLite 数据库含 Boss 登录 cookie + 241 MB Chrome profile）。
+# 必须带前导 `/`：不带的 `data/` 会匹配任意层级的 data 目录，
+# 曾把 frontend-vue/src/lib_ui/data/cities.ts（373 城源码数据）一起吞掉、静默漏提交。
+/data/
 *.db
 *.db-shm
 *.db-wal
@@ -51,7 +49,9 @@ browser-profile/
 
 # ---------- 日志 ----------
 *.log
-logs/
+# 只忽略仓库根的运行时日志目录。必须带前导 `/`：
+# 不带的 `logs/` 会匹配任意层级的 logs 目录，把 frontend-vue/src/features/logs/（源码）一起吞掉。
+/logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -81,3 +81,9 @@ temp/
 .diag-page.png
 *.tsbuildinfo
 nohup.out
+
+# 测试临时目录（Low IL 下 %LOCALAPPDATA%\Temp 不可写，门禁把 TEMP 指到这里）
+.tmp-test/
+# 诊断取证产物（repro lane 的 runs/ logs/ 抓取快照，含本机路径与进程信息）
+.tmp-diag/
+.tmp-diag2/

@@ -1,0 +1,598 @@
+/*
+ * Boss 消息页（M2）样式：右栏 chat-rail + 对话框 chat-detach + 自动投递条。
+ *
+ * 口径：冻结原型 prototypes/ui-v1 的 class 与尺寸逐条照抄（v3–v10 全部裁决），
+ * 只做两处本仓库适配：
+ *   1. 字号一律 `var(--fs-*)`（5 档的定义在 tokens.css，按 1920 基准乘
+ *      `--ui-scale`）；`--rail-w` / `--detach-w` 在 `.page-chat` 上给一份静态兜底，
+ *      运行期由 lib_ui/canvas.ts 的 syncCanvas() 用行内 style 覆写，行内优先级更高。
+ *      右栏宽同样乘 --ui-scale：原型 L135 / L1319 写的就是 calc(300px * scale)；
+ *      对话框宽不乘——原型 syncDetachWidth() 只有 50vw/80vw 与 600px 下限；
+ *   2. 原型把自动投递条在展开时搬进对话框头，这里由页面用 v-if 两处二选一渲染，
+ *      同一个 rail-auto-bar 与 auto-apply-bar 规则两处都适用。
+ *
+ * 禁止事项（C6 同族）：本文件不得出现 //! 或 /// 注释；
+ * 块注释正文里不得出现反引号包起来的星号斜杠——同样的原因，会提前闭合注释。
+ * 颜色一律取 tokens，不写字面色值（两处 light 主题微调除外，均带注释说明来源）。
+ */
+
+/* ============================================================ *
+ * 同屏聊天层：右栏 + 对话框（.app-body 的直接 flex 子项）
+ * ============================================================ */
+
+/* 静态兜底必须落在 `:root`，与原型逐字同一宿主（L135 --rail-w、L1085 --detach-w）。
+ *
+ * 为什么不是 `.app-body`（也不是退役前的 `.page-chat`）：自定义属性是**继承**的，
+ * 任何比 `<html>` 更近的祖先一旦重新声明同名变量，就会把 `syncCanvas()` 写在
+ * `documentElement` 行内 style 上的真实值整棵遮掉。行内样式只在「同一个元素」上
+ * 才赢过样式表声明。实测过一次：宿主给 `.app-body` 时展开态对话框 computed
+ * `width: var(--detach-w)` 拿到的仍是兜底 0px，产物里对话框实测只剩 1px 描边，
+ * 投递列表也不被压缩（`--rail-w` 恰好因为两档数值与媒体查询对得上而看不出来）。
+ *
+ * 这两条只是「JS 还没跑」时的兜底，数值必须与 `lib_ui/canvas.ts` 同一公式；
+ * 运行期真实来源永远是 syncCanvas() 写在 <html> 上的行内值（单一来源，REMAINING#3）。 */
+:root {
+  /* 右栏基线宽：≥1280 为 300，1280 以下收窄到 260（原型 --rail-w 的等价物），两者都乘 --ui-scale。 */
+  --rail-w: calc(300px * var(--ui-scale));
+  /* 对话框宽 = clamp(600px, 50vw, 80vw)，由 syncCanvas() 算好写进行内样式；
+   * 兜底 0px 与原型一致（聊天默认收起、不渲染 detach，规格 A36）。**不乘 scale**。 */
+  --detach-w: 0px;
+}
+
+@media (max-width: 1279px) {
+  :root {
+    --rail-w: calc(260px * var(--ui-scale));
+  }
+}
+
+/* ------------------------------------------------------------ 右栏 */
+
+.chat-rail {
+  flex: 0 0 var(--rail-w);
+  width: var(--rail-w);
+  min-width: 0;
+  position: sticky;
+  top: 0;
+  align-self: stretch;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: var(--radius);
+  background: var(--glass-1);
+  backdrop-filter: blur(var(--blur-1)) saturate(var(--saturate-1));
+  -webkit-backdrop-filter: blur(var(--blur-1)) saturate(var(--saturate-1));
+  box-shadow: var(--shadow-card), var(--inner-light);
+  overflow: hidden;
+}
+
+/* 渐变高光描边（玻璃厚度感，原型 L1052-1060）落在 styles/layout.css 的
+ * .chat-rail::before，与 .card::before 同族同宿主。那边要用
+ * linear-gradient(#000 0 0) 当遮罩的 alpha 通道，而本文件（vue 系样式）按
+ * tests/geometry.test.ts 的规定不得出现任何 hex / rgb 字面色值，所以手法留在契约层。 */
+
+/* 展开态：主对话框接管，右栏让位（原型里的 .app-shell.is-chat-open .chat-rail{display:none}）。 */
+.app-shell.is-chat-open .chat-rail {
+  display: none;
+}
+
+.rail-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.rail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  height: 44px;
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.rail-title {
+  font-size: var(--fs-md);
+  font-weight: 620;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+
+.rail-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.rail-search {
+  flex: 0 0 auto;
+  padding: 8px 12px 6px;
+}
+
+.rail-search .input {
+  width: 100%;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  padding: 0 12px;
+}
+
+.rail-body-slot {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.rail-body {
+  overflow-y: auto;
+  padding: 4px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* ------------------------------------------------------------ 会话行 */
+
+.chat-rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px 10px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.friend {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 7px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-1);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease-glass), border-color var(--dur) var(--ease-glass);
+}
+
+.friend:hover {
+  background: var(--glass-input);
+  border-color: var(--hairline);
+}
+
+.friend.is-active {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+}
+
+.avatar {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: linear-gradient(145deg, var(--primary) 0%, var(--accent) 140%);
+  /* 深色文字压在亮绿渐变上（语义令牌 --on-primary-deep）。 */
+  color: var(--on-primary-deep);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  /* 原型 L1158 的迎光内高光：值 0.5，比 --spec-top（0.22）亮一档，不能复用；
+   * 本文件是 vue 系样式，字面量必须走令牌（见 tokens.css 的 --spec-avatar-top）。 */
+  box-shadow: inset 0 1px 0 var(--spec-avatar-top);
+}
+
+.friend-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.friend-name {
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-msg {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.friend-time {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.unread {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--bad);
+  color: var(--on-primary);
+  font-size: var(--fs-2xs);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------ 列表态 */
+
+.rail-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 26px 6px;
+  text-align: center;
+  color: var(--text-3);
+}
+
+/* .state-title / .state-sub / .state-glyph 用 vue-dashboard.css 的全局真值
+ * （原型 L901-912：玻璃盒 glyph + fs-md 标题 + fs-sm 副文），此处不再覆写。 */
+
+.rail-guide {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+.rail-error {
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bad-border);
+  background: var(--bad-soft);
+  box-shadow: inset 3px 0 0 var(--bad);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+  /* 原型 L1179：错误卡入场 rail-in，与 bubble-in 同族（淡入 + 轻微位移）。 */
+  animation: rail-in var(--dur) var(--ease-out);
+}
+
+.rail-error-head {
+  display: block;
+  font-size: var(--fs-sm);
+  font-weight: 550;
+  color: var(--text-1);
+}
+
+.rail-err-msg {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-2);
+  word-break: break-all;
+  white-space: normal;
+}
+
+/* 原型 L1187 逐字。只动 opacity/transform，走合成层，不触发 backdrop-filter
+ * 每帧重算；减少动态效果由 controls.css 的全局媒体查询统一封顶，这里不重复。 */
+@keyframes rail-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+
+.skel-line {
+  display: block;
+  width: 100%;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-2);
+}
+
+/* ============================================================ *
+ * 对话框：宽度走 flex-basis 过渡（禁止 translateX，A15 要求 position: static）
+ * ============================================================ */
+
+.chat-detach {
+  flex: 0 0 0;
+  width: 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius);
+  background: var(--glass-2);
+  backdrop-filter: blur(var(--blur-1)) saturate(var(--saturate-1));
+  -webkit-backdrop-filter: blur(var(--blur-1)) saturate(var(--saturate-1));
+  box-shadow: var(--shadow-card), var(--inner-light);
+  transform-origin: right center;
+  transition: flex-basis var(--dur) var(--ease-glass), opacity var(--dur) var(--ease-glass);
+}
+
+.chat-detach.is-open {
+  flex-basis: var(--detach-w);
+  width: var(--detach-w);
+  opacity: 1;
+}
+
+.chat-detach[hidden] {
+  display: none;
+}
+
+.chat-detach-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  height: 44px;
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid var(--hairline);
+  min-width: 0;
+}
+
+.chat-detach-sub {
+  flex: 1 1 auto;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.chat-detach-body {
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.chat-detach-rail {
+  flex: 0 0 var(--rail-w);
+  width: var(--rail-w);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--hairline);
+}
+
+.chat-detach-chat {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chat-detach-compose {
+  flex: 0 0 auto;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+/* 原型 L2422：对话框空态的 glyph 是 40×40 的圆盒（右栏与列表空态仍用 44×44 方盒）。 */
+.chat-detach .state-glyph.is-round {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+.chat-detach-compose .textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  resize: none;
+  /* 原型 L1123：保住用户输入的换行，同时长词不撑破。 */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* 原型 L1117：发送按钮不参与换行，窄档也不会被 textarea 挤成两行。 */
+.chat-detach-compose .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* 聊天流：撑满剩余高度并自己滚动（复用 styles/pages.css 的 .chat-feed/.bubble 视觉）。 */
+.chat-detach-chat .chat-feed {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* 原型 L1113：聊天区内边距 12px 14px（pages.css 那份是契约宿主，不动它，
+   * 这里按对话框作用域覆盖，交接表 D 行）。 */
+  padding: 12px 14px;
+}
+
+/* 原型 L1116：1200 档聊天区只有 340px，气泡按 80% 收口、宁可压 Boss 列表段
+ * （可降到 240px）也不逐字换行（用户裁决 U 复核）。契约宿主 pages.css 的 76%/anywhere
+ * 不改，这里只在对话框作用域覆盖。 */
+.chat-detach-chat .bubble {
+  max-width: 80%;
+  overflow-wrap: break-word;
+  word-break: normal;
+  /* 原型 L1196：气泡入场 bubble-in。新节点创建时播一次，既有气泡由 keyed
+   * v-for 保住节点不重播；零 JS 接线、零逻辑改动。 */
+  animation: bubble-in var(--dur) var(--ease-out);
+}
+
+/* 原型 L1201 逐字（淡入 + 下方 4px 起步 + 轻微缩放），与 rail-in 同族。 */
+@keyframes bubble-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ============================================================ *
+ * 自动投递条（`auto-apply-bar`）
+ * ============================================================ */
+
+/* 原型 L521-525：状态条整行**不换行**，且 flex 0 0 auto + min-width 0——
+ * 放不下时自然让位给右侧计数，而不是把整条撑成两行。 */
+.auto-apply-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--glass-input);
+  flex-wrap: nowrap;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.rail-auto-bar {
+  margin: 8px 10px 2px;
+}
+
+.chat-detach-head .auto-apply-bar {
+  margin: 0 2px 0 8px;
+  flex: 0 1 auto;
+}
+
+/* 原型 L528-531：状态标签是 fs-xs / 字重 560 / 单行。 */
+.auto-apply-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  font-weight: 560;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.auto-apply-label::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--text-3);
+}
+
+/* 原型 L537：running 态文字仍是正文色，状态只由**点色**表达（绿点 + 光晕）。 */
+.auto-apply-label.is-running {
+  color: var(--text-1);
+}
+
+.auto-apply-label.is-running::before {
+  background: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.auto-apply-label.is-paused {
+  color: var(--warn);
+}
+
+/* 原型 L540：paused 只有琥珀点，**没有光晕**——光晕只属于 running。 */
+.auto-apply-label.is-paused::before {
+  background: var(--warn);
+}
+
+/* 原型 L541：按钮组 flex 0 0 auto，窄档不吃宽。 */
+.auto-apply-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* 原型 L544-546：计数组贴右端、每项单行；数字等宽、字重 600、左侧 2px。 */
+.auto-apply-counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.auto-apply-counts > span {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.auto-apply-counts b {
+  color: var(--text-1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin-left: 2px;
+}
+
+/* idle：结束按钮不出现（原型用 data-mode 选择器隐藏，这里用 v-if，规则留作兜底）。 */
+.auto-apply-bar[data-mode='idle'] [data-testid='auto-greet-stop-btn'] {
+  display: none;
+}
+
+/* 「暂停」主按钮的警示色（原型 .btn-pause；controls.css 未定义，在此补齐）。 */
+/* 「暂停」主按钮的警示色（原型 L326-327 .btn-pause，用户裁决 D）。
+ * 数值走令牌 --btn-pause-*（浅色覆盖在 tokens.css 的 light 块）；悬停按原型是**改描边**，
+ * 不是 filter 提亮。 */
+.btn-pause {
+  border-color: var(--btn-pause-border);
+  background: var(--btn-pause-bg);
+  color: var(--btn-pause-fg);
+}
+
+.btn-pause:hover {
+  border-color: var(--btn-pause-border-hover);
+}
+
+/* ============================================================ *
+ * 提示行（瞬态）
+ * ============================================================ *
+ * 求职期望行（.expect-row 与 chat-expect-* 锚点）已按 SPEC-001 Rev3/Rev5 退役：原型
+ * L926-927 明写「求职期望已并入筛选条件面板；打分试算已移除」，四档基线图右栏也没有这行。
+ * 期望数据仍由概览筛选面板的「读取期望职位」承载，api 封装与契约面不动。 */
+
+/* 两条瞬态提示：右栏只有 300/260 宽，按 K9「错误必须可读」保留全文，但收小字。 */
+.chat-note {
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 这里原先有一段 @media (max-width: 900px) 把右栏与对话框堆成整行，已按交接表 H 行删除：
+ * 原型 L1339-1341 是用户硬约束「页面最小宽度 1200px；1200 是唯一基线布局（右栏与主列始终
+ * 同排、网格卡始终 3/2 列），小于 1200 保持 1200 布局并出现横向滚动条——不做任何落底/单列
+ * 降级。app-shell 已有的 min-width 1200px 承接这条口径。 */

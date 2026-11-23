@@ -1,0 +1,106 @@
+/* Liquid Glass 第二层（SVG 湍流折射）—— vue 系第四份，红线 8 零颜色字面量零例外。
+ * 真源：docs/ui/UI-SPEC-liquid-glass-l2-l3.md §2.4 / SPEC-003 裁定 1、4。
+ * 只消费 tokens.css 令牌与 index.html 的文档级滤镜（lg-turb-dark / lg-turb-light），
+ * 不定义任何新像素常量、不写颜色字面量。克隆层背景的反平移（--glass-x/y）随 L2-2 接线。
+ * 滤镜只由 CSS 引用（规格 Q5），TS 不写 style.filter；主题切换与降级都在此收口。 */
+
+/* 承载克隆层的玻璃容器：圆角裁剪，缺了会露方角位移（规格 2.2-Q2 铁律 3）。 */
+.glass-l2 { position: relative; overflow: hidden; }
+
+/* 克隆层容器：绝对铺满、继承圆角、不吞事件、压在内容之下。 */
+.glass-clone-wrap {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 克隆层：留 8% 余量防位移露边；背景由 L2-2 按真实屏幕坐标反平移绘制。
+ * 用普通 filter 而非 backdrop-filter —— Chromium 静默忽略 backdrop-filter 里的 url()
+ * （规格 6.1-② 实测），只有克隆层 + 普通 filter 才是真折射。 */
+.glass-clone {
+  position: absolute;
+  inset: -8%;
+  background: inherit;
+  filter: url(#lg-turb-dark);
+  will-change: transform;
+}
+[data-theme='light'] .glass-clone { filter: url(#lg-turb-light); }
+
+/* 内容压在克隆层之上（卡片宿主；抽屉 / 敏感库宿主的内容选择器随 L2-2 补）。 */
+.glass-l2 > .card-head,
+.glass-l2 > .card-body { position: relative; z-index: 1; }
+
+/* 运行时探针判定 filter:url() 失效时整层关闭（规格 2.2-Q6 降级），退回纯第一层。 */
+[data-l2='off'] .glass-clone { filter: none !important; }
+
+/* 无障碍降级：减少透明度 / 强制颜色（规格 2.4）。 */
+@media (prefers-reduced-transparency: reduce) {
+  .glass-clone { filter: none !important; opacity: 0 !important; }
+}
+@media (forced-colors: active) {
+  .glass-clone { display: none !important; }
+}
+
+/* ---- L2-2 / L2-3：宿主内容压克隆层之上＋两模式绘制源（SPEC-003 裁定 6 / 7） ---- */
+
+/* 各宿主直接内容子项压在克隆层（z-index:0）之上：job-card / drawer / sensitive-panel。
+ * 内容默认静态定位会被定位的克隆层盖过，故显式 relative + z-index:1（只动这些子项，不碰宿主布局）。 */
+.glass-l2 > .job-card-top,
+.glass-l2 > .job-meta,
+.glass-l2 > .job-info,
+.glass-l2 > .drawer-head,
+.glass-l2 > .drawer-body,
+.glass-l2 > .drawer-foot,
+.glass-l2 > .sensitive-head,
+.glass-l2 > .sensitive-tools,
+.glass-l2 > .sensitive-error,
+.glass-l2 > .sensitive-body { position: relative; z-index: 1; }
+
+/* P1 材质模式（裁定 7）：克隆源＝宿主自身玻璃 tint。wrap 先 inherit 宿主背景，
+ * 克隆层再 inherit wrap（base .glass-clone 已 background:inherit），令牌随主题自动更新。card-local 不反平移。 */
+.glass-clone-wrap.is-material { background: inherit; }
+
+/* P0 背景模式（裁定 6）：克隆层只承载背景副本，不继承宿主 tint；20px 折射出血边距（REFERENCE Trap 5）。 */
+.glass-clone.is-backdrop { background: transparent; inset: -20px; }
+
+/* 背景副本：反平移对齐真实屏幕坐标（--glass-x/y 由 use-glass-clone 写），普通 filter 施于克隆层。 */
+.glass-clone-backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate3d(calc(var(--glass-x, 0px) * -1), calc(var(--glass-y, 0px) * -1), 0);
+  will-change: transform;
+}
+
+/* 同屏折射预算（规格 L2-3 ≤12）：超预算卡片关滤镜退回纯第一层（use-glass-budget 打类）。 */
+.glass-budget-off .glass-clone { filter: none !important; }
+
+/* ---- L3：WebGL 抽屉透镜画布（规格 §3.5 / SPEC-003 裁定 5） ---- */
+
+/* 固定铺满视口、z-index:40（盖过同层遮罩，低于抽屉面板 41）、不吞事件。
+ * 挂 .app-shell 末尾，DOM 序在后。opacity 由 use-glass-l3 逐帧写（随抽屉淡入），初始 0。 */
+.glass-l3-canvas {
+  position: fixed;
+  inset: 0;
+  display: block;
+  z-index: 40;
+  pointer-events: none;
+  opacity: 0;
+}
+
+/* webgl2 创建失败 / 着色器失败 → data-l3="off"，整层隐藏（第二层照常，规格 §3.4）。 */
+[data-l3='off'] .glass-l3-canvas { display: none !important; }
+
+/* 无障碍降级：减少动效 / 减少透明度 / 强制颜色不显示透镜（A8 的 v-if 已在源头不创建，此处兜底）。 */
+@media (prefers-reduced-motion: reduce) {
+  .glass-l3-canvas { display: none !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass-l3-canvas { display: none !important; }
+}
+@media (forced-colors: active) {
+  .glass-l3-canvas { display: none !important; }
+}

@@ -1,0 +1,337 @@
+/* ============================================================================
+ * Liquid Glass 设计令牌
+ *
+ * 设计语言：Apple「Liquid Glass」。玻璃不是「半透明色块」，而是三件事的合成：
+ *   1. 折射（refraction）—— 背景被弯曲，边缘位移最大、中心几乎不位移
+ *   2. 高光（specular）  —— 玻璃有厚度，迎光边缘出现 1px 亮线
+ *   3. 散射（scatter）   —— 光穿过玻璃后带上材质色，内部不是纯灰
+ *
+ * 三层实现分工（用户选定的方案 C）：
+ *   · 亚克力层：`window-vibrancy` 由 Rust 侧施加，负责「透出桌面」——本文件不参与
+ *   · CSS 层：本文件。`backdrop-filter` 模糊 + 渐变高光边框 + 内外阴影
+ *   · WebGL 层：**尚未实现**（原计划写在 `glass.js` 里，该文件在仓库中不存在）。
+ *     设计意图是只渲染**卡片之间**的真折射（抽屉盖列表、气泡盖背景），
+ *     因为系统合成层在前端 `readPixels` 里读不到，桌面本身折射不了。
+ *     在 WebGL 层落地之前，下文的折射类变量只是设计占位，不产生任何观感
+ *
+ * 深浅两套**不共用数值**，只共用变量名。理由：深色底上玻璃靠「边缘发光」立起来，
+ * 浅色底上玻璃靠「投影分层」立起来——同一组 alpha 在两种底上会得出完全不同的观感，
+ * 浅色下高光给多了会显脏。
+ * ========================================================================== */
+
+:root {
+  /* ---------- 设计基准与等比缩放（用户裁决 K，v7） ----------
+   * 基准分辨率 1920×1080：下面 --fs-* 的像素值就是该基准下的值。
+   * --ui-scale 由 `lib_ui/ui-scale.ts` 的 `syncUiScale()` 在启动与 resize 时写进
+   * `<html>` 的行内 style；公式 clamp(1, innerWidth / 1920, 1.5)：
+   *   ≤1920 恒为 1（**只放大不缩小**），≥1920 线性放大，封顶 1.5。
+   * 写成变量后，--fs-* / --rail-w / --detach-w / 三窗尺寸全部跟着走，
+   * 否则大屏上会「字放大、框不放大」。
+   *
+   * 注意：这两组令牌**与主题无关**，只出现在 :root，浅色块不镜像；
+   * 也不参与下面「深浅两套不共用数值」的约定（那是玻璃/文字色，不是几何）。 */
+  --ui-scale: 1;
+
+  /* ---------- 字号令牌：标准阶梯 5 档（用户裁决 L，v8） ----------
+   * v7 曾按「保留每一种手写值」建了 9 档（10 / 10.5 / 11 / 11.5 / 12 / 12.5 / 13 / 14 / 16），
+   * 相邻档只差 0.5–1px，肉眼无从分辨，反而让整页显得大小不统一 → v8 收敛为这 5 档，旧 9 档已废止。
+   * 铁律：**只允许这 5 个名字**，新增第 6 档视为破坏契约。
+   *   2xs 11px 说明 / 时间戳 / field-hint / chip / rail-stat
+   *   xs  12px 次要正文：卡片副标题 / 表单标签 / 表格 / 日志行 / 条目摘要
+   *   sm  13px 正文基准：body / 列表正文 / 按钮 / 输入框 / 聊天消息
+   *   md  15px 小标题：card-title / rail-title / config-title / 区块标题
+   *   lg  20px 页面级标题：.brand / 弹窗大标题（配置 / 敏感库）
+   * 行高配套：正文 1.55、小字 1.5、标题 1.3（.job-title 1.4 是唯一例外）。 */
+  --fs-2xs: calc(11px * var(--ui-scale));
+  --fs-xs: calc(12px * var(--ui-scale));
+  --fs-sm: calc(13px * var(--ui-scale));
+  --fs-md: calc(15px * var(--ui-scale));
+  --fs-lg: calc(20px * var(--ui-scale));
+
+  /* ---------- 玻璃底色 ----------
+   * 越靠前的层越亮（surface-0 是页面底板，最暗最透）。
+   * alpha 全部 < 0.8，否则亚克力透不出来，窗口会变成一块死色。 */
+  --glass-0: rgba(10, 15, 26, 0.30);
+  --glass-1: rgba(18, 24, 38, 0.52);
+  --glass-2: rgba(30, 39, 58, 0.58);
+  --glass-3: rgba(42, 53, 76, 0.70);
+  --glass-input: rgba(8, 12, 20, 0.40);
+
+  /* ---------- 模糊强度 ----------
+   * 分层递减：底板要糊得狠一点才藏得住桌面细节，越靠上的层越清晰（有层次）。
+   * 同一个 blur 值给所有层，玻璃会变成一片糊在一起的塑料。 */
+  --blur-0: 18px;
+  --blur-1: 24px;
+  --blur-2: 18px;
+  --blur-3: 12px;
+  --blur-pop: 30px; /* 抽屉 / 弹层：脱离页面，糊得更狠 */
+
+  /* ---------- 饱和度补偿 ----------
+   * backdrop-filter 模糊会把颜色往灰里带，饱和度要补回来，否则透出来的是「脏雾」。 */
+  --saturate-0: 1.4;
+  --saturate-1: 1.6;
+  --saturate-2: 1.5;
+
+  /* ---------- 折射位移 ----------
+   * 设计占位：为未实现的 WebGL 层与 SVG 湍流滤镜预留，当前**没有任何样式引用**，
+   * 改这些值不会影响现有画面。值 = 边缘最大像素位移。
+   * 深色下可以给大一点（暗部容得下形变），浅色下超过 8px 就开始发晕。 */
+  --refract-edge: 14px;
+  --refract-turbulence: 0.008;
+
+  /* ---------- 高光 ----------
+   * Liquid Glass 的辨识度主要来自这两条线：
+   * `--spec-top` 是迎光的上边缘（白），`--spec-bottom` 是背光的下边缘（几乎不可见）。
+   * 用 inset box-shadow 画而不是 border：border 会占位改变布局，inset shadow 不会。 */
+  --spec-top: rgba(255, 255, 255, 0.22);
+  --spec-bottom: rgba(255, 255, 255, 0.04);
+  --spec-side: rgba(255, 255, 255, 0.08);
+  --spec-strength: 1;
+
+  /* ---------- 材质散射色 ----------
+   * 光穿过主色玻璃后的染色。极淡的青绿，让玻璃「有材质」而不是纯灰。 */
+  --glass-tint: rgba(16, 185, 129, 0.05);
+  --glass-tint-strong: rgba(16, 185, 129, 0.10);
+
+  /* ---------- 描边 ---------- */
+  --hairline: rgba(255, 255, 255, 0.10);
+  --hairline-strong: rgba(255, 255, 255, 0.18);
+
+  /* ---------- 文字层级 ---------- */
+  --text-1: #e8eef7;
+  --text-2: rgba(232, 238, 247, 0.72);
+  --text-3: rgba(232, 238, 247, 0.48);
+
+  /* ---------- 配色 ----------
+   * 主色沿用 PRD 3.1 的翡翠绿，辅助色科技蓝。玻璃下这四色要更亮一档，
+   * 因为 backdrop 已经把对比度压掉了。 */
+  --primary: #10b981;
+  --primary-strong: #059669;
+  --primary-soft: rgba(16, 185, 129, 0.16);
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, 0.18);
+  --good: #3fb950;
+  --warn: #d29922;
+  --warn-soft: rgba(210, 153, 34, 0.16);
+  --bad: #f85149;
+  --bad-soft: rgba(248, 81, 73, 0.16);
+  --muted: #8b949e;
+
+  /* ---------- 语义色（成对：底色 + 前景） ----------
+   * 页面级样式表只许引用这里，不许再写字面量——深浅两套主题各自独立赋值（C7）。
+   * 取值来自冻结原型 prototypes/ui-v1/index.html，颜色本身不许改。 */
+  --on-primary: #fff; /* 主色块上的反白字（打招呼方块 / 主按钮 / 未读角标） */
+  --on-primary-deep: #04120c; /* 亮绿渐变头像上的深字 */
+  --primary-text: #6ee7b7; /* 主色系文字（高分徽标） */
+  --primary-border: rgba(16, 185, 129, 0.4);
+  --warn-text: #fbbf24; /* 警示文字（暂停按钮 / WARN 日志） */
+  --warn-bg: rgba(245, 158, 11, 0.16);
+  --warn-bg-strong: rgba(245, 158, 11, 0.24);
+  --warn-border: rgba(245, 158, 11, 0.42);
+  --bad-text: #ff6b6b; /* 错误文字（ERROR 日志 / 空态图标） */
+  --bad-text-soft: #ffb4b0; /* 错误条正文 */
+  --bad-text-softer: #ffd9d6; /* 错误条图标上的字 */
+  --bad-bg: rgba(255, 107, 107, 0.14);
+  --bad-bg-strong: rgba(255, 107, 107, 0.3);
+  --bad-border: rgba(255, 107, 107, 0.42);
+  --on-bad: #fff; /* 未读角标在 --bad 底上的字 */
+
+  /* ---------- 圆角 ----------
+   * Liquid Glass 的圆角比常规 UI 大：玻璃边缘要留出高光宽度。
+   * 8px 圆角配 1px 高光等于没有玻璃厚度。 */
+  --radius-sm: 10px;
+  --radius: 16px;
+  --radius-lg: 22px;
+  --radius-pill: 999px;
+
+  /* ---------- 投影 ----------
+   * 两层：贴身的窄影定形（near），远处的宽影分层（far）。
+   * 只有一层会让玻璃像纸片贴在背景上。 */
+  --shadow-near: 0 2px 8px rgba(0, 0, 0, 0.22);
+  --shadow-far: 0 16px 48px rgba(0, 0, 0, 0.34);
+  --shadow-card: var(--shadow-near), var(--shadow-far);
+  --shadow-pop: 0 4px 16px rgba(0, 0, 0, 0.28), 0 32px 80px rgba(0, 0, 0, 0.5);
+
+  /* ---------- 内阴影 ----------
+   * 玻璃内部不是平的：上沿有一道向下的散射光，下沿有一道回光。
+   * 这两道是「厚度感」的来源，比高光边框更重要。 */
+  --inner-light: inset 0 1px 0 0 var(--spec-top),
+    inset 0 -1px 0 0 var(--spec-bottom);
+  --inner-scatter: inset 0 24px 48px -32px rgba(255, 255, 255, 0.10);
+  /* ---------- 暂停主按钮（原型 L326-328 `.btn-pause`，用户裁决 D）----------
+   * 原型这组值是琥珀系里另一档（描边 rgba(240,198,100,.46) / 悬停 .62 / 字色 #f0c674），
+   * 与 --warn-border / --warn-text 都不同档，不能复用；vue 系样式表禁写颜色字面量
+   * （frontend-vue/AGENTS.md 红线 8），所以按 Chief 裁决新增语义令牌，浅色覆盖在 light 块。 */
+  --btn-pause-border: rgba(240, 198, 100, 0.46);
+  --btn-pause-border-hover: rgba(240, 198, 100, 0.62);
+  --btn-pause-bg: rgba(240, 198, 100, 0.16);
+  --btn-pause-fg: #f0c674;
+
+  /* 头像方块顶边的高光（原型 `.avatar` 的 `inset 0 1px 0 rgba(255,255,255,.5)`）。
+   * 值是 0.5，比 --spec-top 的 0.22 亮得多，不能复用；浅色主题原型没有覆盖值，
+   * 所以这条只在 :root 定义，两套主题共用（同 --ui-scale 的例外口径）。 */
+  --spec-avatar-top: rgba(255, 255, 255, 0.5);
+
+  /* ---------- 动效 ----------
+   * Liquid Glass 的动画要「慢且带惯性」：苹果那套普遍 320-420ms、非线性。
+   * 低于 200ms 会显得像老式 UI 的瞬时跳变。 */
+  --ease-glass: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 160ms;
+  --dur: 320ms;
+  --dur-slow: 420ms;
+
+  --font-sans: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+}
+
+/* ============================================================================
+ * 浅色主题
+ *
+ * 与深色**不共用数值**。浅底上玻璃的立起来方式完全不同：
+ *   · 高光要减到几乎看不见（--spec-top 0.22 → 0.9 会显脏，正确做法是提高但不发白）
+ *   · 投影要加重（浅底没有暗部托住，全靠影子分层）
+ *   · 模糊要更强（浅底透出桌面细节更刺眼，糊不狠会眼晕）
+ *   · 折射位移要减小（浅底上形变容易看成「画面有脏点」）
+ * ========================================================================== */
+[data-theme='light'] {
+  --glass-0: rgba(255, 255, 255, 0.24);
+  --glass-1: rgba(255, 255, 255, 0.62);
+  --glass-2: rgba(255, 255, 255, 0.74);
+  --glass-3: rgba(255, 255, 255, 0.86);
+  --glass-input: rgba(255, 255, 255, 0.70);
+
+  /* 浅底更刺眼：模糊与饱和度都要更狠 */
+  --blur-0: 24px;
+  --blur-1: 30px;
+  --blur-2: 24px;
+  --blur-3: 16px;
+  --blur-pop: 36px;
+  --saturate-0: 1.7;
+  --saturate-1: 1.8;
+  --saturate-2: 1.7;
+
+  /* 浅底上形变看着像脏点，位移砍到 1/3 */
+  --refract-edge: 5px;
+  --refract-turbulence: 0.006;
+
+  /* 高光改色不改量：浅底用近白但不纯白，纯白高光在白卡上等于没有 */
+  --spec-top: rgba(255, 255, 255, 0.95);
+  --spec-bottom: rgba(15, 23, 42, 0.04);
+  --spec-side: rgba(15, 23, 42, 0.05);
+  --spec-strength: 0.7;
+
+  --glass-tint: rgba(16, 185, 129, 0.04);
+  --glass-tint-strong: rgba(16, 185, 129, 0.08);
+
+  --hairline: rgba(15, 23, 42, 0.10);
+  --hairline-strong: rgba(15, 23, 42, 0.16);
+
+  --text-1: #0f172a;
+  --text-2: rgba(15, 23, 42, 0.72);
+  --text-3: rgba(15, 23, 42, 0.50);
+
+  --primary-soft: rgba(16, 185, 129, 0.14);
+  --accent-soft: rgba(37, 99, 235, 0.12);
+  --warn-soft: rgba(210, 153, 34, 0.14);
+  --bad-soft: rgba(248, 81, 73, 0.12);
+
+  /* 语义色：浅底上要压深一档才有对比（原型已给浅色分支取值）。 */
+  --on-primary: #fff;
+  --on-primary-deep: #04120c;
+  --primary-text: #047857;
+  --primary-border: rgba(16, 185, 129, 0.4);
+  /* 暂停主按钮浅色覆盖（原型 L328）。悬停描边原型没给浅色值，
+   * 按红线 8 的共用口径沿用 :root 的 --btn-pause-border-hover。 */
+  --btn-pause-border: rgba(146, 101, 10, 0.4);
+  --btn-pause-bg: rgba(176, 124, 0, 0.12);
+  --btn-pause-fg: #92650a;
+
+  --warn-text: #92650a;
+  --warn-bg: rgba(245, 158, 11, 0.16);
+  --warn-bg-strong: rgba(245, 158, 11, 0.24);
+  --warn-border: rgba(245, 158, 11, 0.42);
+  --bad-text: #ff6b6b;
+  --bad-text-soft: #ffb4b0;
+  --bad-text-softer: #ffd9d6;
+  --bad-bg: rgba(255, 107, 107, 0.14);
+  --bad-bg-strong: rgba(255, 107, 107, 0.3);
+  --bad-border: rgba(255, 107, 107, 0.42);
+  --on-bad: #1a1208;
+
+  /* 浅底投影必须更重：没有暗部托住，轻影会让卡片「浮不起来」 */
+  --shadow-near: 0 1px 3px rgba(15, 23, 42, 0.10);
+  --shadow-far: 0 14px 40px rgba(15, 23, 42, 0.16);
+  --shadow-pop: 0 4px 14px rgba(15, 23, 42, 0.12), 0 28px 72px rgba(15, 23, 42, 0.24);
+
+  --inner-light: inset 0 1px 0 0 var(--spec-top),
+    inset 0 -1px 0 0 var(--spec-bottom);
+  --inner-scatter: inset 0 20px 40px -30px rgba(255, 255, 255, 0.9);
+}
+
+/* ============================================================================
+ * 基础重置
+ * ========================================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  /* 必须透明：窗口的亚克力由 Rust 侧合成，这里任何不透明底色都会把它吃掉 */
+  background: transparent;
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--primary-soft);
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--hairline-strong);
+  border-radius: var(--radius-pill);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
+}
+
+/* 无障碍：读屏可见、肉眼不可见。
+ * **必须用 clip 不能用 display:none**——后者会让 Playwright 的 inner_text 取不到，
+ * `tools/gui_e2e.py` 的 PROGRESS_RE 依赖这个连排摘要解析抓取计数。 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

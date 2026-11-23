@@ -1,0 +1,1160 @@
+/*
+ * 概览页（M1）专用样式。
+ *
+ * 为什么单独一份、而不是改 styles/*.css：
+ * `styles/` 那 11 份是 Leptos 版冻结的正文（C4 的引入顺序也是契约）。原型
+ * `prototypes/ui-v1/index.html` 的卡片已经换成「五行卡 + 打招呼方块」，
+ * 用的类名（.pill / .job-card-top / .job-info / .job-greet / .score-box）
+ * 与 Leptos 的 .job-tab / .jc-* 是两套东西，混在一份里必然互相覆盖。
+ * 所以：**原型特有的类名全部落在这里**，那一份正文一行不动，
+ * 本文件在 `styles/index.css` 里排在 11 条 @import 之后（后加载、优先级更高）。
+ *
+ * 字号说明（用户裁决 K/L，v7/v8）：字号一律 `var(--fs-*)`，那 5 档令牌定义在
+ * `styles/tokens.css`，并以 1920 为基准乘 `--ui-scale`（由 `lib_ui/canvas.ts`
+ * 在 resize 时写进 `<html>` 的行内 style）。所以本文件**不出现任何裸 px 字号**，
+ * 大屏上文字与几何一起放大。
+ *
+ * 红线（AGENTS.md §3 第 5 条）：本文件不得出现 `//!` 或 `///`；
+ * 注释正文里也不得出现反引号包住的星号斜杠——块注释被提前闭合会让
+ * 后面几份样式表整片失效，而构建照样打印成功。
+ */
+
+/* 兼容别名：本文件与 `vue-pages.css` 早期版本用 --vd-fs-* / --vp-fs-* 做过
+ * 「就地换算」，语义上就是 --fs-* 的同一档。保留别名只是为了让既有规则与
+ * tests/chat-contract.test.ts 里对 --vd-fs 星号族的断言继续成立，数值只有一份，
+ * 都指向 tokens.css 的令牌；新代码请直接用 --fs-*。 */
+:root {
+  --vd-fs-2xs: var(--fs-2xs);
+  --vd-fs-xs: var(--fs-xs);
+  --vd-fs-sm: var(--fs-sm);
+  --vd-fs-md: var(--fs-md);
+}
+
+/* ---------- 岗位列表卡：整卡吃满高度，网格自己滚 ---------- */
+.job-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.job-tabs-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px 6px;
+}
+
+.job-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hairline);
+  background: var(--glass-0);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 560;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.pill:hover {
+  color: var(--text-1);
+  border-color: var(--hairline-strong);
+}
+
+.pill.is-active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--text-1);
+}
+
+.pill-count {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.pill.is-active .pill-count {
+  color: var(--text-1);
+}
+
+.job-sorts {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sort-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+}
+
+.sort-pill:hover {
+  color: var(--text-1);
+}
+
+.sort-pill.is-active {
+  color: var(--text-1);
+  border-color: var(--hairline);
+  background: var(--glass-0);
+}
+
+.sort-arrow {
+  font-size: var(--fs-2xs);
+  color: var(--primary);
+}
+
+/* ---------- 批量条 ---------- */
+.job-batch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 14px 8px;
+  padding: 5px 10px;
+  min-height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--glass-0);
+  border: 1px solid var(--hairline);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.batch-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.batch-count,
+.batch-total {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-actions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.batch-actions[hidden] {
+  display: none;
+}
+
+/* ---------- 卡片网格：3 列 → 2 列 → 1 列（唯一断点是 1599px） ---------- */
+.job-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-content: start;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 14px 14px;
+}
+
+@media (max-width: 1599px) {
+  .job-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* 聊天抽屉展开时列数 = 收起时 − 1。顺序必须在断点之后（SPEC §16.9 裁决 X）。 */
+.app-shell.is-chat-open .job-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 1599px) {
+  .app-shell.is-chat-open .job-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A54（states.md:809，用户裁决「补齐实现·规格不动」）：
+ * 展开态在 ≤1599 只剩 1 列，卡片要撑住可读宽度——低于 320 × scale 时靠
+ * min-width 撑开、由 .job-grid 横向滚动兜底，**不许**用 overflow-x: hidden 掩盖。
+ * 三条推断（未扣 .app-body 约 12px 列间隙）：
+ *   1200 展开 1 列 ≈ 562px（主列 1200 − 600 对话框 − 右栏已让位）
+ *   1440 展开 1 列 ≈ 682px
+ *   1600 展开 2 列 ≈ 376px（1600 − 800 对话框 = 800，两列各 376 减间距）
+ * 均 ≥ 320，故正常情况下 min-width 不触发，只在超窄窗兜底。 */
+@media (max-width: 1599px) {
+  .app-shell.is-chat-open .job-card {
+    min-width: calc(320px * var(--ui-scale));
+  }
+}
+
+/* ---------- 卡片本体 ---------- */
+.job-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--glass-0);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease-glass), background var(--dur) var(--ease-glass),
+    transform var(--dur-fast) var(--ease-glass);
+}
+
+.job-card:hover {
+  border-color: var(--hairline-strong);
+  background: var(--glass-input);
+}
+
+.job-card.is-checked {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.job-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 勾选框默认不占位；只有 .job-grid.is-selecting 时才出现（裁决 S）。 */
+.job-check-slot {
+  display: none;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.job-grid.is-selecting .job-check-slot {
+  display: flex;
+}
+
+.job-check {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.job-title {
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: 620;
+  color: var(--text-1);
+  line-height: 1.4;
+}
+
+.job-salary {
+  flex: 0 0 auto;
+  font-size: var(--fs-sm);
+  font-weight: 620;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.job-meta {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 地址行（上）+ 分值（左下）+ 打招呼方块（右侧跨两行）。 */
+.job-info {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  row-gap: 6px;
+  align-items: center;
+  margin-top: auto;
+}
+
+.job-info .job-addr {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.job-info .score-box {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: start;
+}
+
+.job-addr {
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-addr.is-empty {
+  opacity: 0.5;
+}
+
+.score-box {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid var(--hairline);
+  background: var(--glass-3);
+  color: var(--text-1);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 20px;
+}
+
+.score-box i {
+  font-size: var(--fs-2xs);
+  font-style: normal;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.score-box.is-hi {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+  color: var(--primary-text);
+}
+
+/* 打招呼方块：正方、跨两行、主色底白字（裁决 W2）。 */
+/* 裁决 A53：方块高度 = 两行正文（行高 1.55）+ 上下内边距 6px×2；最小宽度按
+ * 「三字横排可读」取 --fs-sm × 4.6；aspect-ratio 1/1 兜住两者不一致的一帧。
+ * --fs-sm 已经随 --ui-scale 联动，所以大屏上方块与字号一起变大。 */
+.job-greet {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(var(--fs-sm) * 1.55 * 2 + 12px);
+  min-width: calc(var(--fs-sm) * 4.6);
+  aspect-ratio: 1 / 1;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: var(--fs-sm);
+  font-weight: 620;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  line-height: 1.55;
+  cursor: pointer;
+}
+
+.job-greet:hover {
+  filter: brightness(1.08);
+}
+
+.job-greet:active {
+  filter: none;
+}
+
+.job-greet:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ---------- 骨架 / 空态 / 错误态 ---------- */
+.job-card.is-skeleton {
+  cursor: default;
+  gap: 7px;
+}
+
+.job-card.is-skeleton:hover {
+  border-color: var(--hairline);
+}
+
+.skel-line {
+  display: block;
+  height: 10px;
+  border-radius: 4px;
+  background: var(--glass-2);
+  animation: vd-skel 1.4s ease-in-out infinite;
+}
+
+@keyframes vd-skel {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+.job-state {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 16px;
+  text-align: center;
+  min-height: 220px;
+}
+
+/* 原型 L901-909：44×44 玻璃盒 + 内嵌 SVG，不是文本字符。 */
+.state-glyph {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--hairline-strong);
+  background: var(--glass-1);
+  backdrop-filter: blur(var(--blur-3)) saturate(var(--saturate-2));
+  -webkit-backdrop-filter: blur(var(--blur-3)) saturate(var(--saturate-2));
+  box-shadow: var(--inner-light), var(--shadow-near);
+  color: var(--text-2);
+}
+
+.state-glyph.is-bad {
+  color: var(--bad);
+  border-color: var(--bad-border);
+  background: var(--bad-soft);
+}
+
+.state-title {
+  font-size: var(--fs-md);
+  line-height: 1.3;
+  font-weight: 520;
+  color: var(--text-3);
+}
+
+.state-sub {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  max-width: 380px;
+}
+
+.state-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.state-error-detail {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: var(--glass-input);
+  border: 1px solid var(--hairline);
+  width: max-content;
+  max-width: min(100%, 560px);
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 抓取条 ---------- */
+.scrape-card {
+  flex: 0 0 auto;
+}
+
+.scrape-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+}
+
+/* .btn-pause 的原型真值（L326-328）统一住 vue-chat.css（后加载），此处不再重复定义。 */
+
+.scrape-limit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.scrape-limit .input {
+  width: 64px;
+  height: 24px;
+  padding: 0 6px;
+  font-size: var(--fs-sm);
+}
+
+.scrape-brief {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.scrape-total {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.scrape-last {
+  margin: 0;
+  padding: 0 14px 10px;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 筛选面板（原型 .f-* 一套） ---------- */
+.scrape-filter-bar {
+  flex: 0 0 auto;
+  padding: 0;
+}
+
+.filter-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.f-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.f-title {
+  font-size: var(--fs-xs);
+  font-weight: 620;
+  color: var(--text-1);
+}
+
+.f-title2 {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.f-count {
+  font-size: var(--fs-xs);
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.f-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  max-height: min(58vh, 560px);
+  overflow-y: auto;
+}
+
+.f-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.f-glabel {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.f-glabel-sub {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.f-gbody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.f-grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.f-tri {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.f-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.f-cell-label {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+
+.f-select,
+.f-num {
+  height: 28px;
+  font-size: var(--fs-xs);
+}
+
+.f-textarea {
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.f-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.f-line .input {
+  height: 26px;
+  font-size: var(--fs-sm);
+}
+
+.f-dash {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.f-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.f-chip {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hairline);
+  background: var(--glass-0);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.f-chip:hover {
+  color: var(--text-1);
+  border-color: var(--hairline-strong);
+}
+
+.f-chip.is-on {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--text-1);
+}
+
+.f-clear {
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.f-clear:hover {
+  color: var(--text-1);
+}
+
+.f-hint {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.f-subblock {
+  padding-top: 10px;
+  border-top: 1px dashed var(--hairline);
+}
+
+.f-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--hairline);
+}
+
+.f-note {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+/* ---------- 顶栏单行：落位盒 + 尾段（SPEC-001 决策 7 / §11.3 / A33） ---------- */
+
+/* AppShell 在 header.topbar 里留的空盒：概览把平台卡与尾段 teleport 进来。
+ * `display: contents` 让这个盒子不产生新的 flex 容器——teleport 进来的元素成为
+ * 顶栏的直接 flex 子项，品牌 | 平台卡 | 尾段的间距与原型 L1363-1410 同一套。 */
+.tb-embed {
+  display: contents;
+}
+
+/* 顶栏单行 46px（SPEC-001 AC10 / states.md §7 实测口径）；根容器锁 1200px
+ * （原型 L206/L228：<1200 不降级，保持 1200 基线）。 */
+.topbar {
+  height: 46px;
+  padding: 0 14px;
+}
+
+.app-shell {
+  min-width: 1200px;
+}
+
+/* <1200 不降级、横向出口（基线 §2.3「最小宽度是契约」、原型 L197 意图、
+ * SPEC-001 Rev6 已知偏差③）：契约宿主 tokens.css 的 body overflow:hidden
+ * 会把 1200 外壳裁掉，窄窗既看不到滚动条也看不到右缘。这里放开横向滚动，
+ * 纵向仍锁死（各列自己滚）。tokens.css 不动，此为 Vue 侧覆盖；
+ * index.html 的防首帧闪白内联规则只匹配挂载前，不受影响。 */
+body {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* 顶栏尾段：margin-left: auto 把整组顶到右端（原型 L512，断言 A33），
+ * 所以它与前面的分段控件之间不需要占位 spacer。 */
+.tb-tail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hairline);
+  background: var(--glass-0);
+}
+
+.seg {
+  height: 20px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.seg.is-active {
+  background: var(--primary-soft);
+  color: var(--text-1);
+}
+
+.seg:disabled,
+.seg[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: transparent;
+  border-color: var(--hairline);
+  color: var(--text-3);
+}
+
+/* 裁决 O（SPEC §14.3）：禁用态与选中态组合时必须透明兜底，绿色高亮绝不能出现。 */
+.seg.is-active:disabled,
+.seg.is-active[aria-disabled='true'],
+.seg[aria-checked='true']:disabled,
+.seg[aria-checked='true'][aria-disabled='true'] {
+  background: transparent;
+  color: var(--text-3);
+}
+
+/* token 统计组（原型 L485-490 .tb-stats 语义）：inline-flex + gap 8，
+ * 累计读数一项、分隔线一项、模型打分/打招呼分项各一项；<1360 整组让位给 chip。 */
+.tb-tokens {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 原型 L487：分隔线 1×14 hairline。 */
+.tb-tokens .tb-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--hairline-strong);
+  flex: 0 0 auto;
+}
+
+/* 原型 L485-486：分项读数与累计同族，数字提亮一档 text-1/650。
+ * 字号/颜色继承 .tb-tokens（本仓库 fs-2xs 口径），不另立档位。 */
+.tb-tokens .rail-stat {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.tb-tokens .rail-stat b {
+  color: var(--text-1);
+  font-weight: 650;
+}
+
+/* 原型 L1335-1337：1360–1599 隐藏分项与分隔线，只留累计。 */
+@media (min-width: 1360px) and (max-width: 1599px) {
+  .tb-tokens .rail-stat,
+  .tb-tokens .tb-sep {
+    display: none;
+  }
+}
+
+/* token 折叠 chip（原型 L493/L501-502/L1406）：<1360 折叠成一枚 chip，≥1360 展开。
+ * 类名避开 .tb-stats——那个名字在本仓库被日志卡的 C9 进度块占用。
+ * chip 里的数字原型带 color:var(--text-1)（L1406 行内），这里用选择器等价承接。 */
+.tb-token-chip b {
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.tb-token-chip {
+  display: none;
+}
+
+@media (max-width: 1359px) {
+  .tb-tokens {
+    display: none;
+  }
+
+  .tb-token-chip {
+    display: inline-flex;
+    cursor: pointer;
+  }
+}
+
+/* ---------- 最近事件卡 ----------
+ * 原型 L943：`flex: 0 0 auto; height: 220px; min-height: 160px; position: relative`
+ * ——日志卡是定高块，行数增减不改变外框高度，滚动只发生在卡体内。 */
+.log-card {
+  flex: 0 0 auto;
+  height: 220px;
+  min-height: 160px;
+  position: relative;
+  margin-top: 2px;
+}
+
+/* 卡体是卡内唯一的弹性列：C9 进度块贴顶、日志行区吃剩余高度并自己滚。
+ * 原型 L1720-1729 的日志卡没有 .card-body 这一层（进度块是本仓库 C9 的既有结构），
+ * 所以这里显式把卡体做成 flex column + min-height:0，否则定高之后滚动会跑到外层页面上。 */
+.log-card > .card-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.log-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.log-live.is-on::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.tb-stats {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+}
+
+/* 原型 L1024：日志行区是卡体内的 flex 子项，靠 min-height:0 在自己内部滚，
+ * 不另外设 max-height——日志卡已经定高 220px（原型 L943），再叠一层 180px 就是二次限高，
+ * 卡体上下会空出一截而列表先滚起来。 */
+.log-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.log-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  padding: 1px 0;
+}
+
+.log-time {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.log-level {
+  flex: 0 0 auto;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--text-3);
+}
+
+.log-level.is-warn {
+  color: var(--warn-text);
+}
+
+.log-level.is-error {
+  color: var(--bad-text);
+}
+
+.log-msg {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 页面级错误条 ---------- */
+.app-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  margin-bottom: 2px;
+  border-radius: var(--radius);
+  border: 1px solid var(--bad-border);
+  background: var(--bad-bg);
+  color: var(--bad-text-soft);
+  font-size: var(--fs-sm);
+}
+
+.app-error-ico {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bad-bg-strong);
+  color: var(--bad-text-softer);
+  font-weight: 700;
+  font-size: var(--fs-2xs);
+  line-height: 16px;
+  text-align: center;
+}
+
+.app-error-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.app-error-text code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--fs-2xs);
+  opacity: 0.85;
+}
+
+/* ---------- M5 补遗：详情抽屉扩展件 ----------
+ * 抽屉本体（.drawer / .drawer-head / .kv / .jd-text ...）在契约样式表 drawer.css，
+ * 这里只补原型 job-detail-* 外壳需要、drawer.css 里没有的几块。
+ * 颜色只走 tokens；字号用本文件顶部的 --vd-fs-* 换算。 */
+.drawer-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px 16px;
+  border-top: 1px solid var(--hairline);
+}
+
+.detail-foot-note {
+  font-size: var(--vd-fs-xs);
+  color: var(--text-3);
+}
+
+.drawer-body .detail-head-row,
+.drawer-body .detail-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.drawer-body .detail-score-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.drawer-body .detail-when {
+  margin-top: 8px;
+  font-size: var(--vd-fs-xs);
+  color: var(--text-3);
+}
+
+.drawer-body .detail-jd-sec {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ---------- M5 补遗：顶栏三平台卡 ----------
+ * 形状照原型 .platform-card；未接入的 .is-off 半透明且不可点。 */
+.platform-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  margin-right: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-input);
+  border: 1px solid var(--hairline);
+  font-size: var(--vd-fs-sm);
+  white-space: nowrap;
+  transition:
+    border-color var(--dur) var(--ease-glass),
+    opacity var(--dur) var(--ease-glass);
+}
+
+.platform-card:hover {
+  border-color: var(--hairline-strong);
+}
+
+.platform-card.is-off {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.platform-card.is-off:hover {
+  border-color: var(--hairline);
+}
+
+.platform-name {
+  color: var(--text-1);
+}
+
+.platform-card.is-off .platform-name {
+  color: var(--text-3);
+}
+
+.platform-suffix {
+  font-size: var(--vd-fs-sm);
+  color: var(--text-3);
+}
+
+.platform-login {
+  height: 24px;
+}
+
+/* 登录二维码：login_status.message 里的 data URI，仅在 waiting 态出现。
+   尺寸与平台卡等高，点开登录窗后由后端推送把它带进来。 */
+.platform-scan {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: var(--on-primary);
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+/* 登录状态点：ok 用 good 色，bad 用 bad 色，未知用中性描边。 */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--text-3);
+  box-shadow: 0 0 0 3px var(--glass-input);
+}
+
+.status-dot.is-ok {
+  background: var(--good);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.status-dot.is-bad {
+  background: var(--bad);
+  box-shadow: 0 0 0 3px var(--bad-bg);
+}
+
+/* ---------- M5 补遗：错误条多出来的两件 ---------- */
+.app-error-rest {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--vd-fs-xs);
+  color: var(--text-3);
+}
+
+/* 两处 @media (max-width: 900px) 降级块已删（交接表 H 行 / states.md §7）：
+ * 原型 L1339-1341 是用户硬约束「页面最小宽度 1200px；小于 1200 保持 1200 布局并出现
+ * 横向滚动条——不做任何落底/单列降级。原先那三条（platform-card 压到 26px、
+ * app-error-rest 隐藏、f-tri 与 f-grid2 退单列）都与之相反；app-shell 已有的
+ * min-width 1200px 承接这条口径。 */

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- color-scheme 让原生控件（滚动条、表单控件）跟随主题，
+         否则浅色主题下仍是深色滚动条，与 Liquid Glass 的材质冲突 -->
+    <meta name="color-scheme" content="dark light" />
+    <title>AI 求职助手</title>
+    <!-- 开头这段内联样式（防首帧闪白 / 防滚动条闪烁）的 nonce 由 Tauri 构建期自动注入：
+         tauri-utils html2 的 inject_nonce 会给所有 <style> 打上随机 nonce 并补进 CSP 的 style-src。
+         所以这里不要手工写 nonce 属性（已有 nonce 属性的元素会被跳过）；也不要在 HTML 里出现 Tauri 的
+         nonce 令牌字面量——一旦出现，Tauri 会判定这份 HTML 已自行处理过 CSP 而不再改写它。
+
+         这三条不许挪进外部 CSS（frontend-vue/AGENTS.md C4）：外部样式表要等 JS 拉起后才加载，
+         而首帧闪白恰好发生在它之前。#app 是 Vue 的挂载点，语义与原 #root 相同。 -->
+    <style>
+      html { background: transparent; }
+      body { margin: 0; }
+      /* Vue 挂载完成前不要出现滚动条闪烁 */
+      body:not(:has(#app > *)) { overflow: hidden; }
+    </style>
+    <script>
+      /* 首帧主题（体积极小、必须同步执行、必须在样式表之后）：
+         在 Vue 挂载之前就把 data-theme 打到 <html> 上，否则会先闪一帧深色再切浅色。
+         语义与 src/lib_ui/theme.ts 的 readInitialTheme 逐条一致：
+           已保存的 aja.theme（只认 'light'，其余按深色）> 系统偏好 > 深色。
+         任何异常都吞掉并回落深色（CSS 默认值），绝对不能让它挡住后续脚本。
+
+         这里只能写 ES5：它由 Tauri 的 html2 原样内联进 CSP（script-src 显式存在，
+         见根 AGENTS.md §3.1），不经过 Vite 转译，没有可选链 / 箭头函数可用。 */
+      (function () {
+        var theme = 'dark';
+        try {
+          var stored = window.localStorage.getItem('aja.theme');
+          if (stored !== null && stored !== undefined) {
+            theme = stored === 'light' ? 'light' : 'dark';
+          } else if (
+            typeof window.matchMedia === 'function' &&
+            window.matchMedia('(prefers-color-scheme: light)').matches
+          ) {
+            theme = 'light';
+          }
+        } catch (e) {
+          theme = 'dark';
+        }
+        try {
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          /* 无 document（不该发生）：CSS 默认就是深色 */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <!-- Liquid Glass L2 滤镜宿主（SPEC-003 裁定 2 / 规格 Q5）：文档级全局解析一次被任意元素引用，
+         组件卸载不丢滤镜（退出动画期间仍在），首帧就有不「先平后皱」。0×0、aria-hidden、移出视口。
+         深/浅两条湍流滤镜参数与 lib_ui/glass.ts ThemeParams、tokens.css 折射令牌三方同源
+         （tests/glass.test.ts 守卫）；SVG 属性不吃 CSS 变量，故数值静态写死并由单测钉住。
+         真斜面链 lg-lens-drawer 随 L2-2 抽屉克隆层落地（feImage href 由 TS 运行时注入 dataURL）。 -->
+    <svg width="0" height="0" style="position:absolute; left:-9999px; top:0" aria-hidden="true">
+      <defs>
+        <filter id="lg-turb-dark" x="-8%" y="-8%" width="116%" height="116%"
+                primitiveUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.008" numOctaves="3" seed="11" result="n"/>
+          <feDisplacementMap in="SourceGraphic" in2="n" scale="10" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
+        <filter id="lg-turb-light" x="-8%" y="-8%" width="116%" height="116%"
+                primitiveUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.006" numOctaves="2" seed="11" result="n"/>
+          <feDisplacementMap in="SourceGraphic" in2="n" scale="5" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
+      </defs>
+    </svg>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

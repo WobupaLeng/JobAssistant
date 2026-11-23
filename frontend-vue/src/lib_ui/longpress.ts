@@ -1,0 +1,117 @@
+/**
+ * 长按多选的状态机（SPEC §16.3 裁决 S）。
+ *
+ * 规则只有六条，但全在时间与指针位移的边界上，放组件里没法测：
+ *
+ * 1. 在卡片上 `pointerdown` 起一个 500ms 定时器，**不**立即进入多选；
+ * 2. 500ms 内 `pointerup` / `pointerleave` / `pointercancel` 取消；
+ * 3. 移动超过 8px 取消——用户是在滚动列表，不是要选；
+ * 4. 定时器到点才进入多选，并把**按下的那张卡**勾上；
+ * 5. 多选态下单击卡片 = 勾选/取消勾选；单击空白处 = 退出多选；
+ * 6. 勾选清零自动退出多选（否则会留下一个"空的多选态"，用户没法退）。
+ *
+ * 为什么不用 `mousedown`：触摸滚动时 mouse 事件序列不可靠（先 touchstart
+ * 再合成 mousedown），长按会被滚动打断；Pointer Events 有统一的
+ * `pointercancel`。
+ */
+
+/** 长按判定窗口（毫秒）。SPEC 定死 500。 */
+export const LONG_PRESS_MS = 500;
+
+/** 允许的抖动半径（像素）。超过就当成拖动/滚动。 */
+export const LONG_PRESS_MOVE_TOLERANCE = 8;
+
+/** 点在这些东西上不触发长按：按钮要能点、输入框要能聚焦。 */
+const INTERACTIVE_SELECTOR = 'button, a, input, label, select, textarea, [data-greet]';
+
+export interface PointerSample {
+  readonly x: number;
+  readonly y: number;
+}
+
+export interface SelectionState {
+  readonly selecting: boolean;
+  /** 已勾选的 job_id，保持点击顺序。 */
+  readonly checked: readonly string[];
+}
+
+export function emptySelection(): SelectionState {
+  return { selecting: false, checked: [] };
+}
+
+/** 距离判定用平方比较，省一次开方（同一循环里每帧都在问）。 */
+export function movedBeyond(start: PointerSample, now: PointerSample, tolerance = LONG_PRESS_MOVE_TOLERANCE): boolean {
+  const dx = now.x - start.x;
+  const dy = now.y - start.y;
+  return dx * dx + dy * dy > tolerance * tolerance;
+}
+
+/**
+ * 事件目标是否该被长按逻辑忽略。
+ *
+ * 传 tagName（大写或小写都行）与命中标记，而不是传 DOM 节点：
+ * 这样单测里不需要造 DOM（vitest 默认 node 环境）。
+ */
+export function ignorePointerTarget(tagName: string, matchedInteractive = false): boolean {
+  if (matchedInteractive) return true;
+  const tag = tagName.toLowerCase();
+  return ['button', 'a', 'input', 'label', 'select', 'textarea'].includes(tag);
+}
+
+/** 深选择器字符串，供组件 `el.closest()` 用；与 `ignorePointerTarget` 保持同一口径。 */
+export function interactiveSelector(): string {
+  return INTERACTIVE_SELECTOR;
+}
+
+/** 进入多选并勾上按下的那张卡。 */
+export function enterSelecting(jobId: string): SelectionState {
+  return { selecting: true, checked: [jobId] };
+}
+
+/** 退出多选：**同时清空勾选**（残留勾选会让下一次长按带着旧选择）。 */
+export function exitSelecting(): SelectionState {
+  return emptySelection();
+}
+
+/**
+ * 多选态下点了一张卡：切它；点完若一张不剩，直接退出多选。
+ *
+ * 非多选态点卡片不改选择（那是"展开详情"的工作）。
+ */
+export function clickCard(state: SelectionState, jobId: string): SelectionState {
+  if (!state.selecting) return state;
+  const has = state.checked.includes(jobId);
+  const checked = has ? state.checked.filter((id) => id !== jobId) : [...state.checked, jobId];
+  if (checked.length === 0) return exitSelecting();
+  return { selecting: true, checked };
+}
+
+/** 空白处单击：多选态下退出。 */
+export function clickBlank(state: SelectionState): SelectionState {
+  return state.selecting ? exitSelecting() : state;
+}
+
+/** 全选本页 / 取消全选本页。勾选顺序按传入的可见顺序，保证 diff 稳定。 */
+export function setChecked(jobIds: readonly string[]): SelectionState {
+  if (jobIds.length === 0) return exitSelecting();
+  return { selecting: true, checked: [...jobIds] };
+}
+
+/**
+ * 定时器句柄的极小封装。
+ *
+ * 单独包一层是为了单测能注入假定时器而不碰全局 `setTimeout` 的类型差异
+ * （浏览器返回 number，Node 返回 Timeout）。
+ */
+export interface TimerHandle {
+  cancel(): void;
+}
+
+export function armLongPress(fire: () => void, ms = LONG_PRESS_MS): TimerHandle {
+  const id = setTimeout(fire, ms);
+  return {
+    cancel(): void {
+      clearTimeout(id);
+    },
+  };
+}

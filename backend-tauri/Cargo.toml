@@ -1,0 +1,59 @@
+[package]
+name = "jobassistant-app"
+version = "0.1.0"
+description = "AI 求职助手（Rust 重写骨架）"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "jobassistant_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 原 jobassistant-core 的依赖：core/ 已并入本 crate（src/core/），
+# 但领域层仍不得依赖 tauri —— 靠模块边界而非 crate 边界维持。
+thiserror = "2"
+regex = "1"
+# infra 层实现。bundled 表示把 SQLite 源码编进二进制：
+# 不依赖系统 DLL，且能让 release 体积优化真正生效（否则要链接系统的 sqlite3.dll）
+rusqlite = { version = "0.32", features = ["bundled"] }
+# 大模型 HTTP 调用。选 ureq 而非 reqwest：只需要发一次 POST，
+# 不必引入 tokio/hyper 整棵异步运行时依赖树（体积硬指标 ≤20MB）。
+# rustls 而非 native-tls：不依赖系统 OpenSSL，单文件分发更省心。
+ureq = { version = "2", default-features = false, features = ["json", "tls"] }
+[target.'cfg(windows)'.dependencies]
+# 毛玻璃与 AJA_DIAG_WINDOW 诊断读数。窗口特效全部走这里：
+# SetWindowCompositionAttribute 动态加载 + DwmSetWindowAttribute（不引 window-vibrancy，
+# 它在 Win11 上只调 SYSTEMBACKDROP_TYPE 且丢掉颜色参数，见 src/lib.rs::apply_blur）
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[features]
+# 与 Tauri 模板保持一致：生产构建走自定义协议，避免 CSP 报错
+custom-protocol = ["tauri/custom-protocol"]
+
+# 与旧应用（src-tauri/Cargo.toml）一致的体积优化档位。
+#
+# 注意（实测记录）：`panic = "abort"` 会把 Tauri 的 startup panic 从 101 改写成
+# `0xC0000409 STATUS_STACK_BUFFER_OVERRUN`，排障时先临时改回 "unwind" 才能拿到
+# 可读的 panic 报文与回溯；定位完再切回 abort 出体积最小的包。
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

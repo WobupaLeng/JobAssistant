@@ -1,0 +1,571 @@
+/* 分域样式：控件（按钮、输入、开关、页签、胶囊、状态点、错误条、骨架条）。
+ *
+ * Liquid Glass 下控件与卡片的差别只有一层：控件更小、玻璃更薄、按下时下沉。
+ *
+ * 注意：这里**绝不能**出现两个斜杠加叹号（或三个斜杠）开头的 Rust 文档注释。
+ * CSS 解析器遇到该记号会判定整份样式表非法并**静默丢弃**——表现为
+ * 「变量生效、组件样式全无」。
+ */
+
+/* ---------- 按钮 ----------
+ * 默认是「次级玻璃」：比卡片亮一档但仍在同一材质族里。
+ * 过渡用 --ease-glass 且只过渡 transform/shadow/color——过渡 background 会让
+ * backdrop-filter 每帧重算，滚动时掉帧。 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--glass-3);
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--shadow-near), inset 0 1px 0 var(--spec-top);
+  transition:
+    transform var(--dur-fast) var(--ease-glass),
+    box-shadow var(--dur-fast) var(--ease-glass),
+    color var(--dur-fast) var(--ease-glass),
+    opacity var(--dur-fast) var(--ease-glass);
+}
+
+.btn:hover:not(:disabled) {
+  /* 悬停只抬 1px：玻璃是厚重的，跳 3px 像塑料按钮 */
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-far), inset 0 1px 0 var(--spec-top);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
+  box-shadow: var(--shadow-near), inset 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-sm {
+  height: 24px;
+  padding: 0 9px;
+  font-size: var(--fs-sm);
+  border-radius: 8px;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+/* 主按钮：翡翠绿玻璃。渐变两端同色系，不是纯色——
+ * 纯色会让高光边看起来像贴纸边。 */
+.btn-primary {
+  border-color: rgba(16, 185, 129, 0.45);
+  background: linear-gradient(180deg, var(--primary) 0%, var(--primary-strong) 100%);
+  color: #04120c;
+  font-weight: 650;
+  box-shadow:
+    0 2px 10px rgba(16, 185, 129, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.16);
+}
+
+.btn-primary:hover:not(:disabled) {
+  box-shadow:
+    0 4px 18px rgba(16, 185, 129, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.16);
+}
+
+.btn-danger {
+  border-color: rgba(248, 81, 73, 0.42);
+  background: var(--bad-soft);
+  color: #ffb4b0;
+}
+
+.btn-warn {
+  border-color: rgba(210, 153, 34, 0.45);
+  background: var(--warn-soft);
+  color: #f0c674;
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text-2);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--glass-input);
+  border-color: var(--hairline);
+  box-shadow: none;
+  color: var(--text-1);
+}
+
+/* ---------- 输入 ----------
+ * 输入框是「凹陷的玻璃」：底色比卡片深、内阴影在上沿（光进不去的暗部）。
+ * 这与按钮的凸起形成对比，让可输入区域一眼可辨。 */
+.input,
+.textarea {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--glass-input);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.22);
+  transition: border-color var(--dur-fast) var(--ease-glass),
+    box-shadow var(--dur-fast) var(--ease-glass);
+}
+
+.textarea {
+  height: auto;
+  min-height: 74px;
+  padding: 8px 10px;
+  resize: vertical;
+  line-height: 1.55;
+  font-family: inherit;
+}
+
+.input:focus,
+.textarea:focus {
+  outline: none;
+  border-color: rgba(16, 185, 129, 0.55);
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.22),
+    0 0 0 3px var(--primary-soft);
+}
+
+.input:disabled,
+.textarea:disabled {
+  opacity: 0.5;
+}
+
+/* 只读输入（aria-readonly="true"）：派生值 —— 数据目录、岗位总数这类由库或
+ * 应用路径算出来的读数。虚线边框 + 去掉凹陷内阴影，是「这不是表单项」的信号；
+ * 同时 cursor 回到默认箭头，避免用户以为能点进去打字。
+ * 与 :disabled 的区别：只读框内容仍可选中复制，所以不降整体不透明度。 */
+.input[aria-readonly="true"],
+.textarea[aria-readonly="true"] {
+  border-style: dashed;
+  border-color: var(--hairline-strong, var(--hairline));
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-2);
+  cursor: default;
+}
+
+.input[aria-readonly="true"]:focus,
+.textarea[aria-readonly="true"]:focus {
+  border-color: var(--hairline-strong, var(--hairline));
+  box-shadow: none;
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--text-3);
+}
+
+.input-num {
+  width: 78px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 字段 ---------- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.field-hint {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  opacity: 0.8;
+}
+
+/* ---------- 开关 ---------- */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.switch input {
+  appearance: none;
+  width: 30px;
+  height: 17px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-input);
+  border: 1px solid var(--hairline);
+  position: relative;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease-glass),
+    border-color var(--dur) var(--ease-glass);
+}
+
+/* 滑块本体：带内高光的白色小玻璃球 */
+.switch input::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #fff 0%, #cfd8e3 100%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform var(--dur) var(--ease-glass);
+}
+
+.switch input:checked {
+  background: var(--primary);
+  border-color: rgba(16, 185, 129, 0.5);
+}
+
+.switch input:checked::after {
+  transform: translateX(13px);
+}
+
+.switch input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------- 页签 ----------
+ * 选中态不是「填充色」，而是一块更亮的小玻璃 + 上高光——
+ * 与整个界面的材质语言保持一致。 */
+.tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--glass-input);
+  border: 1px solid var(--hairline);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 520;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease-glass),
+    color var(--dur) var(--ease-glass),
+    box-shadow var(--dur) var(--ease-glass);
+}
+
+.tab:hover:not(.is-active) {
+  color: var(--text-1);
+  background: var(--glass-3);
+}
+
+.tab.is-active {
+  color: var(--text-1);
+  background: var(--glass-3);
+  box-shadow: inset 0 1px 0 var(--spec-top), 0 1px 4px rgba(0, 0, 0, 0.22);
+}
+
+.tab-count {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.tab.is-active .tab-count {
+  color: var(--primary);
+}
+
+/* 二级导航（概览 | Boss 消息 | 配置 | 决策记录）已按用户裁决撤除：
+ * legacy-baseline §9 Q-1「用户裁决：删除二级导航」+ §7-K4（结构树明写无 nav.page-tabs）、
+ * 原型 L1413「用户裁决 5」、ADR-004（聊天不再是整页，Boss 消息常驻右栏）。
+ * 随之退役两条规则：`.nav-tabs .tab`（页签尺寸）与 `.nav { display: contents }`（页签包裹盒）。
+ *
+ * 下面这条敏感库尺寸口径原本挂在 `.nav` 后代上，宿主改成顶栏尾段 `.tb-tail`，
+ * 数值一字未改——要改像素归有稿设计在 A–H 轮定。 */
+.tb-tail button[data-testid='sensitive-open'] {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+/* ---------- 胶囊 ---------- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hairline);
+  background: var(--glass-input);
+  color: var(--text-2);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+
+.chip-primary {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: var(--primary-soft);
+  color: #6ee7b7;
+}
+
+.chip-accent {
+  border-color: rgba(37, 99, 235, 0.4);
+  background: var(--accent-soft);
+  color: #93c5fd;
+}
+
+.chip-warn {
+  border-color: rgba(210, 153, 34, 0.4);
+  background: var(--warn-soft);
+  color: #f0c674;
+}
+
+.chip-bad {
+  border-color: rgba(248, 81, 73, 0.4);
+  background: var(--bad-soft);
+  color: #ffa198;
+}
+
+.chip.as-btn {
+  cursor: pointer;
+}
+
+.chip.as-btn:hover {
+  border-color: var(--hairline-strong);
+}
+
+/* 浅色主题下这几个文字色太浅，改深 */
+[data-theme='light'] .chip-primary {
+  color: #047857;
+}
+[data-theme='light'] .chip-accent {
+  color: #1d4ed8;
+}
+[data-theme='light'] .chip-warn {
+  color: #92650a;
+}
+[data-theme='light'] .chip-bad {
+  color: #b91c1c;
+}
+
+/* ---------- 状态点 ----------
+ * 小圆点 + 外发光。运行时呼吸，静止时熄灭——
+ * 光晕本身就是状态信号，不需要额外文字。 */
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--muted);
+  box-shadow: 0 0 0 3px rgba(139, 148, 158, 0.14);
+}
+
+.dot.is-running {
+  background: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+  animation: dot-pulse 1.8s var(--ease-glass) infinite;
+}
+
+.dot.is-idle {
+  background: var(--muted);
+  box-shadow: 0 0 0 3px rgba(139, 148, 158, 0.12);
+}
+
+.dot.is-warn {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px var(--warn-soft);
+}
+
+.dot.is-bad {
+  background: var(--bad);
+  box-shadow: 0 0 0 3px var(--bad-soft);
+}
+
+@keyframes dot-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px var(--primary-soft);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.06);
+  }
+}
+
+/* ---------- 统计胶囊 ---------- */
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 62px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--glass-input);
+  border: 1px solid var(--hairline);
+  box-shadow: inset 0 1px 0 var(--spec-top);
+}
+
+.stat-label {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.stat-value {
+  font-size: var(--fs-md);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  color: var(--text-1);
+}
+
+.stat-value.is-primary {
+  color: var(--primary);
+}
+.stat-value.is-warn {
+  color: var(--warn);
+}
+.stat-value.is-bad {
+  color: var(--bad);
+}
+
+/* 统计胶囊的骨架态：与 `.stat` 同 padding / 同行高（label 10.5px、value 17px×1.2），
+ * 用一条扫光的短条顶住数值位置。目的是让数据到达时高度不变——否则整排胶囊会跳一下。 */
+.stat-skeleton .stat-label,
+.stat-skeleton .stat-value {
+  display: flex;
+  align-items: center;
+}
+.stat-skeleton .stat-label {
+  min-height: 14px;
+}
+.stat-skeleton .stat-value {
+  min-height: 20px;
+}
+
+/* ---------- 错误条 / 横幅 ---------- */
+.error-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(248, 81, 73, 0.42);
+  background: var(--bad-soft);
+  color: #ffb4b0;
+  font-size: var(--fs-sm);
+  box-shadow: var(--shadow-near);
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(210, 153, 34, 0.4);
+  background: var(--warn-soft);
+  color: #f0c674;
+  font-size: var(--fs-sm);
+  box-shadow: var(--shadow-near);
+}
+
+[data-theme='light'] .error-bar {
+  color: #b91c1c;
+}
+[data-theme='light'] .banner {
+  color: #92650a;
+}
+
+/* ---------- 骨架条 ----------
+ * 加载中不转圈：转圈会把视线拉走，骨架条让布局不跳动。 */
+.skeleton-row td {
+  padding: 9px 10px;
+}
+
+.skeleton-bar {
+  height: 9px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    90deg,
+    var(--glass-input) 0%,
+    var(--hairline-strong) 50%,
+    var(--glass-input) 100%
+  );
+  background-size: 240% 100%;
+  animation: skeleton-sweep 1.4s var(--ease-glass) infinite;
+}
+
+@keyframes skeleton-sweep {
+  0% {
+    background-position: 140% 0;
+  }
+  100% {
+    background-position: -40% 0;
+  }
+}
+
+/* ---------- 动效：列表淡入 ----------
+ * 只动 opacity 与 2px 位移。滚动容器里做大幅位移会触发频繁重排。 */
+.list-fade tbody tr,
+.list-fade > tr {
+  animation: row-in var(--dur) var(--ease-out) both;
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 尊重系统的「减少动态效果」设置：这不是可选项，是前庭功能敏感用户的硬需求 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

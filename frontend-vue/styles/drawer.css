@@ -1,0 +1,193 @@
+/* 分域样式：岗位详情抽屉。
+ *
+ * 形状、间距、字号照抄只读参考 `skeleton-web/src/styles/drawer.css`（用户明确要求
+ * 「UI 与最初版相似即可，不要自由发挥」）。颜色不打字面值，全部走 `tokens.css` 的变量：
+ * 旧版的 `--surface-* / --hairline-strong` 在本项目里改名为 `--glass-* / --hairline-strong`，
+ * 深浅两套数值由 tokens 自己调和，抽屉不需要再写一遍。
+ *
+ * `.drawer-mask` 是旧版类名，新前端类名统一为 `.drawer-backdrop`（旧名保留为别名，
+ * 免得任何引用点失效）。
+ */
+
+.drawer-backdrop,
+.drawer-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  /* 遮罩本身不播进场：旧版 0.18s 的淡入在压暗列表时几乎不可见，
+   * 而多一条动画就要多一条 reduced-motion 分支。面板滑入已经足够交代层级。 */
+}
+
+@keyframes drawer-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+/* 面板：右侧滑出，上下各留 12px（旧版 `inset` 写法），宽 min(560px, 100vw-24px)。
+ * 层级必须高于遮罩（41 > 40），且高于 sticky 表头（jobs.css 里是 1），否则抽屉会被列表盖住。 */
+.drawer {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: min(560px, calc(100vw - 24px));
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: var(--radius-lg);
+  background: var(--glass-3);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: var(--shadow-pop);
+  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-2));
+  backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-2));
+  /* 进场时长与曲线照 apple-design：sheet/drawer = damping 0.8 / response 0.3，
+   * 落到 CSS 就是 220ms + 一条「快出缓收」的曲线（与旧版逐字相同）。
+   * 初始态显式写出来：动画类由 JS 挂载后补上，不能靠「没用类 = 可见」兜底。 */
+  opacity: 0;
+  transform: translateX(24px);
+}
+
+.drawer.drawer-in-play {
+  animation: drawer-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 顶部：左标题区可收缩，右侧分数列固定宽。`flex: 0 0 auto` 让头部不参与 body 的滚动。 */
+.drawer-head {
+  flex: 0 0 auto;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--hairline);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.drawer-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--text-1);
+  /* 长标题最多两行：再摘就要靠 title 提示，不能把分数挤下去 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+/* 分数列：大号数字 + 「/ 100 分」。tabular-nums 让数字宽度一致，
+ * 切换相邻岗位时右边缘不会左右跳。 */
+.drawer-score-box {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 64px;
+}
+
+.drawer-score {
+  font-size: var(--fs-lg);
+  line-height: 1;
+}
+
+/* 正文区：唯一滚动容器。`min-height: 0` 是 flex 子项能真正溢出的前提，
+ * 少了这一句 JD 会把整个面板撑高而不是在内部滚动。 */
+.drawer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* kv 信息列表：左窄右宽两列。dd 允许换行，长公司名不会把抽屉顶宽。 */
+.kv {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.kv dt {
+  color: var(--text-3);
+}
+
+.kv dd {
+  margin: 0;
+  color: var(--text-1);
+  word-break: break-word;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kv a {
+  color: var(--primary);
+  word-break: break-all;
+}
+
+/* 小节标题。旧版类名 `.section-label` 在 `components/widgets.rs::Collapsible` 里
+ * 是按钮（折叠头），这里只补非按钮的静态标题，不改那条既有规则。 */
+.section-label-static {
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+/* 打分依据：与 JD 共用 `jd-text` 的容器样式，高度压到一行左右。 */
+.drawer-reason {
+  max-height: 160px;
+  margin: 0;
+}
+
+/* JD 区：等宽正文，可滚动。`pre` 保留抓取到的换行。 */
+.jd-text {
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1.75;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--glass-input);
+  border: 1px solid var(--hairline);
+  max-height: 340px;
+  overflow: auto;
+}
+
+@media (max-width: 720px) {
+  .drawer {
+    top: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: calc(100vw - 16px);
+  }
+}

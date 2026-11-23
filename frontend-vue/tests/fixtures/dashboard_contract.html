@@ -1,0 +1,95 @@
+<!doctype html>
+<!--
+  `tools/gui_e2e.py` 的**离线契约夹具**（2026-11-21 由 Lane D 建立）。
+
+  这份 HTML 不是给浏览器看的界面，而是把「脚本依赖的 DOM 结构 + 文案」逐字抄下来，
+  让 `tools/tests/test_gui_e2e.py` 在没有 exe、没有网络、没有 WebView2 的情况下
+  也能验证：缺少锚点时脚本只记一项失败、进度读数取得到、重算等待逻辑不空转。
+
+  维护规则（改这里之前先读 tools/gui_e2e.py 顶部注释）：
+  1. 结构与真页面不一致时，改**这里**要跟 `frontend-vue/src/**` 对齐，而不是反过来；
+  2. `scrape-progress` 的五段文案是 AGENTS.md 2.3 的契约，一个字都不能改；
+  3. 打分试算结果的首个整数就是分数（Leptos 版**没有** `/ 100` 后缀）。
+-->
+<html lang="zh-CN">
+  <body>
+    <div class="app-shell" data-testid="app-root">
+      <header>
+        <span data-testid="score-spec">满分 100 / 默认门槛 70</span>
+      </header>
+
+      <section>
+        <div class="job-list" data-testid="job-list">
+        <button data-testid="job-refresh">刷新</button>
+        <table>
+          <tbody>
+            <tr data-testid="job-row-1"><td><span data-testid="score-1">88</span></td></tr>
+            <tr data-testid="job-row-2"><td><span data-testid="score-2">42</span></td></tr>
+            <tr data-testid="job-row-3"><td><span data-testid="score-3">0</span></td></tr>
+          </tbody>
+        </table>
+        </div>
+      </section>
+
+      <section data-testid="rescore-panel">
+        <input type="checkbox" data-testid="rescore-llm-toggle" />
+        <!-- 进度行形态取自 features/jobs/rescore.rs：`已扫描 N 条，改写 M 条` -->
+        <span data-testid="rescore-note">已扫描 3 条，改写 1 条</span>
+        <button data-testid="rescore-btn">全量重算</button>
+      </section>
+
+      <section data-testid="scrape-panel">
+        <span data-testid="scrape-status">未在抓取 · 登录态 已登录</span>
+        <button data-testid="scrape-login-btn">扫码登录</button>
+        <!-- 折叠区：`scrape-keywords` 展开后才进 DOM（与 panel.rs 的 <Show when=expanded> 同构） -->
+        <button class="chip as-btn scrape-toggle" data-testid="scrape-filter-toggle">筛选条件 ▼</button>
+        <input data-testid="scrape-keywords" />
+        <input data-testid="scrape-min-score" />
+        <button data-testid="scrape-start-btn">开始抓取</button>
+        <button data-testid="scrape-stop-btn">停止</button>
+
+        <!-- Leptos 版：容器 + 五个独立数字锚点 -->
+        <div data-testid="scrape-progress">
+          <div class="stat" data-testid="scrape-scraped"><div class="stat-label">已抓</div><div class="stat-value">3</div></div>
+          <div class="stat" data-testid="scrape-inserted"><div class="stat-label">入库</div><div class="stat-value">1</div></div>
+          <div class="stat" data-testid="scrape-duplicates"><div class="stat-label">重复</div><div class="stat-value">0</div></div>
+          <div class="stat" data-testid="scrape-below"><div class="stat-label">低于门槛</div><div class="stat-value">2</div></div>
+          <div class="stat" data-testid="scrape-rejected"><div class="stat-label">规则否决</div><div class="stat-value">0</div></div>
+          <span class="sr-only">已抓 3 · 入库 1 · 重复 0 · 低于门槛 2 · 规则否决 0</span>
+        </div>
+
+        <div class="feed" data-testid="scrape-feed">
+          <div class="feed-line is-ok"><span class="tag">✔</span><span class="msg">88 分 · 后端开发 @ 某公司</span></div>
+          <div class="feed-line is-skip"><span class="tag">跳过</span><span class="msg">低于门槛</span></div>
+        </div>
+      </section>
+
+      <section data-testid="demo-panel">
+        <h2 data-testid="demo-title">打分试算</h2>
+        <input data-testid="demo-title-input" />
+        <input data-testid="demo-salary" />
+        <input data-testid="demo-exp" />
+        <textarea data-testid="demo-jd"></textarea>
+        <input type="checkbox" data-testid="demo-llm-toggle" />
+        <input data-testid="demo-prefilter" />
+        <button data-testid="demo-score-btn">试算</button>
+        <div class="demo-result" data-testid="demo-result">
+          <span class="score-num is-pass">78</span>
+          <span class="chip">规则</span>
+          <span>技能匹配良好</span>
+        </div>
+      </section>
+
+      <section class="auto-bar" data-testid="auto-bar">
+        <button data-testid="auto-toggle">开始自动投递</button>
+        <div class="auto-status" data-testid="auto-status">
+          <span class="auto-status-text">空闲 · 本轮 0 次 · 间隔 20s</span>
+        </div>
+        <button data-testid="auto-reset">重置</button>
+      </section>
+
+      <!-- 敏感库：入口常驻，抽屉点开后才进 DOM（`sensitive-panel` 不在这里，故意如此） -->
+      <button class="btn btn-sm" data-testid="sensitive-open">敏感库（3）</button>
+    </div>
+  </body>
+</html>

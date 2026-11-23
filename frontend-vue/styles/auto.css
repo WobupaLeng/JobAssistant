@@ -1,0 +1,113 @@
+/* 分域样式：自动投递控制条（旧版「自动打招呼」）。
+ *
+ * 用户裁决后**不再自成一卡**：`AutoBar` 只产出扁平节点，直接住进抓取卡片的
+ * `.scrape-bar`（`div.scrape-bar > button[data-testid=auto-toggle]`），
+ * 「开始」紧贴「开始抓取」右边。因此这里不再给外层玻璃条的样式，
+ * 只保留按钮与状态胶囊——它们现在继承 `.scrape-bar` 的行高与间距。
+ *
+ * 颜色全部走 tokens.css；本文件的字面值只有与主题无关的绿色阴影。
+ *
+ * 结构：
+ *   .auto-toggle       开始 / 暂停 / 继续（单按钮切换）
+ *   .auto-status       状态胶囊：呼吸点 + 「已发 N 条 · 下次 12 秒 · …」
+ */
+
+/* 开关按钮：关=静默玻璃，开=翡翠绿（旧版 bg-emerald-500），暂停=琥珀。
+ * 只过渡 transform / shadow / color——过渡 background 会让 backdrop-filter
+ * 每帧重算，滚动时掉帧。 */
+.auto-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  min-width: 64px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hairline);
+  background: var(--glass-3);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: var(--shadow-near), inset 0 1px 0 var(--spec-top);
+  transition:
+    transform var(--dur-fast) var(--ease-glass),
+    box-shadow var(--dur-fast) var(--ease-glass),
+    color var(--dur-fast) var(--ease-glass),
+    border-color var(--dur-fast) var(--ease-glass),
+    opacity var(--dur-fast) var(--ease-glass);
+}
+
+.auto-toggle:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.auto-toggle:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
+}
+
+.auto-toggle:disabled {
+  opacity: 0.55;
+  cursor: progress;
+  transform: none;
+}
+
+.auto-toggle.is-on {
+  border-color: rgba(16, 185, 129, 0.5);
+  background: linear-gradient(180deg, var(--primary) 0%, var(--primary-strong) 100%);
+  color: #04120c;
+  box-shadow:
+    0 2px 10px rgba(16, 185, 129, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.auto-toggle.is-warn {
+  border-color: rgba(210, 153, 34, 0.5);
+  background: var(--warn-soft);
+  color: #f0c674;
+}
+
+/* 状态胶囊：呼吸点在左，文字单行省略（完整文案在 title 里）。
+ * `min-width: 0` + `overflow: hidden` 是 flex 子项内部能省略的前提。
+ * 住在抓取条里时不再贪吃剩余宽度（那里已经有一个弹性更大的 `.scrape-brief`），
+ * 否则它会把上限输入挤到第二行；给个 240px 的上限就够读「已发 N 条 · 下次 M 秒」。 */
+.auto-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 240px;
+  flex: 0 1 auto;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.auto-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 空标签的状态点不必占位；`.dot` 自身有宽高（controls.css）。 */
+.auto-status > .row {
+  flex: 0 0 auto;
+}
+
+.auto-error {
+  /* 在 `.scrape-bar`（flex-wrap）里独占一行，错误条不会被两个按钮夹成一条缝 */
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+[data-theme='light'] .auto-toggle.is-warn {
+  color: #8a5a00;
+}
+
+@media (max-width: 720px) {
+  .auto-status {
+    flex-basis: 100%;
+  }
+}
