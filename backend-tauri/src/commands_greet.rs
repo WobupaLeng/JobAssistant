@@ -14,6 +14,7 @@ use crate::core::domain::profile::DEFAULT_PROFILE;
 use crate::core::domain::job::{Job, JobStore};
 use crate::core::domain::scoring_llm::LlmClient;
 use crate::core::domain::store_ports::ConfigStore;
+use crate::core::domain::token_meter::{TokenKind, TokenMeter};
 use serde::{Deserialize, Serialize};
 
 use crate::commands_chat::{handle_of, request_chat};
@@ -156,13 +157,21 @@ pub fn greet_draft(
     // 3) 大模型可选。照抄 `score_job` 的写法：`guard` 是
     //    `LockResult<MutexGuard<Option<HttpLlmClient>>>`，所以 `as_ref` 要两次。
     let guard = llm_state.0.lock().ok();
-    let client: Option<&dyn LlmClient> = if args.use_llm {
+    let bare: Option<&dyn LlmClient> = if args.use_llm {
         guard
             .as_ref()
             .and_then(|g| g.as_ref())
             .map(|c| c as &dyn LlmClient)
     } else {
         None
+    };
+    // 计费口径的累计装在客户端边界（ADR-005），回传 tokens 语义不变。
+    // 上面 `store_handle` 已保证库已初始化；计数落库失败只 warn，不失败业务。
+    let warn = |m: &str| crate::commands_logs::push("warn", m);
+    let meter = bare.map(|c| TokenMeter::new(c, &*store, TokenKind::Greet, &warn));
+    let client: Option<&dyn LlmClient> = match meter.as_ref() {
+        Some(m) => Some(m as &dyn LlmClient),
+        None => bare,
     };
 
     let g = write_greeting(client, Some(prompt), &job, &profile);
@@ -255,6 +264,9 @@ mod tests {
                 _k: &str,
                 _v: &serde_json::Value,
             ) -> Result<(), Self::Error> {
+                Ok(())
+            }
+            fn bump_tokens(&self, _greet: i64, _score: i64) -> Result<(), Self::Error> {
                 Ok(())
             }
         }

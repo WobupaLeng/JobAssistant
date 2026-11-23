@@ -1065,6 +1065,97 @@ use crate::core::infra::sqlite::admin::MAX_BATCH_IDS;
         );
     }
 
+    // ---------- 词元计数累计（ADR-005） ----------
+
+    #[test]
+    fn bump_tokens_adds_to_legacy_values() {
+        let store = SqliteStore::open_in_memory().unwrap();
+        // 旧 Python 库遗留值：只增不清，不重置也不回填
+        store.set_config("tokens_total", Some("100")).unwrap();
+        store.set_config("tokens_greet", Some("100")).unwrap();
+
+        store.bump_tokens(5, 0).unwrap();
+
+        assert_eq!(store.get_config("tokens_total", "").unwrap(), "105");
+        assert_eq!(store.get_config("tokens_greet", "").unwrap(), "105");
+    }
+
+    #[test]
+    fn bump_tokens_skips_zero_delta_and_never_creates_keys() {
+        let store = SqliteStore::open_in_memory().unwrap();
+        // 双 0：no-op，不写库不建键（规则打分 / 未配 key 每次都走这条）
+        store.bump_tokens(0, 0).unwrap();
+        let keys: Vec<String> = store.config_pairs().unwrap().into_iter().map(|(k, _)| k).collect();
+        assert!(
+            !keys.iter().any(|k| k.starts_with("tokens_")),
+            "双 0 不该建出任何计数键"
+        );
+
+        // 只累打分：greet 分项不该被建出来补 0
+        store.bump_tokens(0, 7).unwrap();
+        assert_eq!(store.get_config("tokens_score", "").unwrap(), "7");
+        assert_eq!(store.get_config("tokens_total", "").unwrap(), "7");
+        assert_eq!(store.get_config("tokens_greet", "未建键").unwrap(), "未建键");
+    }
+
+    #[test]
+    fn bump_tokens_casts_non_numeric_legacy_to_zero() {
+        let store = SqliteStore::open_in_memory().unwrap();
+        // 用户手工改坏 / 旧库脏值：与读侧 num() 的 unwrap_or(0) 同口径，不 panic
+        store.set_config("tokens_total", Some("abc")).unwrap();
+        store.set_config("tokens_score", Some("  ")).unwrap();
+
+        store.bump_tokens(0, 9).unwrap();
+
+        assert_eq!(store.get_config("tokens_total", "").unwrap(), "9");
+        assert_eq!(store.get_config("tokens_score", "").unwrap(), "9");
+    }
+
+    #[test]
+    fn bump_tokens_total_equals_greet_plus_score_on_readback() {
+        let store = SqliteStore::open_in_memory().unwrap();
+        store.bump_tokens(1200, 0).unwrap();
+        store.bump_tokens(0, 1600).unwrap();
+        store.bump_tokens(50, 80).unwrap();
+
+        // 走读侧同一条路径：config_pairs() 带出三键，再按 read_config 的 num() 口径解析
+        let pairs = store.config_pairs().unwrap();
+        let num = |key: &str| -> i64 {
+            pairs
+                .iter()
+                .find(|(k, _)| k == key)
+                .and_then(|(_, v)| v.trim().parse::<i64>().ok())
+                .unwrap_or(0)
+        };
+        let (g, s, t) = (num("tokens_greet"), num("tokens_score"), num("tokens_total"));
+        assert_eq!((g, s), (1250, 1680));
+        assert_eq!(t, g + s, "新增量必须满足 Δtotal = Δgreet + Δscore");
+    }
+
+    #[test]
+    fn bump_tokens_concurrent_threads_lose_no_increment() {
+        use std::sync::Arc;
+        let store = Arc::new(SqliteStore::open_in_memory().unwrap());
+        let threads: Vec<_> = (0..4)
+            .map(|_| {
+                let s = Arc::clone(&store);
+                std::thread::spawn(move || {
+                    for _ in 0..25 {
+                        s.bump_tokens(3, 2).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+
+        // 100 次调用：读改写实现会在这里丢增量
+        assert_eq!(store.get_config("tokens_greet", "").unwrap(), "300");
+        assert_eq!(store.get_config("tokens_score", "").unwrap(), "200");
+        assert_eq!(store.get_config("tokens_total", "").unwrap(), "500");
+    }
+
     #[test]
     fn single_db_file_holds_all_rows() {
         let dir = std::env::temp_dir().join(format!("aja_single_{}", std::process::id()));

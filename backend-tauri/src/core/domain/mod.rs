@@ -18,6 +18,7 @@ pub mod scoring;
 pub mod scoring_llm;
 pub mod scoring_service;
 pub mod store_ports;
+pub mod token_meter;
 
 pub use auto_greet::{
     next_gap_ms, AutoGreetRuntime, AUTO_GAP_MIN_MS, AUTO_GAP_MS, AUTO_MAX_FAILURES,

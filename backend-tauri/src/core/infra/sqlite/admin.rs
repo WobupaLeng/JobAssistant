@@ -6,6 +6,7 @@
 //! 否则漏了 id 的行会被整表误判。
 
 use rusqlite::{params, OptionalExtension};
+use crate::core::domain::app_config::{KEY_TOKENS_GREET, KEY_TOKENS_SCORE, KEY_TOKENS_TOTAL};
 use crate::core::domain::job::{Job, JobQuery, JobStatus, SensitiveKind};
 use crate::core::domain::store_ports::{
     ConfigStore, DecisionRecord, DecisionStore, JobAdminStore, JobStats, SensitiveAdminStore,
@@ -496,5 +497,35 @@ impl ConfigStore for SqliteStore {
         // serde_json 默认不转义非 ASCII，与 Python 的 ensure_ascii=False 一致
         let text = serde_json::to_string(value).map_err(|e| StoreError::Json(e.to_string()))?;
         self.set_config(key, Some(&text))
+    }
+
+    /// ADR-005: docs/adr/ADR-005-legacy-token-accumulation.md
+    fn bump_tokens(&self, greet: i64, score: i64) -> Result<()> {
+        // 双 0 是 no-op：不写库、不建键、不补 0（规则打分与未配 key 都走这里）
+        if greet == 0 && score == 0 {
+            return Ok(());
+        }
+        let conn = self.conn.lock().expect("存储锁中毒");
+        // 单事务三键：读方（read_config）永不见「total 已加、分项未加」的半更新态。
+        // 事务形状照 `SqliteStore::migrate`（连接在 Mutex 后，用 unchecked_transaction）。
+        let tx = conn.unchecked_transaction()?;
+        // 算术在 SQL 侧：旧值与增量在同一条语句内相加，Rust 侧不做 get→set 读改写
+        // （那会被并发的 auto/rescore/配置保存插队，丢增量）。
+        // 非数字遗留值经 CAST 归 0，与读侧 `num()` 的 unwrap_or(0) 同口径。
+        const UPSERT: &str = "INSERT INTO app_config (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = CAST(COALESCE(NULLIF(TRIM(value), ''), '0') AS INTEGER) + ?2";
+        for (key, delta) in [
+            (KEY_TOKENS_TOTAL, greet + score),
+            (KEY_TOKENS_GREET, greet),
+            (KEY_TOKENS_SCORE, score),
+        ] {
+            // 增量为 0 的键跳过语句：不给未使用过的分项建键
+            if delta == 0 {
+                continue;
+            }
+            tx.execute(UPSERT, params![key, delta])?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 }

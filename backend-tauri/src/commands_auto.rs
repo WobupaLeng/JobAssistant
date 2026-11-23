@@ -23,6 +23,7 @@ use crate::core::domain::profile::DEFAULT_PROFILE;
 use crate::core::domain::scoring_llm::LlmClient;
 use crate::core::domain::job::JobStore;
 use crate::core::domain::store_ports::{ConfigStore, JobAdminStore};
+use crate::core::domain::token_meter::{TokenKind, TokenMeter};
 use crate::core::sidecar::protocol::Command;
 use serde::{Deserialize, Serialize};
 
@@ -288,7 +289,14 @@ pub fn auto_greet_next(
     // 3) 生成话术
     let greeting = {
         let guard = llm.0.lock().ok();
-        let client: Option<&dyn LlmClient> = guard.as_ref().and_then(|g| g.as_ref()).map(|c| c as &dyn LlmClient);
+        let bare: Option<&dyn LlmClient> = guard.as_ref().and_then(|g| g.as_ref()).map(|c| c as &dyn LlmClient);
+        // 计费口径的累计装在客户端边界（ADR-005），`draft_for` 本体不动。
+        let warn = |m: &str| crate::commands_logs::push("warn", m);
+        let meter = bare.map(|c| TokenMeter::new(c, &*store_arc, TokenKind::Greet, &warn));
+        let client: Option<&dyn LlmClient> = match meter.as_ref() {
+            Some(m) => Some(m as &dyn LlmClient),
+            None => bare,
+        };
         draft_for(&*store_arc, client, &job)
     };
 

@@ -250,6 +250,20 @@ pub trait ConfigStore {
     /// 写 JSON 值，序列化带 `ensure_ascii=false` 语义（中文不转义）。
     fn set_config_json(&self, key: &str, value: &serde_json::Value) -> Result<(), Self::Error>;
 
+    /// 累计词元计数：`tokens_greet += greet`、`tokens_score += score`、
+    /// `tokens_total += greet + score`。
+    ///
+    /// **内部计数专用**，不经 `set_app_config`：三键仍属
+    /// [`CONFIG_READ_ONLY_KEYS`]，前端整份回传不得写它们（只读守卫必须保持绿）。
+    ///
+    /// 实现必须是**单次锁获取 + 单事务 + SQL 侧算术**：读方（`read_config`）
+    /// 永不见半更新态，并发累计不丢增量。禁止 Rust 侧 `get_config` → `set_config`
+    /// 读改写。增量为 0 的键跳过语句，双 0 为 no-op（不写库、不建键、不补 0）；
+    /// 遗留值只增不清，非数字遗留值按 0 起算（与读侧 `num()` 同口径）。
+    ///
+    /// ADR-005: docs/adr/ADR-005-legacy-token-accumulation.md
+    fn bump_tokens(&self, greet: i64, score: i64) -> Result<(), Self::Error>;
+
     /// 一次读出全部键值对（`SELECT key, value FROM app_config`）。
     ///
     /// 命令层装配配置回执时要用到十几个键，逐个 `get_config` 会反复抢锁。

@@ -12,6 +12,7 @@ use crate::core::domain::profile::DEFAULT_PROFILE;
 use crate::core::domain::scoring::{rule_score_all, RuleScore};
 use crate::core::domain::scoring_llm::{LlmClient, LLM_PREFILTER_DEFAULT};
 use crate::core::domain::scoring_service::{score_job as score_job_entry, ScoreConfig, ScoreOutcome};
+use crate::core::domain::token_meter::{TokenKind, TokenMeter};
 use crate::core::infra::{HttpLlmClient, SqliteStore};
 use serde::{Deserialize, Serialize};
 
@@ -395,13 +396,36 @@ impl From<ScoreOutcome> for ScoreReply {
 /// 未配置密钥时即使 `use_llm=true` 也自动退回规则分，不会报错，
 /// 因为「没配密钥」是正常状态而不是故障。
 #[tauri::command]
-pub fn score_job(llm: tauri::State<'_, LlmState>, args: ScoreArgs) -> ScoreReply {
+pub fn score_job(
+    store_state: tauri::State<'_, StoreState>,
+    llm: tauri::State<'_, LlmState>,
+    args: ScoreArgs,
+) -> ScoreReply {
     let guard = llm.0.lock().ok();
     // 显式标注成 trait 对象，否则 `Option<&HttpLlmClient>` 不会自动收窄
-    let client: Option<&dyn LlmClient> = guard
+    let bare: Option<&dyn LlmClient> = guard
         .as_ref()
         .and_then(|g| g.as_ref())
         .map(|c| c as &dyn LlmClient);
+    // 计费口径的累计装在客户端边界（ADR-005），打分决策与回传语义零改动。
+    // 本命令签名不可失败：库还没初始化时降级为裸 client，只记一条 warn。
+    let warn = |m: &str| crate::commands_logs::push("warn", m);
+    let store = store_handle(&store_state).ok();
+    let meter = match (bare, store.as_deref()) {
+        (Some(c), Some(s)) => Some(TokenMeter::new(c, s, TokenKind::Score, &warn)),
+        (Some(_), None) => {
+            crate::commands_logs::push(
+                "warn",
+                "词元计数未计入：数据库尚未初始化（打分本身不受影响）",
+            );
+            None
+        }
+        (None, _) => None,
+    };
+    let client: Option<&dyn LlmClient> = match meter.as_ref() {
+        Some(m) => Some(m as &dyn LlmClient),
+        None => bare,
+    };
     score_job_entry(&args.to_job(), &DEFAULT_PROFILE, &args.to_config(), client).into()
 }
 
@@ -530,13 +554,21 @@ pub fn rescore_jobs(
     let opts = args.into_options();
     with_store(&state, |s| {
         let guard = llm.0.lock().ok();
-        let client: Option<&dyn LlmClient> = if opts.use_llm {
+        let bare: Option<&dyn LlmClient> = if opts.use_llm {
             guard
                 .as_ref()
                 .and_then(|g| g.as_ref())
                 .map(|c| c as &dyn LlmClient)
         } else {
             None
+        };
+        // 计费口径的累计装在客户端边界（ADR-005）：全量重算的逐条调用每轮都计。
+        // `with_store` 已保证库已初始化；计数落库失败只 warn，不失败业务。
+        let warn = |m: &str| crate::commands_logs::push("warn", m);
+        let meter = bare.map(|c| TokenMeter::new(c, s, TokenKind::Score, &warn));
+        let client: Option<&dyn LlmClient> = match meter.as_ref() {
+            Some(m) => Some(m as &dyn LlmClient),
+            None => bare,
         };
         let out = crate::core::domain::rescore::rescore_batch(
             s,
