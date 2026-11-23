@@ -23,6 +23,7 @@ use crate::core::sidecar::protocol::Command;
 use crate::core::sidecar::session::{
     ScrapeProgress, SessionUpdate, SidecarSession,
 };
+use crate::core::domain::store_ports::ConfigStore;
 
 use serde::{Deserialize, Serialize};
 
@@ -465,7 +466,7 @@ pub struct LoginStatusReply {
     /// sidecar 是否在跑（决定「重新登录」按钮要不要先拉起浏览器）
     pub running: bool,
     pub message: String,
-    /// 是否已在本次会话中把登录态存过（旧版用以避免重复 `loginSave`）
+    /// 是否已把登录态存过（读 `platform_login:{platform}` 标记；旧版用以避免重复 `loginSave`）
     pub saved: bool,
 }
 
@@ -520,6 +521,8 @@ pub fn login_status(
     let platform = platform.unwrap_or_else(|| scrape::DEFAULT_PLATFORM.to_string());
     let script_dir = sidecar_script_dir()?;
     let store_arc = store_handle(&store)?;
+    // 标记是库内状态，与本次 sidecar 查询成败无关：两个分支都要填。
+    let saved = login_marker_saved(store_arc.as_ref(), &platform);
     let handle = {
         let mut guard = state.0.lock().map_err(|_| "抓取锁已中毒".to_string())?;
         scrape::ensure_session_locked(&mut guard, script_dir, store_arc)?;
@@ -537,7 +540,8 @@ pub fn login_status(
         },
     ) {
         Ok(data) => {
-            let reply = parse_login_state(&platform, &data);
+            let mut reply = parse_login_state(&platform, &data);
+            reply.saved = saved;
             // 查询结论写回 progress：session.open 的回执**不会**触发 login.state
             // 事件，不写回的话 lib.rs 的 login-state watcher 永远播不出这次查询
             // 结果。unknown 是查询失败的降级值，不得覆盖已知登录态。
@@ -558,7 +562,7 @@ pub fn login_status(
             state: "unknown".to_string(),
             running: true,
             message: format!("查询登录态失败：{e}"),
-            saved: false,
+            saved,
         }),
     }
 }
@@ -579,6 +583,17 @@ pub struct LoginSaveReply {
 /// 所以这里只需要记一个可见的标记，供界面显示与 `logout` 清除。
 pub fn login_marker_key(platform: &str) -> String {
     format!("platform_login:{platform}")
+}
+
+/// 读登录标记：`login_save` 写 `"saved"`，`logout` 清成空串。
+///
+/// 非空即视为已保存（兼容旧库可能遗留的异值）；读失败降级 `false`——
+/// 与 `login_status` 的降级哲学一致：标记读不到不该让登录态查询报错。
+fn login_marker_saved<S: ConfigStore>(store: &S, platform: &str) -> bool {
+    store
+        .get_config(&login_marker_key(platform), "")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -807,5 +822,97 @@ mod tests {
         assert_eq!(r.login_state, "logged_in");
         assert!(r.running);
         assert_eq!(r.finished_reason, None, "新进程尚未结束");
+    }
+
+    // ---------- 登录标记（saved） ----------
+
+    /// 内存配置桩：`set_config(None)` 写空串，与 SqliteStore 语义一致。
+    struct MemConfig {
+        values: Mutex<std::collections::HashMap<String, String>>,
+        fail_reads: bool,
+    }
+    impl MemConfig {
+        fn new() -> Self {
+            Self {
+                values: Mutex::new(std::collections::HashMap::new()),
+                fail_reads: false,
+            }
+        }
+    }
+    impl ConfigStore for MemConfig {
+        type Error = String;
+        fn get_config(&self, k: &str, d: &str) -> Result<String, Self::Error> {
+            if self.fail_reads {
+                return Err("模拟读失败".to_string());
+            }
+            Ok(self
+                .values
+                .lock()
+                .unwrap()
+                .get(k)
+                .cloned()
+                .unwrap_or_else(|| d.to_string()))
+        }
+        fn set_config(&self, k: &str, v: Option<&str>) -> Result<(), Self::Error> {
+            self.values
+                .lock()
+                .unwrap()
+                .insert(k.to_string(), v.unwrap_or("").to_string());
+            Ok(())
+        }
+        fn get_config_json(
+            &self,
+            _k: &str,
+            d: serde_json::Value,
+        ) -> Result<serde_json::Value, Self::Error> {
+            Ok(d)
+        }
+        fn set_config_json(&self, _k: &str, _v: &serde_json::Value) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn bump_tokens(&self, _greet: i64, _score: i64) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    /// `saved` 必须读 `platform_login:{platform}` 标记：存过为 true、登出清空为 false。
+    /// 此前硬编码 false，前端永远看不出「已存过」，会重复调 loginSave。
+    #[test]
+    fn login_marker_saved_follows_save_and_logout() {
+        let s = MemConfig::new();
+        assert!(!login_marker_saved(&s, "boss"), "未存过必须为 false");
+        s.set_config(&login_marker_key("boss"), Some("saved")).unwrap();
+        assert!(login_marker_saved(&s, "boss"), "login_save 后必须为 true");
+        s.set_config(&login_marker_key("boss"), None).unwrap();
+        assert!(!login_marker_saved(&s, "boss"), "logout 清空串后必须为 false");
+    }
+
+    /// 标记按平台隔离；旧库遗留的非空异值同样视为已保存。
+    #[test]
+    fn login_marker_saved_is_per_platform_and_tolerates_legacy_values() {
+        let s = MemConfig::new();
+        s.set_config(&login_marker_key("boss"), Some("saved")).unwrap();
+        assert!(login_marker_saved(&s, "boss"));
+        assert!(!login_marker_saved(&s, "other"), "不得跨平台读标记");
+        s.set_config(&login_marker_key("legacy"), Some("1")).unwrap();
+        assert!(login_marker_saved(&s, "legacy"));
+    }
+
+    /// 读失败降级 false：标记读不到不该让登录态查询报错。
+    #[test]
+    fn login_marker_saved_degrades_to_false_on_read_error() {
+        let s = MemConfig { fail_reads: true, ..MemConfig::new() };
+        assert!(!login_marker_saved(&s, "boss"));
+    }
+
+    /// `parse_login_state` 只翻译 sidecar 回执；`saved` 是库内标记态，由 `login_status` 填。
+    #[test]
+    fn parse_login_state_leaves_saved_to_the_marker() {
+        let r = parse_login_state(
+            "boss",
+            &serde_json::json!({"logged_in": true, "state": "logged_in"}),
+        );
+        assert_eq!(r.state, "logged_in");
+        assert!(!r.saved, "纯翻译不碰标记");
     }
 }
