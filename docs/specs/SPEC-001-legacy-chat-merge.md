@@ -1,7 +1,7 @@
 # SPEC-001-legacy · 聊天编排同屏合并（chat-merge）
 
 > 状态：**READY_FOR_IMPLEMENTATION**（规格冻结，2026-11-23）
-> 修订：**Rev 3**（2026-11-23，DOM 顺序定谳：唯一标准=原型 dashboard→chat-rail→chat-detach，见下节与 UI-SPEC §17；Rev 2 同日并入撤导航用户裁决；Rev 1 同日首冻）
+> 修订：**Rev 5**（2026-11-23，用户裁决·占位会话改规格不动代码——推翻 Rev 4 裁决 2，见「用户裁决」节与 UI-SPEC §19；A6 分配宽口径〔Rev 4 裁决 1〕维持；Rev 3 DOM 顺序定谳；Rev 2 撤导航用户裁决；Rev 1 首冻）
 > 决策依据：[`ADR-004`](../adr/ADR-004-legacy-chat-orchestration.md)（用户裁决「方案 1」：实现向 SPEC 对齐，整页化否决；§9 追加裁决：撤除二级导航）
 > 设计真源：[`UI-SPEC-chat-detach-v3`](../ui/UI-SPEC-chat-detach-v3.md)（冻结，一字不动）+ `prototypes/ui-v1/index.html`；其余条款见 `UI-SPEC-legacy-baseline.md`
 > 证据基线：HEAD `a4bb3d5`，工作区干净
@@ -65,10 +65,10 @@
 | AC1 | R1/A2：初始右栏可见且参与布局，与概览同屏；DashboardPage 永不因聊天展开/收起、浮层开合而卸载，5s 轮询不中断 |
 | AC2 | R2/A1：初始 `chatOpen=false` 且 `.chat-detach` 带 `hidden`；不存在「未点 Boss 就弹出」路径 |
 | AC3 | R3/A15：`.chat-detach` computed `position: static`，`.app-body` flex 子项，无 `inset`/`z-index` 抬升；主列宽随展开变化（`getBoundingClientRect` 可测） |
-| AC4 | R6/A4/A6：四档 1200/1280/1440/1600 `detachW ≈ 0.5×innerWidth ±2px`、主列 `≥0.49×innerWidth`；源码含 `Math.max(innerWidth * 0.5, 600)` 与 80vw 上限；`--detach-w` 单一来源、不乘 scale |
+| AC4 | R6/A4/A6：四档 1200/1280/1440/1600 `detachW ≈ 0.5×innerWidth ±2px`；主列**分配宽**（`innerWidth − detachW`，即实测 rect + 左右内衬 + 列间隙）`≥0.49×innerWidth`（口径照原型 `_smoke.mjs` L70–76，见 Rev 4 裁决与 UI-SPEC §18）；源码含 `Math.max(innerWidth * 0.5, 600)` 与 80vw 上限；`--detach-w` 单一来源、不乘 scale |
 | AC5 | R4/R5/A7/A8：点任意 Boss 展开+选中；收起保留 `activeFriend`；再点同一位立即重开；Esc 只关一层（决策记录/配置/抽屉/敏感库优先） |
 | AC6 | 裁决 X/A52：展开列数=收起−1（<1600：2→1；≥1600：3→2）；`is-chat-open` 规则源码位置晚于 ≤1599 断点规则；展开态无 `transition`；单列卡片下限 `320px×--ui-scale` |
-| AC7 | §16.5：greet 链=就地展开+好友匹配+预填+focus，不自动发送；`navigate('chat')` 切页调用点=0 |
+| AC7 | §16.5 + §19 用户裁决：greet 链=就地展开+好友匹配，`navigate('chat')` 切页调用点=0；**匹配会话**：预填 compose + focus，不自动发送（A48 适用此情形）；**占位会话**（`待打招呼 · 公司`）：走「生成打招呼」面板，**不预填输入框、不要求 focus**，`isSendableFriend` 语义不变（Rev 5 用户裁决，推翻 Rev 4 裁决 2） |
 | AC8 | §4.4/裁决 N：`auto-apply-bar` 全站唯一 DOM，展开搬进对话框头（搬节点不复制）；三态文案/点色/`aria-live` 照 §14.2 |
 | AC9 | **用户裁决 5（撤导航）**：NAV 4 项、`navTestId`/`pageTestId`、`nav-<slug>`/`page-<slug>` 锚点、Vue 侧 `nav-tabs` 残留命中 0；三入口保留可用（右栏 `friend-<uid>`、顶栏 `shell-config-btn`、日志卡头部决策记录入口）；config/logs 仍浮层；`page_tick` 语义保留 |
 | AC10 | §11.3/顶栏三段：单行 46px；顺序 segmented → sensitive-open → tb-stats → shell-config-btn；`.tb-tail{margin-left:auto}`；`theme-toggle` 全站恰一处；三处折叠规则不变 |
@@ -89,6 +89,30 @@
 1. **ExpectRow 删除**：原型右栏结构=状态条→标题行→搜索→会话列表，四档基线实证无期望行；期望读取已由概览筛选面板「读取期望职位」承载。ChatPage 的 ExpectRow 引用与 `loadExpectations` 消费点退役（api 封装保留，契约面不动）；`chat-expect-*` testid 退役，列入 QA 重锚清单。
 2. **chat-note / auto-note 保留为瞬态提示**：`v-if` 非空才渲染，默认态与原型像素一致；错误反馈依赖它（K9 错误必须可读），不删除；位置维持右栏末尾、小字样式，M2 收像素。
 3. **顶栏三段像素归 M2**：按冻结 §11.3 + 原型 L505–513（单行 46px、顺序、三处折叠、`.tb-tail{margin-left:auto}`）。
+
+## 槽位 C 取证裁决（Rev 4，2026-11-23，前端编码上报、存量架构设计裁定）
+
+### 裁决 1 · A6 测量口径＝分配宽，非实测 rect
+
+- **争议**：1440 档展开态主列实测 rect 680 = 0.472×innerWidth，低于 AC4「≥0.49」。
+- **证据**：原型 `_smoke.mjs` L70–76 以 `mainShare = (vw − detachW) / vw` 断言 ≥0.49——**分配口径**；`.app-outer` 左右内衬 14×2（原型 L241）+ 列间隙 12 属主列之外的 chrome：680+28+12=720=0.5×1440，合规。L59 注释「主列 ≥ 47%」为陈旧文字，代码阈值即 0.49。
+- **裁决**：A6/AC4 按分配宽 ≥0.49×innerWidth 判（等价：rect+内衬+间隙）；§2.3 表值为理想分配。680@1440 **非缺陷**，不降阈值、不改几何；`c4913a2` 的 `:root` 兜底修复不受影响。口径澄清落 UI-SPEC §18。
+
+### 裁决 2（Rev 4 原裁，已被用户裁决推翻——见下节 Rev 5；证据链留痕备查）
+
+- **争议**：greet 无公司匹配时插的占位「待打招呼 · 公司」被 `isSendableFriend` 判不可发送 ⇒ compose 不渲染 ⇒ §16.5「预填 + focus」落不了地（产物实测 `composeInputPresent=false`）。
+- **证据**：原型 `renderDetachChat` L2411–2413 `canCompose = !!f && railMode==='default'`——占位是正常 friend，compose 照常渲染；`greetFromJob` L2515–2519 预填+focus；`_tri.mjs` L265–266 断言预填非空；冻结 A48 同要求。Vue `chat-model.ts:297` 按名字前缀挡 compose，属 Leptos 遗产规则，与在后的用户裁决 T（§16.5）冲突——**规格赢**。
+- **裁决**：compose 可见性 = 有 activeFriend && 会话列表 default 态（非 loading/error/empty），照原型 L2412 逐字；`isSendableFriend` 退出可见性判定。预填+focus、不自动发送不变。**发送校验留在动作层**：占位 uid 后端不认识，`chat_send` 与 `greet_one` 同走 ChatSend（`commands_greet.rs:189`），发送会拿回错误，走既有错误提示路径（K9 错误必须可读），不得静默吞掉。
+- **真实后端缺口披露（非阻塞）**：占位会话在建立真实会话前**没有可用发送路径**（greet_one 并不比 chat_send 多一条通道）。是否补「建立会话」能力（后端新轨）或修订 §16.5（占位走生成打招呼面板、不预填 compose），属用户另裁，本轮不自决、不改冻结规格。
+- **路由建议**：Chief 派前端编码 M1 补遗（canTalk 口径改照原型 + 占位 compose/预填用例 + chat-page/chat-contract 断言同步），门禁绿后再进 M2；零后端改动。
+
+## 用户裁决 · 占位会话改规格（Rev 5，2026-11-23，Chief 群内传达）
+
+- **用户裁决（推翻 Rev 4 裁决 2）：改规格，不动代码。**`isSendableFriend` 业务语义保持不变；冻结 §16.5 补一句：**占位会话（`待打招呼 · 公司`）走「生成打招呼」面板，不预填输入框、不要求 focus**。落盘于冻结 UI-SPEC §19 追加裁决（按其冻结追加惯例）。
+- **代码零改动**：前端编码现状（占位不渲染 compose、`canTalk` 经 `isSendableFriend` 判定）已合规；Rev 4 的「M1 补遗」路由建议**作废**，前端编码无需为此动代码。
+- 匹配会话的 greet 链不变（§16.5：预填 compose + focus、不自动发送；A48 预填断言适用匹配情形）。原型 mock 行为不改，本条例外约束下游真实实现。
+- 真实后端缺口披露仍成立：占位 uid 后端不认识，`chat_send` 与 `greet_one` 同走 ChatSend（`commands_greet.rs:189`），发送错误如实冒泡（K9）；是否补「建立会话」能力属用户另裁 / 后端新轨。
+- **A6 口径确认（Rev 4 裁决 1 维持，Chief 委派架构定口径）**：按**分配宽** `(innerWidth − detachW) / innerWidth ≥ 0.49` 判，等价「实测 rect + 左右内衬 14×2 + 列间隙 12 ≥ 0.49×innerWidth」，亦即 Chief 所列「720 − 内衬 − 间隙」选项；**不降 0.47**（`_smoke.mjs` L59 注释为陈旧文字，代码 L70–76 阈值即 0.49 分配口径）。前端编码几何断言**无需改动**（`c4913a2` 几何正确）；如任何用例拿实测 rect 直比 0.49，改按本口径。UI-SPEC §18 已澄清。
 
 ## QA 重锚清单（点名，M4 执行；以各里程碑提交信息增删清单汇总为准）
 
@@ -171,5 +195,5 @@ M1 期间 `frontend-vue/` 单写者；M2/M3 同样单写者串行，严禁 UI �
 - 原型真值坐标（已核）：裁决 5 原文 L1413–1415；顶栏三段 L505–513；`.app-body` flex + dashboard `transition: flex-basis 240ms` L555–569；概览容器 `shell-dashboard` L1418。右栏/对话框真值 L1039–1136（有稿设计已提供前端编码）。
 - 四个废止 testid 在 `src/` 命中 0（已核，保持）；`autoBarLocation` 二选一搬移机制已在 ChatPage 落地，提升后保留。
 - 本 SPEC 与 ADR-004 同日冻结；实施细化不得突破契约面与 AC，突破即熔断回存量架构设计修订。
-- 架构侧门禁快照（Rev 3，HEAD `b2b60f3`，架构 lane 实跑）：cargo test 392 过 0 败（1 ignored=已知 sidecar_smoke）、typecheck 0 错、vitest 34 文件 568 用例全绿、compileall 通过。Rev 1 时 vitest 受架构沙箱 `spawn EPERM` 边界限制未实跑，会话改完全权限后已补实跑（不拿静态计数冒充通过数）。
+- 架构侧门禁快照（Rev 5，HEAD `c4913a2` + M2 在途工作树）：架构 lane 实跑槽位 A 全绿——cargo test 392 过 0 败（1 ignored=已知 sidecar_smoke）、typecheck 0 错、compileall 过。vitest 当轮 567/568，唯一失败为 `geometry.test.ts:137` hex 守卫命中 M2 在途 `.chat-rail::before` mask `#000`（非 HEAD 缺陷、非本文档所致）。**已由前端编码接手处置（M2 改派后）**：整条 `::before` 规则移进 `styles/layout.css`（与 `.card::before` 同宿主，原型 L1055–1057 数值逐字保留）；`.avatar` 顶边内高光 `rgba(255,255,255,.5)`（原型 L1158）新增语义令牌 `--spec-avatar-top` 落 `tokens.css`，vue 系改 `var()`。修后 typecheck 0 错、vitest 34 文件 568 全绿、build 通过（前端编码实跑）。
 - **AC5 缺口跟踪**：敏感库面板不回应 Esc（冻结 §6.1 Esc 分层含敏感库）——Chief 已派 M4 QA 重锚轮一并处理；AC5 不降标，M4 闭合前该子项记未过。

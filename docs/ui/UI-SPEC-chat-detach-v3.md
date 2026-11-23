@@ -624,3 +624,23 @@ var w = Math.round(Math.min(Math.max(innerWidth * 0.5, 600), innerWidth * 0.8));
 1. §2.1 结构树是**逻辑示意**（按角色列：被压缩方 → 展开体 → 常驻右栏），不是字面 DOM 序列。§2.4「DOM 顺序 = 阅读顺序 = Tab 顺序」对**可见子集**成立：收起态 = 主列 → 右栏；展开态 = 主列 → 对话框（体内左段 → 右段）。§2.4 所述「主列 → 对话框 → 右栏」的全可见 Tab 序在 R1/R2 下永不出现。
 2. 证据（已核）：右栏与对话框**互斥可见**——展开时 `.is-chat-open .chat-rail { display:none }` 立即生效（L1132）；收起时 `closeChatDetach()` 同步置 `el.hidden = true`（L2454–2464），不存在两者同屏的瞬间。原型 CSS 无 `order` 属性、无 rail/detach 兄弟选择器依赖；A17 只约束**对话框体内**左段先于右段，两种排法均满足；`_smoke.mjs` 无 rail-vs-detach 顺序断言。因此相对 DOM 顺序在布局 / Tab / 读屏上**不可观察**，以可执行原型为准。
 3. 下游：`frontend-vue` 照此顺序落地（M1 提交 `b2b60f3` 已按原型顺序，`chat-page.test.ts` 顺序断言有效，**无需返工**）；后续像素轮不得以 §2.1 树序为由翻转 DOM。[`SPEC-001-legacy-chat-merge`](../specs/SPEC-001-legacy-chat-merge.md) Rev 3 同步记录。
+
+---
+
+## 18. 追加澄清：A6 主列测量口径（2026-11-23，存量架构设计裁决 · Chief 委派）
+
+> 性质：架构澄清，**非用户裁决**；不改写既有结论与阈值，只把 A6/§2.3 的测量口径定到与可执行自检逐字一致。
+
+1. A6「主列 ≥ 0.49 × innerWidth」按**分配宽**判：`mainShare = (innerWidth − detachW) / innerWidth`，`_smoke.mjs` L70–76 即按此断言。主列实测 rect 还会再扣 `.app-outer` 左右内衬（14×2，L241）与列间隙（12）：如 1440 档 rect 680 + 28 + 12 = 720 = 0.5×1440，**合规**。§2.3 表中的主列值（720 等）是理想分配宽，与表下注「实测宽未扣约 12px 列间隙」同口径。
+2. `_smoke.mjs` L59 注释「主列 ≥ 47%」为陈旧文字，代码阈值是 0.49（分配口径）。下游**不得**据该注释把阈值降为 0.47，也**不得**拿主列实测 rect 直接比 0.49 判不合规。
+3. [`SPEC-001-legacy-chat-merge`](../specs/SPEC-001-legacy-chat-merge.md) Rev 4 同步记录（AC4 口径显式化）。
+
+---
+
+## 19. 追加裁决：占位会话的打招呼链例外（2026-11-23 用户裁决，Chief 群内传达）
+
+> 用户裁决（逐字要义）：**占位会话（`待打招呼 · 公司`）走「生成打招呼」面板，不预填输入框、不要求 focus。** 改规格，不动代码；可发送判定（`isSendableFriend`）业务语义保持不变。
+
+1. §16.5 补充：greet 链中 `friendUidForJob` 无公司匹配而插入的**占位会话**，展开 + 选中后走「生成打招呼」面板（`greet_draft` 生成话术），**不预填 `chat-detach-compose-input`、不要求 `focus()`**；「不自动发送」不变。**匹配到真实会话**时 §16.5 原链不变（预填 + focus、不自动发送），A48 的预填断言适用匹配情形。
+2. 本裁决推翻存量架构设计 Rev 4 裁决 2（「占位也渲染 compose 并预填」）；下游真实实现以本条为准。原型 mock 行为不改（原型中占位是普通 mock friend，compose 照常渲染）——本条约束的是接真实后端的下游实现：占位 uid 后端不认识，`chat_send` 与 `greet_one` 同走 ChatSend，无可用发送路径，发送错误如实冒泡。
+3. [`SPEC-001-legacy-chat-merge`](../specs/SPEC-001-legacy-chat-merge.md) Rev 5 同步记录（AC7 改写、代码零改动、Rev 4 补遗路由作废）。
