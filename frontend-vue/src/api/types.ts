@@ -139,6 +139,7 @@ export type ScrapeUpdate =
   | { kind: 'job'; summary: string; accepted: boolean; score: number | null }
   | { kind: 'log'; level: string; msg: string }
   | { kind: 'login'; state: string; msg: string }
+  | { kind: 'risk'; platform: string; reason: string; url: string }
   | { kind: 'malformed'; line: string }
   | { kind: 'exited'; code: number }
   | { kind: 'restarted'; pid: number };

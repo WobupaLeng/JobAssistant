@@ -147,6 +147,30 @@ use super::handle::SidecarError;
         ));
     }
 
+    /// `scrape.risk` 是风控停止信号：必须被识别为事件，不能落到 Ignore，
+    /// 否则界面会把风控静默当成「空列表」。缺字段时宽容回落，但事件名不丢。
+    #[test]
+    fn parse_line_reads_scrape_risk() {
+        match parse_line(
+            r#"{"event":"scrape.risk","data":{"platform":"boss","reason":"跳到了安全验证页","url":"https://x/verify"}}"#,
+        ) {
+            LineParse::Event(SidecarEvent::Event(Event::ScrapeRisk { platform, reason, url })) => {
+                assert_eq!(platform, "boss");
+                assert_eq!(reason, "跳到了安全验证页");
+                assert_eq!(url, "https://x/verify");
+            }
+            other => panic!("实际 {other:?}"),
+        }
+        match parse_line(r#"{"event":"scrape.risk"}"#) {
+            LineParse::Event(SidecarEvent::Event(Event::ScrapeRisk { platform, reason, url })) => {
+                assert_eq!(platform, "boss");
+                assert!(reason.is_empty());
+                assert!(url.is_empty());
+            }
+            other => panic!("实际 {other:?}"),
+        }
+    }
+
     /// `scrape.finished` 是自然完成信号：缺它界面永停「抓取中」。
     /// 字段缺省必须宽容（data 可能不全），但事件名必须认识、不能落到 Ignore。
     #[test]

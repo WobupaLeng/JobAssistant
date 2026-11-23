@@ -234,6 +234,12 @@ pub enum UpdateReply {
         state: String,
         msg: String,
     },
+    /// 抓取因安全验证（风控）停止；界面提示手动过验证后点恢复
+    Risk {
+        platform: String,
+        reason: String,
+        url: String,
+    },
     /// 无法解析的行（通常是 Python traceback 混进了 stdout）
     Malformed {
         line: String,
@@ -264,6 +270,9 @@ pub fn to_update_reply(u: SessionUpdate) -> UpdateReply {
         }
         SessionUpdate::Log { level, msg } => UpdateReply::Log { level, msg },
         SessionUpdate::Login { state, msg } => UpdateReply::Login { state, msg },
+        SessionUpdate::Risk { platform, reason, url } => {
+            UpdateReply::Risk { platform, reason, url }
+        }
         SessionUpdate::Malformed { line } => UpdateReply::Malformed { line },
         SessionUpdate::Exited { code } => UpdateReply::Exited { code },
     }

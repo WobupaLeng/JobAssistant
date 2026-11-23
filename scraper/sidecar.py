@@ -131,7 +131,15 @@ def profile_dir() -> Path:
     browser has been closed`，表现为聊天与求职期望全部失败。
 
     路径必须与现行版 `backend/app/browser.py` 一致：`data/browser-profile`。
+
+    按系统默认浏览器分目录：Chrome 沿用原路径（已有登录态不受影响）；Edge 用
+    `browser-profile-edge`。cookie 由各浏览器自己的密钥加密，互不可读，混用会让
+    登录静默失效，所以必须分开。
     """
+    from browser import _default_browser_kind
+
+    if _default_browser_kind() == "edge":
+        return data_dir() / "data" / "browser-profile-edge"
     return data_dir() / "data" / "browser-profile"
 
 
@@ -310,6 +318,12 @@ def _run_scrape(payload: dict[str, Any]) -> None:
         try:
             count = scraper.run(page)
             log("info", f"抓取结束，共 {count} 条")
+            if scraper.risk_reason:
+                # 检测即停的事件帧：Rust 侧据此停止 running 并把原因交给界面提示恢复
+                emit({
+                    "event": "scrape.risk",
+                    "data": {"platform": "boss", "reason": scraper.risk_reason, "url": page.url},
+                })
         finally:
             try:
                 page.close()

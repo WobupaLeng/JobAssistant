@@ -172,6 +172,8 @@ class BossScraper:
         self._sleep = sleep          # 可中断睡眠：返回 True 表示期间被要求停止
         self.on_job = on_job
         self.collected = 0
+        # 非空 = 本次抓取因风控被停（sidecar 据此发 scrape.risk 事件）
+        self.risk_reason = ""
 
     # ---------- 工具 ----------
     def info(self, msg: str) -> None:
@@ -302,6 +304,13 @@ class BossScraper:
             added_dom = _harvest_dom()
 
         if not added_dom:
+            # 检测即停：命中安全验证页就不再重试/继续，记下原因交给 sidecar 发 scrape.risk
+            risk = self._detect_risk(page)
+            if risk:
+                self.risk_reason = risk
+                self.warn(f"触发风控，已停止抓取：{risk}")
+                self.warn("请在浏览器中手动完成验证后，再重新开始抓取")
+                return
             self.warn(
                 "首屏没有拿到任何岗位（页面卡片为空），"
                 f"可能触发风控或未登录。当前地址：{page.url}"
@@ -382,6 +391,31 @@ class BossScraper:
                 return True
             prev = now
         return False
+
+    def _detect_risk(self, page: Any) -> str:
+        """只识别「安全验证」类风控页，返回原因；不是风控返回空串。
+
+        与 _diagnose_empty_page 的区别：这里只关心必须人工介入的验证页，
+        登录失效 / 加载中 / 无结果都不算风控，不能因此误停。
+        """
+        try:
+            cur = (page.url or "").lower()
+            if "verify" in cur or "captcha" in cur:
+                return "跳到了安全验证页（需要手动过验证码）"
+            title = ""
+            try:
+                title = (page.title() or "")[:80]
+            except Exception:
+                pass
+            if "安全验证" in title or "验证码" in title:
+                return f"安全验证页（{title}）"
+            text = _first_text(page, "body", 3000)
+            for marker in ("安全验证", "请完成验证", "拖动滑块", "点击验证", "人机验证"):
+                if marker in text:
+                    return f"页面要求安全验证（{marker}）"
+        except Exception:
+            pass
+        return ""
 
     def _diagnose_empty_page(self, page: Any) -> str:
         """空页到底是哪种：验证码/风控、登录失效、加载中、还是真没有结果。

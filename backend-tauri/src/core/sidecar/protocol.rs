@@ -243,6 +243,18 @@ pub enum Event {
         /// 非空 = 异常收尾（早退 / 异常），用于 finished_reason 文案
         error: String,
     },
+    /// 抓取检测到安全验证（风控）并已停止。在 `scrape.finished` 之前发出。
+    /// 界面据此提示「需手动过验证，过完后点恢复重新抓取」，而不是静默空列表。
+    /// additive 扩展：老壳不认识该事件名时由 codec 静默丢弃。
+    #[serde(rename = "scrape.risk")]
+    ScrapeRisk {
+        /// 平台标识（当前仅 `boss`）
+        platform: String,
+        /// 命中的风控原因（人话，直接展示给用户）
+        reason: String,
+        /// 命中时的页面地址，便于用户定位要过验证的页面
+        url: String,
+    },
 }
 
 /// 一条抓取到的岗位原始数据。

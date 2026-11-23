@@ -96,6 +96,11 @@ pub fn parse_line(line: &str) -> LineParse {
             stopped: data.get("stopped").and_then(|s| s.as_bool()).unwrap_or(false),
             error: json_str(&data, "error").unwrap_or_default(),
         })),
+        "scrape.risk" => LineParse::Event(SidecarEvent::Event(Event::ScrapeRisk {
+            platform: json_str(&data, "platform").unwrap_or_else(|| "boss".to_string()),
+            reason: json_str(&data, "reason").unwrap_or_default(),
+            url: json_str(&data, "url").unwrap_or_default(),
+        })),
         // 未来新增的事件类型：老版本壳不认识，丢弃而不是报错
         _ => LineParse::Ignore,
     }

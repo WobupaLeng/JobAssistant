@@ -327,6 +327,13 @@ async function drainFeed(): Promise<void> {
     if (updates.length === 0) return;
     const lines: FeedLine[] = [];
     for (const u of updates) {
+      // 风控停止：不进事件流（那里只放岗位行），而是进错误队列，并挂「恢复」——
+      // 用户过完验证后点它，就是重新 scrape_start。
+      if (u.kind === 'risk') {
+        fail(`触发风控已停止：${u.reason}。请在浏览器中手动完成验证后，点「恢复」重新抓取`,
+          'scrape_risk', { label: '恢复', run: () => void onStart() });
+        continue;
+      }
       const line = toFeedLine(u);
       if (line) lines.push(line);
     }

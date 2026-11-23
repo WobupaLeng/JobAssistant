@@ -83,6 +83,12 @@ pub enum SessionUpdate {
         state: String,
         msg: String,
     },
+    /// 抓取因安全验证（风控）停止。界面据此提示手动过验证后恢复。
+    Risk {
+        platform: String,
+        reason: String,
+        url: String,
+    },
     /// 无法解析的行（含 Python traceback 混入 stdout 的情况）
     Malformed {
         line: String,
@@ -472,6 +478,18 @@ fn consume(
                     p.login_state = state.clone();
                 }
                 let _ = tx.send(SessionUpdate::Login { state, msg });
+            }
+            SidecarEvent::Event(Event::ScrapeRisk { platform, reason, url }) => {
+                // 风控停止：与 ScrapeFinished 同一个 running 守卫，原因写成可辨识的文案，
+                // 界面据此区分「被风控停」与「正常抓完」。sidecar 随后仍会发 scrape.finished
+                // 收尾，但守卫保证这里先写的风控原因不会被覆盖成「抓取完成」。
+                if let Ok(mut p) = progress.lock() {
+                    if p.running {
+                        p.running = false;
+                        p.finished_reason = Some(format!("触发风控已停止：{reason}"));
+                    }
+                }
+                let _ = tx.send(SessionUpdate::Risk { platform, reason, url });
             }
             SidecarEvent::Event(Event::ScrapeFinished { stopped, error, .. }) => {
                 // 自然完成也要清 running，否则界面永停「抓取中」（sidecar 抓完
