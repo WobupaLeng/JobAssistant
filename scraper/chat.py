@@ -317,13 +317,9 @@ class ChatClient:
                 page = p
                 break
         if page is None:
-            # 优先复用启动时留下的空白页，直接导航，避免先出现一个 about:blank 再跳转
-            for p in ctx.pages:
-                if (p.url or "") in ("about:blank", "", "chrome://newtab/"):
-                    page = p
-                    break
-        if page is None:
-            page = ctx.new_page()
+            # 与抓取/登录共用同一套空白页复用规则，避免各写一份导致行为不一致
+            import browser as browser_mod
+            page = browser_mod.reuse_or_new_page(ctx)
         if "/web/geek/chat" not in (page.url or ""):
             page.goto(CHAT_URL, wait_until="domcontentloaded", timeout=45_000)
         self._page = page

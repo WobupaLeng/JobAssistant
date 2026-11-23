@@ -60,8 +60,10 @@ _occupant: str | None = None
 # greenlet 约束：patchright 的 sync API 绑死创建它的线程，所以浏览器只在
 # _browser_q 的常驻工作线程里碰——所有浏览器命令排队，不并发。
 _pw: Any = None          # 当前 sync_playwright 实例
-_ctx: Any = None         # 当前持久化 BrowserContext
-_pw_lock = threading.Lock()
+_ctx: Any = None         # 当前 CDP 连接得到的 BrowserContext
+_cdp_proc: Any = None    # 本模块拉起的 CDP Chrome 进程（Popen），进程寿命与应用一致
+_cdp_port: int | None = None  # 其动态分配的 127.0.0.1 端口
+_pw_lock = threading.RLock()  # 可重入：聊天车道在持锁时会再调用 ensure_context
 
 
 def emit(payload: dict) -> None:
@@ -149,23 +151,26 @@ def ensure_context(log_fn: Any) -> Any:
                 return _ctx
             except Exception:
                 time.sleep(0.5)
-        log_fn("warn", "浏览器上下文已失效，重新启动")
+        log_fn("warn", "浏览器上下文已失效，重新连接")
         _ctx = None
         _teardown_playwright()
     import browser as browser_mod
 
+    global _cdp_proc, _cdp_port
     with _pw_lock:
+        # 已有可连的 CDP Chrome（上一轮遗留或本模块拉起）就直接复用，不再起新的：
+        # 同一 profile 只能有一个 Chrome 持锁，新起的会把请求移交给旧进程后退出。
+        if _cdp_port is None or not _port_listening(_cdp_port):
+            if _cdp_proc is None or _cdp_proc.poll() is not None:
+                _cdp_proc, _cdp_port = browser_mod.start_cdp_chrome(str(profile_dir()))
         if _pw is None:
             from patchright.sync_api import sync_playwright
 
             _pw = sync_playwright().start()
-        # 传的是 profile 子目录，不是应用根数据目录——见 profile_dir() 的说明
         try:
-            _ctx = browser_mod.launch_context(_pw, profile_dir(), log_fn)
+            _ctx = browser_mod.connect_cdp_context(_pw, _cdp_port)
         except Exception:
-            # launch 失败（如单例撞名）可能连带 driver 连接一起断掉。
-            # 不清掉死 _pw，下次 ensure_context 会跳过 start() 复用尸体，
-            # 永远报「Playwright connection closed」。清掉后下次重新拉起。
+            # 连接失败可能是 driver 断了：清掉死 _pw，下次重新拉起
             _teardown_playwright()
             raise
     return _ctx
@@ -189,6 +194,43 @@ def _teardown_playwright() -> None:
         except Exception:
             pass  # 连接已断时 stop 必抛，这正是我们要丢掉的
     _pw = None
+
+
+def _port_listening(port: int) -> bool:
+    """探测 127.0.0.1:port 是否有 CDP 监听（不发请求，只判断端口是否通）。"""
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def _shutdown_cdp_chrome() -> None:
+    """优雅关闭本模块拉起的 CDP Chrome（应用退出时调用）。
+
+    先经 CDP 的 Browser.close 让 Chrome 正常落盘 cookie，再兜底 terminate。
+    直接 terminate 会丢 cookie（之前实测过：硬杀后 Cookies 库 0 行）。
+    """
+    global _cdp_proc, _cdp_port
+    if _cdp_proc is None:
+        return
+    try:
+        if _cdp_port:
+            from patchright.sync_api import sync_playwright
+
+            with sync_playwright() as pw:
+                b = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{_cdp_port}")
+                b.close()
+    except Exception:
+        pass
+    try:
+        _cdp_proc.wait(timeout=8)
+    except Exception:
+        _cdp_proc.terminate()
+    _cdp_proc = None
+    _cdp_port = None
 
 
 def _job_to_event(item: dict[str, Any]) -> dict[str, Any]:
@@ -426,6 +468,13 @@ def stop_scrape() -> None:
 _chat: Any = None      # 延迟创建的 ChatClient
 _chat_busy = threading.Lock()   # 同一时刻只允许一条聊天命令在跑
 
+# 车道 B（聊天）专属线程。patchright 的 sync API 绑死创建它的线程，所以聊天必须
+# 有自己的 sync_playwright 连接与线程，不能与抓取车道 A（_browser_q）共用。
+# 两车道各自 connect_over_cdp 到同一个 CDP Chrome 端口，互不阻塞。
+_chat_q = ThreadPoolExecutor(max_workers=1, thread_name_prefix="chat")
+_chat_pw: Any = None     # 聊天线程专属的 sync_playwright 实例
+_chat_ctx: Any = None    # 聊天线程专属的 BrowserContext（经 CDP 连接）
+
 
 def _chat_client() -> Any:
     global _chat
@@ -442,11 +491,43 @@ def _with_chat(fn: Any) -> Any:
     串行执行而不是并发：`_chat_busy` 保证同一时刻只有一条聊天命令在动浏览器，
     `_worker_lock` 保证它不会和抓取/登录抢同一个 context。
     """
-    with _chat_busy, _worker_lock:
-        if _worker is not None and _worker.is_alive():
-            raise RuntimeError(busy_reason("聊天"))
-        ctx = ensure_context(log)
+    # 车道 B：不抢 _worker_lock，因此抓取进行中也能执行聊天（这就是双车道的意义）
+    with _chat_busy:
+        ctx = _ensure_chat_context()
         return fn(ctx)
+
+
+def _ensure_chat_context() -> Any:
+    """聊天车道专属的 BrowserContext：经 CDP 连到已拉起的同一端口，与抓取各自独立。
+
+    必须在聊天线程（_chat_q）里调用。端口由 ensure_context 首次拉起 Chrome 后记录在 _cdp_port。
+    """
+    global _chat_pw, _chat_ctx
+    import browser as browser_mod
+
+    if _chat_ctx is not None:
+        try:
+            _chat_ctx.cookies()
+            return _chat_ctx
+        except Exception:
+            _chat_ctx = None
+            try:
+                if _chat_pw is not None:
+                    _chat_pw.stop()
+            except Exception:
+                pass
+            _chat_pw = None
+    # 双车道可能同时首次进来：必须与 ensure_context 共用 _pw_lock 串行拉起 Chrome，
+    # 否则两边都判定「未拉起」，各起一个 Chrome，端口互相覆盖（实测 ECONNREFUSED）。
+    with _pw_lock:
+        if _cdp_proc is None or _cdp_proc.poll() is not None or _cdp_port is None:
+            ensure_context(log)
+    from patchright.sync_api import sync_playwright
+
+    if _chat_pw is None:
+        _chat_pw = sync_playwright().start()
+    _chat_ctx = browser_mod.connect_cdp_context(_chat_pw, _cdp_port)
+    return _chat_ctx
 
 
 def _run_chat(cmd: dict[str, Any]) -> None:
@@ -626,14 +707,8 @@ def handle(cmd: dict) -> None:
 
     if isinstance(name, str) and name.startswith("chat."):
         # 聊天是**请求/应答**：执行完必须用同一个 id 回执。
-        # 投递到常驻浏览器线程，主线程继续读 stdin，执行中途还能收到 scrape.stop。
-        busy = _busy_now("聊天")
-        if busy:
-            msg = f"RuntimeError: {busy}"
-            log("error", f"聊天命令失败（{name}）：{msg}")
-            emit({"id": cid, "ok": False, "error": {"code": "CHAT_FAILED", "msg": msg}})
-        else:
-            _browser_q.submit(_run_chat, cmd)
+        # 车道 B：投递到聊天专属线程 _chat_q，不再因抓取占用而拒绝（双车道的核心）。
+        _chat_q.submit(_run_chat, cmd)
         return
 
     if name == "expectation.list":
@@ -695,6 +770,11 @@ def main() -> None:
     try:
         if _worker is None or not _worker.is_alive():
             _browser_q.submit(_teardown_playwright).result(timeout=3)
+    except Exception:
+        pass
+    # 最后优雅关闭本模块拉起的 CDP Chrome（cookie 落盘后再结束进程）
+    try:
+        _browser_q.submit(_shutdown_cdp_chrome).result(timeout=15)
     except Exception:
         pass
 

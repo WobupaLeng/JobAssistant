@@ -110,6 +110,19 @@ def sanitize_profile_exit_state(data_dir: str | Path) -> bool:
         return False
 
 
+def connect_cdp_context(pw: Any, port: int) -> Any:
+    """连接到已由 start_cdp_chrome 启动的 CDP Chrome，返回它的默认 BrowserContext。
+
+    只连接不启动：启动由 start_cdp_chrome 负责（进程与端口归它管）。
+    返回的 context 与 launch_context 一样可用 cookies()/pages/new_page()，
+    调用方（ensure_context 的探活、reuse_or_new_page）无需改动。
+    """
+    browser = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+    if not browser.contexts:
+        raise RuntimeError("CDP Chrome 没有可用的 BrowserContext")
+    return browser.contexts[0]
+
+
 def launch_context(pw: Any, data_dir: str | Path, log: LogFn):
     """启动 patchright 持久化上下文，返回 BrowserContext。"""
     sanitize_profile_exit_state(data_dir)
@@ -190,6 +203,38 @@ def launch_context(pw: Any, data_dir: str | Path, log: LogFn):
 
 
 BLANK_URLS = ("about:blank", "", "chrome://newtab/")
+
+
+def start_cdp_chrome(profile_dir: str) -> tuple[Any, int]:
+    """以 CDP 方式启动本机 Chrome，返回 (subprocess.Popen, 端口)。
+
+    端口由系统动态分配（bind 到 0 取空闲口），仅绑定 127.0.0.1，且只在本进程
+    存活期间存在：父进程（sidecar）退出时由 Popen 句柄随之释放，不常驻占口。
+    这一步只负责起进程与分配端口，连接与标签页由调用方用 connect_over_cdp 完成。
+    """
+    import socket
+    import subprocess
+
+    exe = _find_system_browser()
+    if not exe:
+        raise RuntimeError("未找到本机 Chrome，无法以 CDP 方式启动")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    args = [
+        exe,
+        f"--remote-debugging-port={port}",
+        "--remote-debugging-address=127.0.0.1",
+        f"--user-data-dir={profile_dir}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--no-proxy-server",
+        "--proxy-bypass-list=*",
+        "about:blank",
+    ]
+    proc = subprocess.Popen(args)
+    print(f"[browser] CDP Chrome 已启动（127.0.0.1:{port}）", file=__import__("sys").stderr)
+    return proc, port
 
 
 def reuse_or_new_page(ctx: Any) -> Any:
