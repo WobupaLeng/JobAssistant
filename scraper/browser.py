@@ -67,16 +67,46 @@ def _launch_args() -> list[str]:
     ]
 
 
+_CHROME_EXES = [
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+]
+_EDGE_EXES = [
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+]
+
+
+def _default_browser_kind() -> str | None:
+    """Windows 默认 https 浏览器：'chrome' / 'edge'，其它（含 Firefox）返回 None。
+
+    只读注册表 UserChoice；读取失败一律返回 None，调用方回退到原有顺序。
+    """
+    try:
+        import winreg
+
+        key = r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as k:
+            prog_id, _ = winreg.QueryValueEx(k, "ProgId")
+    except Exception:
+        return None
+    if prog_id.startswith("ChromeHTML"):
+        return "chrome"
+    if prog_id.startswith("MSEdgeHTM"):
+        return "edge"
+    return None
+
+
 def _find_system_browser() -> str | None:
-    """本机 Chrome / Edge 的 exe 路径。"""
-    candidates = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
-        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-    ]
-    for c in candidates:
+    """本机 Chrome / Edge 的 exe 路径。
+
+    优先取系统默认浏览器（Chrome 或 Edge）对应的 exe；默认是 Firefox 或检测失败时，
+    保持原有顺序（先 Chrome 后 Edge），行为与改动前一致。
+    """
+    preferred = _EDGE_EXES if _default_browser_kind() == "edge" else _CHROME_EXES
+    others = _CHROME_EXES if preferred is _EDGE_EXES else _EDGE_EXES
+    for c in preferred + others:
         if os.path.isfile(c):
             return c
     return None
