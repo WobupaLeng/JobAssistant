@@ -30,6 +30,7 @@
 mod codec;
 mod config;
 mod handle;
+mod job;
 #[cfg(test)]
 mod tests;
 

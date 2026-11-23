@@ -21,15 +21,35 @@ import os
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 MAX_LINE_BYTES = 1024 * 1024
 
+# 浏览器常驻单车道（scraper/AGENTS.md §4.10：碰浏览器的命令必须排队到同一个
+# 工作线程）。patchright 的 sync API 绑死创建它的线程：旧实现每条命令各起一个
+# 新线程，首条命令的线程一退出，_pw/_ctx 就成了尸体——第二条命令探活必报
+# 「Playwright connection closed」，随后误判「浏览器已失效」去 teardown 重启，
+# 撞上仍活着的 Chrome 单例窗（「正在现有的浏览器会话中打开」→ TargetClosedError）。
+# 改为常驻单线程 executor：所有浏览器命令在同一条线程上排队，连接与进程同寿。
+_browser_q = ThreadPoolExecutor(max_workers=1, thread_name_prefix="browser")
+
+
+class _WorkerHandle:
+    """把长任务 Future 包装成旧 _worker 线程的接口（is_alive）。"""
+
+    def __init__(self, fut: Any) -> None:
+        self._fut = fut
+
+    def is_alive(self) -> bool:
+        return not self._fut.done()
+
+
 # 抓取运行态。_stop 是「请求停止」，_sleep 期间每 0.2s 检查一次，
 # 保证点停止后最多 0.2 秒就退出等待。
 _stop = threading.Event()
-_worker: threading.Thread | None = None
+_worker: _WorkerHandle | None = None
 _worker_lock = threading.Lock()
 # 谁占着浏览器：`"scrape"` / `"login"` / `None`。只用于把「占用中」的
 # 错误提示说清楚——登录期间没有「停止」按钮可按，照抄抓取的措辞会把
@@ -38,7 +58,7 @@ _occupant: str | None = None
 
 # 登录态查询：Rust 侧轮询 login.start 后用。
 # greenlet 约束：patchright 的 sync API 绑死创建它的线程，所以浏览器只在
-# _run_scrape / _run_login 这**同一个后台线程**里碰——两者互斥，不并发。
+# _browser_q 的常驻工作线程里碰——所有浏览器命令排队，不并发。
 _pw: Any = None          # 当前 sync_playwright 实例
 _ctx: Any = None         # 当前持久化 BrowserContext
 _pw_lock = threading.Lock()
@@ -134,7 +154,14 @@ def ensure_context(log_fn: Any) -> Any:
 
             _pw = sync_playwright().start()
         # 传的是 profile 子目录，不是应用根数据目录——见 profile_dir() 的说明
-        _ctx = browser_mod.launch_context(_pw, profile_dir(), log_fn)
+        try:
+            _ctx = browser_mod.launch_context(_pw, profile_dir(), log_fn)
+        except Exception:
+            # launch 失败（如单例撞名）可能连带 driver 连接一起断掉。
+            # 不清掉死 _pw，下次 ensure_context 会跳过 start() 复用尸体，
+            # 永远报「Playwright connection closed」。清掉后下次重新拉起。
+            _teardown_playwright()
+            raise
     return _ctx
 
 
@@ -326,6 +353,14 @@ def busy_reason(action: str) -> str:
     return f"浏览器正忙，请稍后再{action}"
 
 
+def _busy_now(action: str) -> str | None:
+    """主线程预检：长任务占着浏览器时立即回 busy，不让命令排到几分钟之后。"""
+    with _worker_lock:
+        if _worker is not None and _worker.is_alive():
+            return busy_reason(action)
+    return None
+
+
 def start_scrape(payload: dict[str, Any]) -> None:
     """在后台线程启动抓取。已在跑就拒绝，避免两个浏览器抢同一个 profile。"""
     global _worker
@@ -336,8 +371,7 @@ def start_scrape(payload: dict[str, Any]) -> None:
             return
         _stop.clear()
         _occupant = "scrape"
-        _worker = threading.Thread(target=_run_scrape, args=(payload,), daemon=True)
-        _worker.start()
+        _worker = _WorkerHandle(_browser_q.submit(_run_scrape, payload))
 
 
 def start_login(payload: dict[str, Any]) -> None:
@@ -350,8 +384,7 @@ def start_login(payload: dict[str, Any]) -> None:
             return
         _stop.clear()
         _occupant = "login"
-        _worker = threading.Thread(target=_run_login, args=(payload,), daemon=True)
-        _worker.start()
+        _worker = _WorkerHandle(_browser_q.submit(_run_login, payload))
 
 
 def stop_scrape() -> None:
@@ -546,10 +579,16 @@ def handle(cmd: dict) -> None:
         return
 
     if name == "login.status":
-        try:
+        # 探活同样要投递到浏览器线程：patchright 对象线程绑定，主线程直接
+        # cookies() 必报 greenlet 错。浏览器线程被长任务占用时 5s 超时按
+        # 未登录回报（Rust 侧另有 busy/unknown 兜底）。
+        def _probe() -> bool:
             import browser as browser_mod
 
-            logged = _ctx is not None and browser_mod.detect_logged_in(_ctx, "boss")
+            return _ctx is not None and browser_mod.detect_logged_in(_ctx, "boss")
+
+        try:
+            logged = bool(_browser_q.submit(_probe).result(timeout=5))
         except Exception:
             logged = False
         emit({"id": cid, "ok": True, "data": {"logged_in": logged}})
@@ -557,19 +596,37 @@ def handle(cmd: dict) -> None:
 
     if isinstance(name, str) and name.startswith("chat."):
         # 聊天是**请求/应答**：执行完必须用同一个 id 回执。
-        # 放进后台线程执行，主线程继续读 stdin，这样执行中途还能收到 scrape.stop。
-        threading.Thread(target=_run_chat, args=(cmd,), daemon=True).start()
+        # 投递到常驻浏览器线程，主线程继续读 stdin，执行中途还能收到 scrape.stop。
+        busy = _busy_now("聊天")
+        if busy:
+            msg = f"RuntimeError: {busy}"
+            log("error", f"聊天命令失败（{name}）：{msg}")
+            emit({"id": cid, "ok": False, "error": {"code": "CHAT_FAILED", "msg": msg}})
+        else:
+            _browser_q.submit(_run_chat, cmd)
         return
 
     if name == "expectation.list":
         # 同样是请求/应答，且要等网络往返
-        threading.Thread(target=_run_expect, args=(cmd,), daemon=True).start()
+        busy = _busy_now("读取期望职位")
+        if busy:
+            msg = f"RuntimeError: {busy}"
+            log("warn", f"读取期望职位失败：{msg}")
+            emit({"id": cid, "ok": False, "error": {"code": "EXPECT_FAILED", "msg": msg}})
+        else:
+            _browser_q.submit(_run_expect, cmd)
         return
 
     if name == "session.open":
         # 只把浏览器拉起来并报登录态。放后台线程是因为启动 Chrome 要几秒，
         # 主线程必须继续读 stdin。
-        threading.Thread(target=_run_session_open, args=(cmd,), daemon=True).start()
+        busy = _busy_now("打开浏览器")
+        if busy:
+            msg = f"RuntimeError: {busy}"
+            log("warn", f"启动浏览器失败：{msg}")
+            emit({"id": cid, "ok": False, "error": {"code": "SESSION_FAILED", "msg": msg}})
+        else:
+            _browser_q.submit(_run_session_open, cmd)
         return
 
     emit({"id": cid, "ok": False, "error": {"code": "UNKNOWN_CMD", "msg": f"未知命令：{name}"}})
@@ -602,6 +659,14 @@ def main() -> None:
 
     # stdin 关闭 = 父进程退出，收尾
     _stop.set()
+    # 兜底：显式丢弃 playwright 连接（关 driver / 浏览器）。Rust 侧 KILL_ON_JOB_CLOSE
+    # 作业是硬保证；这里只在无长任务占用时尝试，且必须投递到浏览器线程执行
+    # ——跨线程 stop 必报 greenlet 错，等于没关。
+    try:
+        if _worker is None or not _worker.is_alive():
+            _browser_q.submit(_teardown_playwright).result(timeout=3)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

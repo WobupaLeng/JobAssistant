@@ -16,6 +16,7 @@ use crate::core::sidecar::protocol::{Command as ProtocolCommand, Event};
 
 use super::codec::{protocol_line, spawn_stderr_reader, spawn_stdout_reader, spawn_waiter};
 use super::config::SidecarConfig;
+use super::job::KillOnCloseJob;
 /// sidecar 进程生命周期与协议事件：读线程向上层冒泡的唯一通道。
 ///
 /// `Debug` / `Clone` 不能省：`codec` 的读线程要在分支间移动它，测试也要打印它。
@@ -91,6 +92,9 @@ pub struct SidecarHandle {
     /// 回执时先查这张表，命中就投递并从事件流里摘掉——否则会像历史上
     /// 那样被当成 `Ignore` 静默丢弃。
     pending: Arc<Mutex<HashMap<String, Sender<SidecarReply>>>>,
+    /// KILL_ON_JOB_CLOSE 作业：句柄关闭即回收 sidecar 整棵进程树（node driver / Chrome），
+    /// 杜绝强杀 python 后孤儿 Chrome 持有 profile 单例窗。`None` 表示作业不可用（降级）。
+    job: Arc<Mutex<Option<KillOnCloseJob>>>,
 }
 
 /// 手写 `Clone` 而不是 `derive`：`AtomicU64` 自带 `Clone` 但那是**复制值**，
@@ -105,6 +109,7 @@ impl Clone for SidecarHandle {
             next_id: Arc::clone(&self.next_id),
             pid: self.pid,
             pending: Arc::clone(&self.pending),
+            job: Arc::clone(&self.job),
         }
     }
 }
@@ -172,6 +177,14 @@ impl SidecarHandle {
         })?;
         let pid = child.id();
 
+        // 把 sidecar 及后代纳入 KILL_ON_JOB_CLOSE 作业：句柄关闭即回收整棵进程树，
+        // 杜绝强杀 python 后 node driver / Chrome 成为孤儿持有 profile 单例窗。
+        // 必须在子进程派生孙进程前纳入——spawn 返回后立即调用，远早于 Python 启动。
+        let job = KillOnCloseJob::new();
+        if let Some(j) = &job {
+            j.assign_child(&child);
+        }
+
         let stdin = child.stdin.take();
         let stdout = match child.stdout.take() {
             Some(s) => s,
@@ -209,6 +222,7 @@ impl SidecarHandle {
             next_id: Arc::new(AtomicU64::new(1)),
             pid,
             pending,
+            job: Arc::new(Mutex::new(job)),
         };
 
         // ready 之前的早到事件（例如 sidecar 抢跑打的日志）在这里被丢掉：
@@ -345,18 +359,11 @@ impl SidecarHandle {
         }
         let deadline = Instant::now() + grace;
         loop {
-            {
-                let mut c = match self.child.lock() {
-                    Ok(c) => c,
-                    Err(_) => return,
-                };
-                match c.try_wait() {
-                    Ok(Some(_)) => return,
-                    Ok(None) => {}
-                    Err(_) => return,
-                }
-            }
-            if Instant::now() >= deadline {
+            let exited = match self.child.lock() {
+                Ok(mut c) => !matches!(c.try_wait(), Ok(None)),
+                Err(_) => true,
+            };
+            if exited || Instant::now() >= deadline {
                 break;
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -364,6 +371,11 @@ impl SidecarHandle {
         if let Ok(mut c) = self.child.lock() {
             let _ = c.kill();
             let _ = c.wait();
+        }
+        // 回收整棵进程树：关作业句柄触发 KILL_ON_JOB_CLOSE，强杀 python 后存活的
+        // node driver / Chrome 一并被终止，不留孤儿持有 profile 单例窗。
+        if let Ok(mut g) = self.job.lock() {
+            *g = None;
         }
     }
 
@@ -403,8 +415,16 @@ fn wait_ready(
 
 impl Drop for SidecarHandle {
     fn drop(&mut self) {
-        // 应用退出 / 句柄被替换时必须收拾干净，否则 python 会留在后台占着
-        // 浏览器 profile，下次启动 patchright 会报「profile 正被使用」
+        // 句柄是 Arc 克隆共享的：`handle_clone()` 的临时克隆（login_status /
+        // 聊天等锁外请求）用完出 scope 时会话仍在用。只有**最后一个**引用
+        // 被丢弃才允许关停；否则每次请求结束都会关 stdin 杀掉 sidecar，
+        // KILL_ON_JOB_CLOSE 还会连带回收整棵 Chrome 树——前端挂载时的
+        // login_status 兜底查询就能把刚拉起的 sidecar 杀死（实测 exit 0）。
+        // 会话被替换的路径（scrape_close / maybe_restart 等）都已显式
+        // shutdown，这里只兜「应用退出 / 最后一个句柄消失」的底。
+        if Arc::strong_count(&self.child) > 1 {
+            return;
+        }
         self.shutdown(Duration::from_millis(800));
     }
 }

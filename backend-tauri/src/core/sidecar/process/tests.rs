@@ -167,6 +167,39 @@ use super::handle::SidecarError;
         }
     }
 
+    /// 回归：临时克隆出 scope 不得关停仍在用的 sidecar。
+    ///
+    /// `SidecarHandle` 是 Arc 克隆共享，`handle_clone()` 供 login_status /
+    /// 聊天做锁外请求。历史上 `Drop` 无条件 shutdown，请求结束克隆被丢弃
+    /// 就会关 stdin 杀进程（KILL_ON_JOB_CLOSE 连带整棵 Chrome 树）——
+    /// 前端挂载时的 login_status 兜底查询会杀死刚拉起的 sidecar。
+    #[test]
+    fn dropping_handle_clone_keeps_sidecar_alive() {
+        let dir = std::env::temp_dir().join(format!("aja-clone-drop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        std::fs::write(
+            dir.join("sidecar.py"),
+            "import sys, os, json\n\
+             print(json.dumps({'event': 'ready', 'data': {'pid': os.getpid()}}), flush=True)\n\
+             for _ in sys.stdin:\n    pass\n",
+        )
+        .expect("写假 sidecar");
+        let cfg = SidecarConfig::new(&dir);
+        let (handle, _rx) = SidecarHandle::spawn(&cfg, Duration::from_secs(10)).expect("spawn");
+        {
+            let clone = handle.clone();
+            assert!(clone.is_alive());
+        } // 克隆在此出 scope：不得触发 shutdown
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(handle.is_alive(), "临时克隆 drop 杀死了仍在用的 sidecar");
+        handle
+            .write_line("{\"id\":\"t1\",\"cmd\":\"ping\"}")
+            .expect("克隆 drop 后 stdin 应仍可写");
+        handle.shutdown(Duration::from_millis(200));
+        assert!(!handle.is_alive(), "显式 shutdown 仍应生效");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn locate_script_dir_finds_repo_scraper() {
         // 开发树里 core/ 的上一级就有 scraper/，这条锚点保证路径推导没写错层级
