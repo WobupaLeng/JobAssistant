@@ -99,14 +99,16 @@
   animation: feed-in var(--dur-fast) var(--ease-out) both;
 }
 
-.feed-line > .tag {
+.feed-line > .tag,
+.feed-line > .feed-tag {
   flex: 0 0 auto;
   min-width: 34px;
   color: var(--text-3);
   text-align: right;
 }
 
-.feed-line > .msg {
+.feed-line > .msg,
+.feed-line > .feed-msg {
   flex: 1 1 auto;
   min-width: 0;
   word-break: break-word;
@@ -115,32 +117,40 @@
 
 /* 四种事件色：入库绿、跳过橙、错误红、其余灰。
  * 这些是日志行的唯一视觉分类，颜色必须有足够对比度。 */
-.feed-line.is-ok .tag {
+.feed-line.is-ok .tag,
+.feed-line.is-ok .feed-tag {
   color: var(--primary);
 }
-.feed-line.is-ok .msg {
+.feed-line.is-ok .msg,
+.feed-line.is-ok .feed-msg {
   color: #8ee6c0;
 }
 
-.feed-line.is-skip .tag {
+.feed-line.is-skip .tag,
+.feed-line.is-skip .feed-tag {
   color: var(--warn);
 }
 
-.feed-line.is-bad .tag {
+.feed-line.is-bad .tag,
+.feed-line.is-bad .feed-tag {
   color: var(--bad);
 }
-.feed-line.is-bad .msg {
+.feed-line.is-bad .msg,
+.feed-line.is-bad .feed-msg {
   color: #ffa198;
 }
 
-.feed-line.is-info .tag {
+.feed-line.is-info .tag,
+.feed-line.is-info .feed-tag {
   color: var(--accent);
 }
 
-[data-theme='light'] .feed-line.is-ok .msg {
+[data-theme='light'] .feed-line.is-ok .msg,
+.feed-line.is-ok .feed-msg {
   color: #047857;
 }
-[data-theme='light'] .feed-line.is-bad .msg {
+[data-theme='light'] .feed-line.is-bad .msg,
+.feed-line.is-bad .feed-msg {
   color: #b91c1c;
 }
 

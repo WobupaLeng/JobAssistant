@@ -6,14 +6,12 @@
  * `features/jobs/list-model.ts`；长按状态机来自 `features/jobs/longpress.ts`。
  * 组件本身不 import 任何 `features` 之外的领域模块。
  */
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { Job, JobTabCounts } from '../api/types';
 import JobCard from './JobCard.vue';
-import { useGlassBudget } from '../lib_ui/use-glass-budget';
 import {
   LIST_TABS,
   SORT_FIELDS,
-  allVisibleChecked,
   batchLabel,
   cardView,
   headCount,
@@ -42,17 +40,48 @@ const props = withDefaults(
     scoreMax?: number | null;
     loading?: boolean;
     error?: string;
+    /** 当前展开聊天的 Boss 所在公司（原始名）；同公司的岗位联动高亮。空串表示无。 */
+    highlightCompany?: string;
+    /** 后端还有下一页；为 false 时不渲染底部哨兵。 */
+    hasMore?: boolean;
+    /** 正在追加下一页，避免重复触发。 */
+    pageLoading?: boolean;
   }>(),
-  { showAll: false, scoreMax: null, loading: false, error: '' },
+  { showAll: false, scoreMax: null, loading: false, error: '', highlightCompany: '', hasMore: false, pageLoading: false },
 );
 
+/* 无限滚动：哨兵进入视口即请求下一页。哨兵出现 / 消失时重新挂观察器。 */
+const sentinel = ref<HTMLElement | null>(null);
+let observer: IntersectionObserver | null = null;
+
+function observe(el: HTMLElement | null): void {
+  observer?.disconnect();
+  observer = null;
+  if (!el || typeof IntersectionObserver === 'undefined') return;
+  observer = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((e) => e.isIntersecting) && props.hasMore && !props.pageLoading) emit('load-more');
+    },
+    { rootMargin: '200px 0px' },
+  );
+  observer.observe(el);
+}
+
+onMounted(() => observe(sentinel.value));
+watch(sentinel, (el) => observe(el));
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  observer = null;
+});
+
 const emit = defineEmits<{
+  (e: 'load-more'): void;
   (e: 'update:tab', tab: ListTab): void;
   (e: 'update:showAll', showAll: boolean): void;
   (e: 'sort', field: SortField): void;
   (e: 'refresh'): void;
   (e: 'toggle', jobId: string): void;
-  (e: 'checkAll'): void;
+  (e: 'checkAll', checked: boolean): void;
   (e: 'batch', op: 'reject' | 'allow'): void;
   (e: 'greet', jobId: string): void;
   (e: 'open', jobId: string): void;
@@ -61,17 +90,12 @@ const emit = defineEmits<{
   (e: 'empty-start'): void;
 }>();
 
-/** L2-3：网格同屏折射预算（IO ≤12 张挂滤镜，超出退回纯第一层）。 */
-const gridEl = ref<HTMLElement | null>(null);
-useGlassBudget(gridEl);
-
 const visible = computed(() => visibleJobs(props.jobs, props.tab, props.showAll));
 const views = computed(() => visible.value.map((j) => cardView(j, props.scoreMax)));
 const anchors = computed(() => keepaliveRows(visible.value));
 const visibleIds = computed(() => visible.value.map((j) => j.job_id));
 const selectedCount = computed(() => props.selection.checked.length);
 const selectedHere = computed(() => props.selection.checked.filter((id) => visibleIds.value.includes(id)));
-const allHere = computed(() => allVisibleChecked(selectedHere.value, visibleIds.value));
 const total = computed(() => headCount(props.counts, props.tab, props.showAll));
 const batchVisible = computed(() => showBatchActions(selectedCount.value));
 
@@ -117,26 +141,15 @@ function onSort(field: SortField): void {
           v-for="t in LIST_TABS"
           :key="t.key"
           class="pill"
-          :class="{ 'is-active': !showAll && t.key === tab }"
+          :class="{ 'is-active': t.key === tab }"
           type="button"
           role="tab"
-          :aria-selected="!showAll && t.key === tab"
+          :aria-selected="t.key === tab"
           :data-testid="`job-tab-${t.slug}-tab`"
           @click="onTab(t.key)"
         >
           {{ t.label }}
           <span class="pill-count" :data-testid="`job-tab-${t.slug}-count`">{{ tabCount(counts, t.key) }}</span>
-        </button>
-        <button
-          class="pill"
-          :class="{ 'is-active': showAll }"
-          type="button"
-          role="tab"
-          :aria-selected="showAll"
-          data-testid="job-tab-all"
-          @click="onShowAll"
-        >
-          全部
         </button>
         <span class="card-sub" data-testid="job-total">共 {{ total }} 条</span>
         <!-- 原型 L2193 逐字：「列表状态 {mode} · 共 {total} 条 · 已选 {n} 条」。
@@ -169,10 +182,10 @@ function onSort(field: SortField): void {
       <label class="batch-check">
         <input
           type="checkbox"
-          :checked="allHere"
+          :checked="selectedCount > 0"
           data-testid="job-select-all-check"
           aria-label="全选本页"
-          @change="emit('checkAll')"
+          @change="emit('checkAll', ($event.target as HTMLInputElement).checked)"
         />
         <span>全选本页</span>
       </label>
@@ -189,7 +202,6 @@ function onSort(field: SortField): void {
     </div>
 
     <div
-      ref="gridEl"
       class="job-grid"
       :class="{ 'is-selecting': selection.selecting }"
       :data-state="loading ? 'loading' : error ? 'error' : visible.length === 0 ? 'empty' : 'ready'"
@@ -239,11 +251,22 @@ function onSort(field: SortField): void {
           :view="v"
           :selecting="selection.selecting"
           :selected="selection.checked.includes(v.jobId)"
+          :linked="highlightCompany !== '' && v.rawCompany === highlightCompany"
           @toggle="emit('toggle', $event)"
           @greet="emit('greet', $event)"
           @open="emit('open', $event)"
         />
       </template>
+      <!-- 无限滚动哨兵：滚到它时加载下一页；不足一页即不渲染。 -->
+      <div
+        v-if="hasMore"
+        ref="sentinel"
+        class="job-load-sentinel"
+        data-testid="job-load-sentinel"
+        aria-hidden="true"
+      >
+        {{ pageLoading ? '加载中…' : '' }}
+      </div>
     </div>
 
     <!-- C8：隐藏锚点表。唯一作用是为 `job-row-{id}` / `score-{id}` 保活，

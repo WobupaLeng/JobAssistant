@@ -35,18 +35,18 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
-import { autoGreetPause, autoGreetReset, autoGreetResume } from '../api/commands/auto';
+import { autoGreetPause, autoGreetReset, autoGreetResume, autoGreetStatus } from '../api/commands/auto';
 import {
   chatFriends,
   chatMessages,
   chatRecall,
-  chatResumes,
+
   chatSend,
-  chatSendResume,
+
 } from '../api/commands/chat';
 import { greetDraft, greetOne } from '../api/commands/greet';
-import { sessionOpen } from '../api/commands/scrape';
-import type { ChatMessage, Friend, GreetReply, ResumeItem } from '../api/types';
+import { loginStatus, sessionOpen } from '../api/commands/scrape';
+import type { ChatMessage, Friend, GreetReply } from '../api/types';
 import AutoApplyBar from '../components/chat/AutoApplyBar.vue';
 import ChatCompose from '../components/chat/ChatCompose.vue';
 import ChatDetach from '../components/chat/ChatDetach.vue';
@@ -66,7 +66,6 @@ import {
   GREET_SENT_NOTE,
   MESSAGES_FAIL_PREFIX,
   RECALL_DONE_NOTE,
-  RESUME_SENT_NOTE,
   SEND_FAIL_PREFIX,
   SESSION_BOOTING_NOTE,
   canSend,
@@ -75,6 +74,11 @@ import {
   createChatUi,
   detachWidth,
   filterFriends,
+  isPendingFriend,
+  loadPendingFriends,
+  savePendingFriends,
+  CHAT_ACTIVE_COMPANY_KEY,
+  CHAT_ACTIVE_COMPANY_EVENT,
   isSendableFriend,
   matchFriendByCompany,
   nowText,
@@ -83,7 +87,9 @@ import {
   shouldRetryWithSession,
   withPending,
 } from '../lib_ui/chat-model';
-import { peekGreetDraft, takeGreetDraft } from '../features/chat/greet-draft';
+import { needsSession } from '../lib_ui/session';
+import { isLoggedIn } from '../lib_ui/login-model';
+import { peekGreetDraft, setGreetDraft, takeGreetDraft } from '../features/chat/greet-draft';
 import { hasHigherOverlay } from '../lib_ui/overlay-stack';
 
 /**
@@ -100,6 +106,8 @@ const emit = defineEmits<{
 const friends = ref<Friend[]>([]);
 const loadingFriends = ref(true);
 const friendsError = ref('');
+/** 卡片「打招呼」带来的岗位：只对该 Boss 生效，发送成功时只标记此岗位已投递。 */
+const greetJob = ref<{ uid: string; jobId: string } | null>(null);
 const search = ref('');
 
 /* ---------------------------------- 展开态 ---------------------------------- */
@@ -111,12 +119,6 @@ const ui = ref(createChatUi());
 const messages = ref<ChatMessage[]>([]);
 const loadingMessages = ref(false);
 const note = ref('');
-
-/* ---------------------------------- 简历 ------------------------------------ */
-
-const resumes = ref<ResumeItem[]>([]);
-const resumesOpen = ref(false);
-const resumesLoaded = ref(false);
 
 /* -------------------------------- 打招呼草稿 --------------------------------- */
 
@@ -161,22 +163,32 @@ const composeRef = ref<InstanceType<typeof ChatCompose> | null>(null);
 
 /* ---------------------------------- 加载 ------------------------------------ */
 
-async function loadFriends(): Promise<void> {
+async function loadFriends(allowOpenSession = false): Promise<void> {
   loadingFriends.value = true;
   friendsError.value = '';
+  // 先把刷新前持久化的占位放回列表：后端报错（浏览器未连接）时它们也必须可见。
+  friends.value = [...loadPendingFriends(), ...friends.value.filter((f) => !isPendingFriend(f))];
   try {
     let reply;
     try {
       reply = await chatFriends();
     } catch (e) {
       const text = errText(e);
-      if (!shouldRetryWithSession(text)) throw e;
+      // 被动：挂载时不得拉起 sidecar/浏览器，只有用户主动操作才允许自动开会话。
+      if (!allowOpenSession || !shouldRetryWithSession(text)) throw e;
       note.value = SESSION_BOOTING_NOTE;
       await sessionOpen('boss', 'chat');
       reply = await chatFriends();
     }
-    friends.value = reply.items;
-    if (reply.items.length === 0) note.value = FRIENDS_EMPTY_NOTE;
+    // 占位（后端尚无会话）条目：内存里的 + 刷新前持久化的，去重后保留在列表头部。
+    const seen = new Set(reply.items.map((r) => r.company));
+    const locals = [...friends.value, ...loadPendingFriends()].filter((f, i, all) => {
+      if (!isPendingFriend(f) || seen.has(f.company)) return false;
+      return all.findIndex((g) => g.uid === f.uid) === i;
+    });
+    friends.value = [...locals, ...reply.items];
+    savePendingFriends(friends.value);
+    if (reply.items.length === 0 && locals.length === 0) note.value = FRIENDS_EMPTY_NOTE;
     // 刷新不得改变展开态与选中（SPEC §3）：只把 activeFriend 的字段换成新的。
     const uid = ui.value.activeFriendsUid;
     if (uid !== null && !friends.value.some((f) => f.uid === uid)) {
@@ -184,7 +196,8 @@ async function loadFriends(): Promise<void> {
     }
   } catch (e) {
     friendsError.value = errText(e);
-    note.value = FRIENDS_FAIL_PREFIX + errText(e);
+    // 浏览器未连接时 rail 已给出引导提示，不再把原始报错重复写进 note（否则两段文字叠在一起）。
+    if (!needsSession(errText(e))) note.value = FRIENDS_FAIL_PREFIX + errText(e);
   } finally {
     loadingFriends.value = false;
   }
@@ -205,19 +218,6 @@ async function loadMessages(uid: string): Promise<void> {
   }
 }
 
-async function loadResumes(force = false): Promise<void> {
-  if (resumesLoaded.value && !force) return;
-  try {
-    const reply = await chatResumes();
-    resumes.value = reply.items;
-    resumesLoaded.value = true;
-  } catch (e) {
-    resumes.value = [];
-    resumesLoaded.value = true;
-    note.value = `读取简历失败：${errText(e)}`;
-  }
-}
-
 /* ---------------------------------- 选中 ------------------------------------ */
 
 async function pick(uid: string): Promise<void> {
@@ -229,15 +229,41 @@ async function pick(uid: string): Promise<void> {
     messages.value = [];
     greet.value = null;
     draft.value = '';
-    resumesOpen.value = false;
     note.value = '';
-    await Promise.all([loadMessages(uid), loadResumes()]);
+    await loadMessages(uid);
   }
 }
 
 /** 收起：保留 activeFriend（A7）；再点同一位也能重开（A8）。 */
 function close(): void {
   ui.value = closeDetach(ui.value);
+}
+
+/* ------------------------- Boss 列表行内操作（下沉） ------------------------- */
+
+/**
+ * 行内「打招呼」：先选中该行，再生成话术。
+ *
+ * 原先「生成打招呼」在对话区顶部，作用于「当前选中的人」；下沉到列表行后，
+ * 点哪一行就是对谁操作，所以必须先 `pick` 把选中态对齐，否则会给上一行的人
+ * 生成话术——那是最典型的错位。已选中时 `pick` 不会重载消息（幂等），
+ * 所以重复点同一行是安全的。
+ */
+/** 手动打招呼新增的占位 HR 可移除：从内存与持久化里同时删除；不碰后端真实会话。 */
+const removableUids = computed(() => friends.value.filter(isPendingFriend).map((f) => f.uid));
+
+function removePending(uid: string): void {
+  if (!removableUids.value.includes(uid)) return;
+  friends.value = friends.value.filter((f) => f.uid !== uid);
+  savePendingFriends(friends.value);
+  if (ui.value.activeFriendsUid === uid) ui.value = closeDetach(ui.value);
+  note.value = '已移除该 Boss';
+}
+
+async function greetFor(uid: string): Promise<void> {
+  if (generating.value) return;
+  if (ui.value.activeFriendsUid !== uid) await pick(uid);
+  await generateGreet();
 }
 
 /* ---------------------------------- 发送 ------------------------------------ */
@@ -248,7 +274,19 @@ async function send(): Promise<void> {
   const text = draft.value.trim();
   sending.value = true;
   try {
-    const reply = await chatSend(friend.uid, text, null);
+    // 发送前先验证登录态：只有已登录才真正发出，否则给出对应提示。
+    // sidecar 未启动时 loginStatus 本身会抛错：同样视为「浏览器未连接」，不落入「发送失败」。
+    const st = await loginStatus('boss').catch(() => ({ state: 'unknown' as const }));
+    if (st.state !== 'logged_in') {
+      note.value =
+        st.state === 'no_login'
+          ? '未登录 Boss 直聘：请先点「扫码登录」，登录后再发送消息'
+          : '浏览器未连接：请先点「开始抓取」或「扫码登录」，连接后再发送消息';
+      return;
+    }
+    // 只有发给「卡片打招呼的那位 Boss」时才带岗位 id，后端据此只标记这一个岗位已投递。
+    const jobId = greetJob.value !== null && greetJob.value.uid === friend.uid ? greetJob.value.jobId : null;
+    const reply = await chatSend(friend.uid, text, jobId);
     const outgoing = String(reply.text ?? '') !== '' ? String(reply.text) : text;
     messages.value = [
       ...messages.value,
@@ -256,6 +294,8 @@ async function send(): Promise<void> {
     ];
     draft.value = '';
     note.value = '消息已发送';
+    // 已用掉这次岗位标记：之后再发给同一 Boss 不得重复标记。
+    if (jobId !== null) greetJob.value = null;
   } catch (e) {
     note.value = SEND_FAIL_PREFIX + errText(e);
   } finally {
@@ -277,6 +317,14 @@ async function sendGreet(): Promise<void> {
       { sender: 'me', content: text, time: nowText(), msg_id: '', recalled: false },
     ];
     greet.value = null;
+    // 打招呼成功即把对方挂进 Boss 列表：占位会话（无后端会话）此时才真正入列。
+    if (isPendingFriend(friend)) {
+      friends.value = withPending(
+        friends.value.filter((f) => f.uid !== friend.uid),
+        friend,
+      );
+      savePendingFriends(friends.value);
+    }
     note.value = GREET_SENT_NOTE;
   } catch (e) {
     note.value = `发送失败：${errText(e)}`;
@@ -320,19 +368,6 @@ async function recall(): Promise<void> {
   }
 }
 
-async function sendResume(resumeId: string): Promise<void> {
-  const friend = talkableFriend.value;
-  if (friend === null) return;
-  try {
-    await chatSendResume(friend.uid, resumeId);
-    resumesOpen.value = false;
-    note.value = RESUME_SENT_NOTE;
-    await loadMessages(friend.uid);
-  } catch (e) {
-    note.value = `发送简历失败：${errText(e)}`;
-  }
-}
-
 /* -------------------------------- 打招呼链路 --------------------------------- */
 
 /** 「放到输入框再改」：草稿搬进输入框并聚焦，草稿框收起。 */
@@ -352,21 +387,21 @@ function consumeGreetDraft(): void {
   const intent = takeGreetDraft();
   if (intent === null) return;
 
-  let target = matchFriendByCompany(friends.value, intent.company);
-  if (target === null) {
+  const target = matchFriendByCompany(friends.value, intent.company);
+  // 1）入列：已有好友直接复用，否则插一条占位（手动打招呼新增，可移除）。
+  let uid: string;
+  if (target !== null) {
+    uid = target.uid;
+  } else {
     const placeholder = pendingFriend(intent.company, intent.company);
     friends.value = withPending(friends.value, placeholder);
-    target = placeholder;
+    savePendingFriends(friends.value);
+    uid = placeholder.uid;
   }
-  const uid = target.uid;
-  void (async () => {
-    ui.value = pickFriend(ui.value, uid);
-    messages.value = [];
-    draft.value = intent.text;
-    await loadResumes();
-    // 聚焦是用户显式意图（SPEC §6.2 只允许这一处抢焦点）。
-    composeRef.value?.focus();
-  })();
+  // 记住被点击的岗位，仅对该 Boss 生效：发送成功时只标记这一个岗位已投递。
+  greetJob.value = { uid, jobId: intent.jobId };
+  // 2）展开聊天框 + 3）生成话术：复用 greetFor（它先 pick 展开，再 generateGreet）。
+  void greetFor(uid);
 }
 
 /* -------------------------------- 自动投递 ----------------------------------- */
@@ -407,13 +442,32 @@ async function onAutoToggle(): Promise<void> {
   const action = toggleAction(autoPhase.value);
   try {
     if (action.kind === 'start') {
+      // 开始前先确认登录有效：自动投递只往**已有**会话里发消息，未登录时
+      // 既发不出去也不该去找浏览器（那正是「窗口无限打开」的来源）。
+      // 后端 `auto_greet_next` 也有同一道闸，这里是让用户当场看到原因，
+      // 而不是等队列空转到第一次投递才失败。
+      const st = await loginStatus('boss');
+      // `unknown` = 浏览器（sidecar）还没拉起来：单独提示，不与「登录过期」混为一谈。
+      if (st.state === 'unknown') {
+        autoNote.value = '浏览器未连接：请先点「开始抓取」或「扫码登录」，连接后再开始投递';
+        return;
+      }
+      if (!isLoggedIn(st.state)) {
+        autoNote.value = '未登录 Boss 直聘：请先点「扫码登录」，登录后再开始投递';
+        return;
+      }
       // 开始前先清零上一轮计数，否则「已发 N 条」会接着上次累加。
       await autoGreetReset();
       await autoGreetResume();
+      // 只在自动投递运行时才轮询状态（每秒一次），关闭时不做无谓的 IPC。
+      startQueue();
     } else if (action.kind === 'pause') {
       await autoGreetPause(action.reason);
+      queue?.stop();
+      queue = null;
     } else {
       await autoGreetResume();
+      startQueue();
     }
     queue?.kick();
   } catch (e) {
@@ -428,7 +482,9 @@ async function onAutoStop(): Promise<void> {
   autoBusy.value = true;
   try {
     await autoGreetReset();
-    queue?.kick();
+    // 结束后后端已不在跑：停掉轮询，不再每秒空转一次 status。
+    queue?.stop();
+    queue = null;
     autoNote.value = '已结束本轮自动投递';
   } catch (e) {
     onAutoNote(`重置失败：${errText(e)}`);
@@ -461,11 +517,19 @@ onMounted(() => {
   // 从概览页传过来的意图随后消费。
   const pendingDraft = peekGreetDraft();
   void (async () => {
+    // 挂载是被动加载：不允许自动拉起浏览器（allowOpenSession 缺省 false）。
     await loadFriends();
     consumeGreetDraft();
+    // 挂载时读一次后端状态：若自动投递已在跑，才启动每秒轮询（关闭时不空转）。
+    try {
+      const st = await autoGreetStatus();
+      autoStatus.value = st;
+      if (st.running) startQueue();
+    } catch {
+      /* 状态读不到时不轮询，等用户操作后再启动 */
+    }
     if (pendingDraft !== null && draft.value === '') draft.value = pendingDraft.text;
   })();
-  startQueue();
 });
 
 onBeforeUnmount(() => {
@@ -474,6 +538,22 @@ onBeforeUnmount(() => {
   queue?.stop();
   queue = null;
 });
+
+// 跨页联动：展开聊天时把该 Boss 的公司名写入共享键，概览页据此高亮同公司岗位；收起即清除。
+watch(
+  () => [ui.value.chatOpen, (activeFriend.value?.company ?? '').trim()] as const,
+  ([open, company]) => {
+    try {
+      if (open && company !== '') localStorage.setItem(CHAT_ACTIVE_COMPANY_KEY, company);
+      else localStorage.removeItem(CHAT_ACTIVE_COMPANY_KEY);
+      // storage 事件不会在写入方所在标签页触发：补一个同页事件，让已挂载的概览页即时更新。
+      window.dispatchEvent(new Event(CHAT_ACTIVE_COMPANY_EVENT));
+    } catch {
+      /* 存储不可用：静默降级，仅影响跨页高亮 */
+    }
+  },
+  { immediate: true },
+);
 
 watch(
   () => ui.value.chatOpen,
@@ -526,6 +606,11 @@ defineExpose({
       @toggle="onAutoToggle"
       @stop="onAutoStop"
     />
+    <!-- 待投递/已投递：紧贴自动投递条下方另起一行（原先挤在列表头里，被「刷新」挤掉）。 -->
+    <div v-if="autoBarLocation === 'rail'" class="rail-counts" data-testid="auto-apply-counts">
+      <span data-testid="auto-apply-pending">待投递 <b>{{ autoStatus.pending }}</b></span>
+      <span data-testid="auto-apply-done">已投递 <b>{{ autoStatus.sent }}</b></span>
+    </div>
     <FriendList
       prefix="chat-rail"
       :title="CHAT_RAIL_TITLE"
@@ -535,6 +620,9 @@ defineExpose({
       :error="friendsError"
       :search="search"
       @pick="pick"
+      @greet="greetFor"
+      :removable-uids="removableUids"
+      @remove="removePending"
       @refresh="loadFriends"
       @retry="loadFriends"
       @search="search = $event"
@@ -570,6 +658,12 @@ defineExpose({
         @stop="onAutoStop"
       />
     </template>
+    <template #head-sub>
+      <span v-if="autoBarLocation === 'detach'" class="rail-counts" data-testid="auto-apply-counts">
+        <span data-testid="auto-apply-pending">待投递 <b>{{ autoStatus.pending }}</b></span>
+        <span data-testid="auto-apply-done">已投递 <b>{{ autoStatus.sent }}</b></span>
+      </span>
+    </template>
 
     <template #rail>
       <FriendList
@@ -581,10 +675,14 @@ defineExpose({
         :loading="loadingFriends"
         :error="friendsError"
         :search="search"
+        :greeting-uid="generating ? (ui.activeFriendsUid ?? '') : ''"
         @pick="pick"
         @refresh="loadFriends"
         @retry="loadFriends"
         @search="search = $event"
+        @greet="greetFor"
+        :removable-uids="removableUids"
+        @remove="removePending"
       />
     </template>
 
@@ -592,21 +690,23 @@ defineExpose({
       :friend="talkableFriend"
       :messages="messages"
       :loading-messages="loadingMessages"
-      :resumes="resumes"
-      :resumes-open="resumesOpen"
-      :resumes-loaded="resumesLoaded"
       :greet="greet"
       :generating="generating"
       :sending-greet="sendingGreet"
       :recalling="recalling"
       @generate-greet="generateGreet"
-      @toggle-resumes="resumesOpen = !resumesOpen"
-      @send-resume="sendResume"
       @recall="recall"
       @send-greet="sendGreet"
       @greet-to-draft="greetToDraft"
       @discard-greet="greet = null"
     >
+      <template #notices>
+        <!-- 展开态的提示：右栏的 note / autoNote 在对话框展开时看不到，这里同源再渲染一份（置顶）。 -->
+        <div v-if="note !== '' || autoNote !== ''" class="detach-notes">
+          <div v-if="note !== ''" class="detach-note" data-testid="chat-note-detach">{{ note }}</div>
+          <div v-if="autoNote !== ''" class="detach-note" data-testid="auto-note-detach">{{ autoNote }}</div>
+        </div>
+      </template>
       <template #compose>
         <!-- 唯一输入框：显式绑 modelValue + update（不走 v-model 的模板展开）。 -->
         <ChatCompose

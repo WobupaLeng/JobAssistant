@@ -28,6 +28,9 @@ type Call = { cmd: string; payload: unknown };
 const EXPECTED_COMMANDS = [
   'get_scoring_spec',
   'app_info',
+  'window_minimize',
+  'window_toggle_maximize',
+  'window_close',
   'list_jobs',
   'get_job',
   'db_overview',
@@ -42,6 +45,8 @@ const EXPECTED_COMMANDS = [
   'allow_jobs',
   'mark_delivered',
   'list_decisions',
+  'count_decisions',
+  'decision_counts',
   'sensitive_list',
   'sensitive_remove',
   'get_app_config',
@@ -111,7 +116,7 @@ afterEach(() => {
  * 直接读源文件做文本扫描，不做 AST：48 条命令名都在同一行。
  */
 describe('命令名覆盖：与 generate_handler! 逐条对齐（C1）', () => {
-  it('48 条命令恰好覆盖一次，不多不少', () => {
+  it('53 条命令恰好覆盖一次，不多不少', () => {
     const dir = fileURLToPath(new URL('../src/api/commands/', import.meta.url));
     const used = new Set<string>();
     for (const name of readdirSync(dir).filter((f: string) => f.endsWith('.ts'))) {
@@ -125,7 +130,7 @@ describe('命令名覆盖：与 generate_handler! 逐条对齐（C1）', () => {
         used.add(m[1]!);
       }
     }
-    expect(used.size).toBe(48);
+    expect(used.size).toBe(53);
     expect(EXPECTED_COMMANDS.filter((c) => !used.has(c))).toEqual([]);
     const known: readonly string[] = EXPECTED_COMMANDS;
     expect([...used].filter((c) => !known.includes(c))).toEqual([]);
@@ -184,6 +189,14 @@ describe('commands_db · 包 args 的一类', () => {
     calls = [];
     await db.listDecisions();
     expect(last()).toEqual({ cmd: 'list_decisions', payload: { args: {} } });
+  });
+
+  it('list_decisions：beforeId 向更旧翻页', async () => {
+    await db.listDecisions(10, null, 99);
+    expect(last()).toEqual({
+      cmd: 'list_decisions',
+      payload: { args: { limit: 10, afterId: null, beforeId: 99 } },
+    });
   });
 
   it('rescore_jobs：三键显式 null，布尔恒发，filters 缺省被丢', async () => {

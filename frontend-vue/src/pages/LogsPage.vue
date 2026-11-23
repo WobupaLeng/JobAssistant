@@ -11,12 +11,12 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { clearLogs, listLogs } from '../api/commands/logs';
-import { listDecisions } from '../api/commands/db';
-import { allLevels, levelCn, type LogLevel } from '../lib_ui/logfmt';
+import { countDecisions, decisionCounts, listDecisions } from '../api/commands/db';
+import { allLevels, decisionTone, levelCn, type LogLevel } from '../lib_ui/logfmt';
 import {
   AUTO_REFRESH_MS,
   DECISION_FILTERS,
-  DECISION_LIMIT,
+  DECISION_PAGE_SIZE,
   INITIAL_CURSOR,
   LOG_VIEWS,
   advanceCursor,
@@ -49,6 +49,21 @@ const runRows = ref<RunRow[]>([]);
 const decisions = ref<DecisionRowView[]>([]);
 const runLoading = ref(true);
 const decLoading = ref(true);
+const decLoadingMore = ref(false);
+const decDone = ref(false);
+/** 库里决策总数（不受已加载条数影响）。 */
+const decTotal = ref(0);
+/**
+ * 各档（按 `decisionTone` 归属）的**全库**条数。
+ *
+ * 界面只加载了前几页，用已加载行去数必然偏小——这正是「排除/入库/其它
+ * 总条数不对」的根因；计数一律走后端 `decision_counts`。
+ */
+const decToneCounts = ref<Record<'bad' | 'primary' | 'other', number>>({
+  bad: 0,
+  primary: 0,
+  other: 0,
+});
 const runError = ref('');
 const decError = ref('');
 
@@ -72,8 +87,30 @@ const decFiltered = computed(() => decFilter.value !== 'all' || decKeyword.value
 const runCount = computed(() =>
   runCountLabel(visibleRuns.value.length, runRows.value.length, runFiltered.value),
 );
+/** 「全部」的全库条数；翻页可能先于计数返回，这里兜住已加载条数。 */
+const decAllTotal = computed(() => Math.max(decTotal.value, decisions.value.length));
+
+/** 某一档的全库条数（「全部」用总计数，其余用后端分档计数）。 */
+function decFilterTotal(slug: DecisionFilter): number {
+  switch (slug) {
+    case 'reject':
+      return decToneCounts.value.bad;
+    case 'accept':
+      return decToneCounts.value.primary;
+    case 'other':
+      return decToneCounts.value.other;
+    default:
+      return decAllTotal.value;
+  }
+}
+
 const decCount = computed(() =>
-  decisionCountLabel(visibleDecisions.value.length, decisions.value.length, decFiltered.value),
+  decisionCountLabel(
+    visibleDecisions.value.length,
+    // 总数走后端计数：界面只加载了前几页，decisions.length 不等于库里总条数
+    decFilterTotal(decFilter.value),
+    decFiltered.value,
+  ),
 );
 
 function errText(e: unknown): string {
@@ -100,17 +137,70 @@ async function loadRuns(full: boolean): Promise<void> {
   }
 }
 
+/** 第一页（最新 10 条）：进页面与手动刷新都走这里，会把已加载的旧页丢掉重来。 */
 async function loadDecisions(): Promise<void> {
   decLoading.value = true;
+  decLoadingMore.value = false;
+  decDone.value = false;
   decError.value = '';
   try {
-    const rows = await listDecisions(DECISION_LIMIT, null);
+    const [rows, total, counts] = await Promise.all([
+      listDecisions(DECISION_PAGE_SIZE, null, null),
+      countDecisions().catch(() => 0),
+      decisionCounts().catch(() => []),
+    ]);
     decisions.value = rows.map(decisionRowFromRecord);
+    decTotal.value = total;
+    const tones = { bad: 0, primary: 0, other: 0 };
+    for (const c of counts) {
+      const t = decisionTone(c.decision);
+      if (t === 'bad') tones.bad += c.count;
+      else if (t === 'primary') tones.primary += c.count;
+      else if (t === 'default') tones.other += c.count; // 重算(accent) 不计入这三档
+    }
+    decToneCounts.value = tones;
+    decDone.value = rows.length < DECISION_PAGE_SIZE;
   } catch (e) {
     decError.value = errText(e);
   } finally {
     decLoading.value = false;
   }
+}
+
+/**
+ * 无限滚动：拿当前最后一条的 id 当 `beforeId`，再取 10 条更旧的。
+ *
+ * `afterId` 只能取「比游标更新」的记录，往下翻必须用 `beforeId`（见 store_ports）。
+ * 返回不足一页即到底；到底或正在加载时直接返回，滚到底不会连发。
+ */
+async function loadMoreDecisions(): Promise<void> {
+  if (decLoading.value || decLoadingMore.value || decDone.value) return;
+  const last = decisions.value[decisions.value.length - 1];
+  if (!last) {
+    decDone.value = true;
+    return;
+  }
+  decLoadingMore.value = true;
+  decError.value = '';
+  try {
+    const rows = await listDecisions(DECISION_PAGE_SIZE, null, last.id);
+    const seen = new Set(decisions.value.map((r) => r.id));
+    const fresh = rows.map(decisionRowFromRecord).filter((r) => !seen.has(r.id));
+    decisions.value = [...decisions.value, ...fresh];
+    decDone.value = rows.length < DECISION_PAGE_SIZE;
+    if (decTotal.value < decisions.value.length) decTotal.value = decisions.value.length;
+  } catch (e) {
+    decError.value = errText(e);
+  } finally {
+    decLoadingMore.value = false;
+  }
+}
+
+/** 距底部 120px 内就预取下一页。 */
+function onDecisionScroll(ev: Event): void {
+  const el = ev.target as HTMLElement | null;
+  if (!el) return;
+  if (el.scrollHeight - el.scrollTop - el.clientHeight <= 120) void loadMoreDecisions();
 }
 
 async function refresh(): Promise<void> {
@@ -332,6 +422,7 @@ onBeforeUnmount(() => {
               @click="decFilter = f.slug"
             >
               {{ f.label }}
+              <span class="tab-num" :data-testid="`logs-kfilter-count-${f.slug}`">{{ decFilterTotal(f.slug) }}</span>
             </button>
           </div>
           <input
@@ -359,8 +450,19 @@ onBeforeUnmount(() => {
         >
           没有匹配的决策记录：换个行为筛选或关键字
         </div>
-        <div v-else class="dl-rows" data-testid="decisions-rows">
+        <div
+          v-else
+          class="dl-rows"
+          data-testid="decisions-rows"
+          @scroll.passive="onDecisionScroll"
+        >
           <DecisionRow v-for="r in visibleDecisions" :key="r.id" :row="r" />
+          <div v-if="decLoadingMore" class="dl-more" data-testid="decisions-loading-more">
+            正在加载更早的决策…
+          </div>
+          <div v-else-if="decDone" class="dl-more" data-testid="decisions-end">
+            没有更早的记录了
+          </div>
         </div>
       </div>
     </div>

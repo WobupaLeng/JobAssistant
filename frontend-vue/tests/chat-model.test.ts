@@ -277,10 +277,10 @@ describe('打招呼链路（SPEC §16.5 裁决 T）', () => {
     expect(matchFriendByCompany(list, '   ')).toBeNull();
   });
 
-  it('占位会话：uid 带 g 前缀、名字是「待打招呼 · 公司」', () => {
+  it('占位会话：uid 带 g 前缀、名字就是公司名', () => {
     const p = pendingFriend('job-7', '星瀚科技', '后端工程师');
     expect(p.uid).toBe('gjob-7');
-    expect(p.name).toBe('待打招呼 · 星瀚科技');
+    expect(p.name).toBe('星瀚科技');
     expect(p.company).toBe('星瀚科技');
     expect(p.title).toBe('后端工程师');
     expect(p.unread).toBe(0);
@@ -290,8 +290,8 @@ describe('打招呼链路（SPEC §16.5 裁决 T）', () => {
   it('占位会话不能用 chat_send（后端不认识这个 uid）', () => {
     expect(isSendableFriend(pendingFriend('x', '星瀚科技'))).toBe(false);
     expect(isSendableFriend(friend({ uid: 'u1', name: '张三' }))).toBe(true);
-    // 名字里只是含「待打招呼」但不在开头，仍可发送。
-    expect(isSendableFriend(friend({ name: '客户待打招呼' }))).toBe(true);
+    // 判定只看 uid 前缀，与名字文本无关。
+    expect(isSendableFriend(friend({ uid: 'u2', name: '客户待打招呼' }))).toBe(true);
   });
 
   it('占位永远插在列表最前', () => {

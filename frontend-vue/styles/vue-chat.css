@@ -68,7 +68,7 @@
 
 /* 渐变高光描边（玻璃厚度感，原型 L1052-1060）落在 styles/layout.css 的
  * .chat-rail::before，与 .card::before 同族同宿主。那边要用
- * linear-gradient(#000 0 0) 当遮罩的 alpha 通道，而本文件（vue 系样式）按
+ * linear-gradient(currentColor 0 0) 当遮罩的 alpha 通道，而本文件（vue 系样式）按
  * tests/geometry.test.ts 的规定不得出现任何 hex / rgb 字面色值，所以手法留在契约层。 */
 
 /* 展开态：主对话框接管，右栏让位（原型里的 .app-shell.is-chat-open .chat-rail{display:none}）。 */
@@ -82,15 +82,17 @@
   min-height: 0;
   min-width: 0;
   flex: 1 1 auto;
+  /* 面板自身永不被内容顶高：头/搜索固定，列表在自己那一格里滚。 */
+  overflow: hidden;
 }
 
 .rail-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: 0 0 auto;
   height: 44px;
-  padding: 0 12px 0 14px;
+  padding: 0 10px 0 12px;
   border-bottom: 1px solid var(--hairline);
 }
 
@@ -99,6 +101,10 @@
   font-weight: 620;
   color: var(--text-1);
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
 }
 
 .rail-head-actions {
@@ -106,6 +112,147 @@
   align-items: center;
   gap: 2px;
   margin-left: auto;
+}
+
+/* 收起对话框：Boss 列表左侧的竖条（用户显式要求覆盖 SPEC A16 的禁竖排）。
+ * 常态只有一圈暗淡边框，不显示文字；
+ * 鼠标移入/键盘聚焦时，流光沿边框跑：两段光从上下两端出发、向左右两条竖边汇聚，
+ * 可以溢出按钮压住邻近内容；文字单独占内层，四周留内边距，不与线条重叠。 */
+@property --chat-rail-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+/* 纯浮层：绝对定位在对话框左边缘的中点，不进流——左侧 BOSS 列表因此能贴住
+ * 对话框左边框，不会被这条竖条挤出一段空隙。按钮本体一直接管指针（否则 :hover
+ * 永远不触发，文字标签也就永远不出现）；::before / ::after 两个伪元素都
+ * pointer-events: none，指针不会因为移到光条上而闪断。
+ * left 取 0 而不是 -50%：对话框是 overflow: hidden，居中压在边框上会被裁掉一半，
+ * 流光与竖线就只剩一半可见。 */
+.chat-detach-collapse {
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  top: 50%;
+  width: 22px;
+  height: 200px;
+  margin: 0;
+  padding: 6px 0;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  overflow: visible;
+  cursor: pointer;
+  transition: box-shadow var(--dur) var(--ease-out);
+}
+
+.chat-detach-collapse:hover,
+.chat-detach-collapse:focus-visible {
+  box-shadow: 0 0 12px -2px var(--primary-soft);
+}
+
+/* 常态只留一条居中的短竖线，不构成第二层边框 */
+.chat-detach-collapse::after {
+  content: '';
+  position: absolute;
+  left: calc(50% - 1px);
+  top: 50%;
+  width: 2px;
+  height: 200px;
+  margin-top: -100px;
+  border-radius: 1px;
+  background: linear-gradient(180deg, transparent 0%, var(--primary) 50%, transparent 100%);
+  box-shadow: 0 0 8px var(--primary-soft);
+  opacity: 0.85;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease-out);
+}
+
+.chat-detach-collapse:hover::after,
+.chat-detach-collapse:focus-visible::after {
+  opacity: 0;
+}
+
+/* 只保留 1px 宽的边框环，conic 渐变沿环跑：亮段初始在上下两端，转半圈汇聚到左右两边 */
+.chat-detach-collapse::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  /* 两段光弧：中点最亮（primary 实色），向两端逐渐暗淡到透明；弧宽加大让流光更明显。 */
+  background: conic-gradient(
+    from var(--chat-rail-angle),
+    var(--primary-soft) 0deg,
+    var(--primary) 30deg,
+    var(--primary) 60deg,
+    var(--primary-soft) 90deg,
+    transparent 130deg,
+    transparent 170deg,
+    var(--primary-soft) 200deg,
+    var(--primary) 230deg,
+    var(--primary) 260deg,
+    var(--primary-soft) 290deg,
+    transparent 330deg
+  );
+  -webkit-mask: linear-gradient(currentColor 0 0) content-box, linear-gradient(currentColor 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(currentColor 0 0) content-box, linear-gradient(currentColor 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease-out);
+}
+
+.chat-detach-collapse:hover::before,
+.chat-detach-collapse:focus-visible::before {
+  opacity: 1;
+  animation: chat-rail-sweep 2.6s linear infinite;
+}
+
+/* 0deg→180deg 后两段光互换位置，首尾同相，循环无跳变 */
+@keyframes chat-rail-sweep {
+  from {
+    --chat-rail-angle: 0deg;
+  }
+  to {
+    --chat-rail-angle: 180deg;
+  }
+}
+
+/* 文字标签悬停时浮在邻近内容之上（不挤压、不改布局尺寸）：
+ * 底色用不透明的玻璃令牌而不是 accent-soft，否则竖排字会与底下的 BOSS 列表文字叠成一团。 */
+.chat-detach-collapse-label {
+  position: relative;
+  z-index: 1;
+  writing-mode: vertical-rl;
+  letter-spacing: 2px;
+  font-size: var(--fs-xs);
+  color: var(--primary);
+  padding: 8px 3px;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease-out);
+}
+
+.chat-detach-collapse:hover .chat-detach-collapse-label,
+.chat-detach-collapse:focus-visible .chat-detach-collapse-label {
+  opacity: 1;
+  background: var(--glass-3);
+  box-shadow: var(--shadow-pop);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-detach-collapse:hover::before,
+  .chat-detach-collapse:focus-visible::before {
+    animation: none;
+  }
 }
 
 .rail-search {
@@ -146,6 +293,7 @@
   gap: 2px;
   padding: 6px 8px 10px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   min-height: 0;
   flex: 1 1 auto;
 }
@@ -160,6 +308,9 @@
   padding: 7px 8px;
   white-space: nowrap;
   overflow: hidden;
+  /* 行是滚动列的 flex 项：默认 flex-shrink:1 会把它压到比内容还矮（配合 overflow:hidden
+   * 的 min-height:auto=0），文字被裁成一条条、行与行看起来叠在一起。行高必须由内容决定。 */
+  flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -229,6 +380,57 @@
   flex: 0 0 auto;
 }
 
+/* 行内操作列（打招呼 / 简历）：原先在对话区顶部的 chat-head，已按裁决下沉到行内。
+ * 默认隐藏，行 hover / 选中 / 键盘聚焦时才浮现——否则每一行都挂两个按钮，
+ * 列表会变成一片按钮墙，扫视会话的效率反而下降。 */
+.friend-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease-glass);
+}
+
+.friend:hover .friend-acts,
+.friend.is-active .friend-acts,
+.friend-acts:focus-within {
+  opacity: 1;
+}
+
+.friend-act {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--hairline);
+  background: var(--glass-0);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease-glass), border-color var(--dur) var(--ease-glass);
+}
+
+.friend-act:hover {
+  color: var(--text-1);
+  border-color: var(--primary-border);
+}
+
+.friend-act[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 触屏 / 无 hover 设备上永远看不见操作列，等于功能消失——直接常显。 */
+@media (hover: none) {
+  .friend-acts {
+    opacity: 1;
+  }
+}
+
 .friend-time {
   font-size: var(--fs-2xs);
   color: var(--text-3);
@@ -255,11 +457,13 @@
 .rail-state {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  /* 靠左：Boss 列表的引导/空态与列表条目同一条左基线，居中排版在窄栏里
+   * 会和上方搜索框、下方条目错位（用户反馈「没有靠左」）。 */
+  align-items: flex-start;
   justify-content: center;
   gap: 8px;
-  padding: 26px 6px;
-  text-align: center;
+  padding: 20px 12px;
+  text-align: left;
   color: var(--text-3);
 }
 
@@ -357,12 +561,20 @@
 
 .chat-detach-head {
   display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 0 12px 7px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* 标题行：内容与原先同一行，高度仍是 44px（计数行另起一行，不挤进这一行）。 */
+.chat-detach-head-row {
+  display: flex;
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
   height: 44px;
-  padding: 0 12px 0 14px;
-  border-bottom: 1px solid var(--hairline);
   min-width: 0;
 }
 
@@ -377,19 +589,23 @@
 }
 
 .chat-detach-body {
+  position: relative;
   display: flex;
   align-items: stretch;
   min-height: 0;
   min-width: 0;
   flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .chat-detach-rail {
   flex: 0 0 var(--rail-w);
   width: var(--rail-w);
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   border-right: 1px solid var(--hairline);
 }
 
@@ -481,11 +697,20 @@
 
 .rail-auto-bar {
   margin: 8px 10px 2px;
+  /* 计数已挪进列表头；条内只剩状态标签与按钮。按钮靠右由条内的 .spacer 撑开
+   * （space-between 只管两端的盒，acts 盒本身是内容宽，按钮会粘着标签）。 */
 }
 
+/* 对话框头里的条：标题行 `.chat-detach-head-row` 是本条的直接父级，它是个
+ * `display:flex` 行，所以本条是一个 flex 项目。这里必须 `flex: 1 1 auto`：
+ * 条本身的宽度是**内容宽**，若只写 `0 1 auto`，它就缩到「标签 + 按钮」那么宽，
+ * 条内的 `.spacer` 只剩 0 空间可分 —— 表现是展开态按钮组不贴右，而是紧跟着
+ * 状态标签挤在左边（收起态在右栏里是普通块级元素，占满整行，所以不显形）。
+ * 占满标题行后，`.spacer` 才有余量把按钮组推到条的右内边。
+ */
 .chat-detach-head .auto-apply-bar {
   margin: 0 2px 0 8px;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
 }
 
 /* 原型 L528-531：状态标签是 fs-xs / 字重 560 / 单行。 */
@@ -534,22 +759,40 @@
   flex: 0 0 auto;
 }
 
-/* 原型 L544-546：计数组贴右端、每项单行；数字等宽、字重 600、左侧 2px。 */
-.auto-apply-counts {
-  display: inline-flex;
+/* 待投递 / 已投递：各自独占一行，放在自动投递条的正下方（收起态在右栏、展开态在
+ * 对话框头第二行）。原先挂在列表头里与「刷新」抢宽度，两个数字都会被挤掉。 */
+.rail-counts {
+  display: flex;
+  flex-direction: row;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 10px;
-  margin-left: auto;
+  /* 右栏实例：与 .rail-auto-bar 的左右缩进对齐（条为 10px + 1px 边框）。 */
+  margin: 6px 11px 0;
+  min-width: 0;
   flex: 0 0 auto;
 }
 
-.auto-apply-counts > span {
+/* 对话框头里的计数行：标题行之下、整行左对齐，横向排开省高度。 */
+/* 展开态：计数与自动投递条同一行，计数紧贴条的左侧，整组靠右吸住。 */
+.chat-detach-head-row > .rail-counts {
+  gap: 8px;
+  margin: 0 0 0 auto;
+  padding: 0;
+  flex: 0 0 auto;
+}
+
+.chat-detach-head-row > .auto-apply-bar {
+  margin-left: 0;
+}
+
+.rail-counts > span {
   font-size: var(--fs-xs);
   color: var(--text-3);
   white-space: nowrap;
 }
 
-.auto-apply-counts b {
+.rail-counts b {
   color: var(--text-1);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -584,10 +827,39 @@
 
 /* 两条瞬态提示：右栏只有 300/260 宽，按 K9「错误必须可读」保留全文，但收小字。 */
 .chat-note {
-  flex: 1 1 100%;
-  min-width: 0;
+  display: block;
+  box-sizing: border-box;
+  width: auto;
+  max-width: 100%;
+  margin: 6px 12px 0;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bad-border);
+  background: var(--bad-bg);
+  color: var(--bad-text-soft);
   font-size: var(--fs-2xs);
-  color: var(--text-3);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 展开态对话框内的提示：贴在输入框正上方，单行条带，字号与对话区一致。 */
+.detach-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.detach-note {
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--bad-border);
+  background: var(--bad-bg);
+  color: var(--bad-text-soft);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
 }

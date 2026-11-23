@@ -110,7 +110,15 @@
   --primary-soft: rgba(16, 185, 129, 0.16);
   --accent: #2563eb;
   --accent-soft: rgba(37, 99, 235, 0.18);
+  /* 分值流光炫彩的渐变色带（与 --primary / --accent 同层） */
+  --iri-1: #7cf3c4;
+  --iri-2: #7dd3fc;
+  --iri-3: #c4b5fd;
+  --iri-4: #f9a8d4;
+  --iri-5: #fde68a;
+  --iri-glow: rgba(255, 255, 255, 0.35);
   --good: #3fb950;
+  --good-soft: rgba(63, 185, 80, 0.14);
   --warn: #d29922;
   --warn-soft: rgba(210, 153, 34, 0.16);
   --bad: #f85149;
@@ -235,6 +243,7 @@
   --accent-soft: rgba(37, 99, 235, 0.12);
   --warn-soft: rgba(210, 153, 34, 0.14);
   --bad-soft: rgba(248, 81, 73, 0.12);
+  --good-soft: rgba(63, 185, 80, 0.12);
 
   /* 语义色：浅底上要压深一档才有对比（原型已给浅色分支取值）。 */
   --on-primary: #fff;

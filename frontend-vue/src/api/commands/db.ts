@@ -174,9 +174,35 @@ export function markDelivered(jobIds: readonly string[]): Promise<number> {
 /**
  * 读决策记录（新 → 旧）。
  *
- * 载荷结构：`{ args: { limit?, afterId? } }`——`after_id` 的驼峰**是** `afterId`，
- * 不是 `after_id`。翻页时把上一页最小的 id 传进来。
+ * 载荷结构：`{ args: { limit?, afterId?, beforeId? } }`——驼峰**是** `afterId` / `beforeId`，
+ * 不是蛇形。两个游标互斥：`afterId` 追新（取 `id > afterId`），
+ * `beforeId` 向更旧翻页（取 `id < beforeId`，传上一页最后一条的 id）。
  */
-export function listDecisions(limit?: number | null, afterId?: number | null): Promise<DecisionRecord[]> {
-  return invokeArgs<DecisionRecord[]>('list_decisions', { limit, afterId });
+export function listDecisions(
+  limit?: number | null,
+  afterId?: number | null,
+  beforeId?: number | null,
+): Promise<DecisionRecord[]> {
+  return invokeArgs<DecisionRecord[]>('list_decisions', { limit, afterId, beforeId });
+}
+
+/** 决策日志总条数（不受翻页条数影响，界面显示「共 N 条」用）。 */
+export function countDecisions(): Promise<number> {
+  return invokeArgs<number>('count_decisions', {});
+}
+
+/** 单条决策行为的条数（`decision` 是库里的原值）。 */
+export interface DecisionCount {
+  decision: string;
+  count: number;
+}
+
+/**
+ * 各决策行为的条数。
+ *
+ * 分档（排除/入库/其它）由调用方按 `decisionTone` 归属：后端只按原值
+ * `GROUP BY`，两套口径不会漂移。
+ */
+export function decisionCounts(): Promise<DecisionCount[]> {
+  return invokeArgs<DecisionCount[]>('decision_counts', {});
 }

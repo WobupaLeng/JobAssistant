@@ -329,18 +329,67 @@ class ChatClient:
         return page
 
     def _item_rows(self, page: Any) -> list[tuple[int, str, str]]:
-        """读出会话列表每一行的 (索引, HR 名字, 整行文本)。"""
+        """读出会话列表每一行的 (索引, HR 名字, 整行文本)。
+
+        只用于「列表渲染出来没有」这类计数场景（`_wait_items`）。要拿字段请用
+        `_item_details`——这里只有名字，公司/岗位/时间都在 `innerText` 里没拆开。
+        """
+        return [(r["i"], r["name"], r["txt"]) for r in self._item_details(page)]
+
+    def _item_details(self, page: Any) -> list[dict[str, Any]]:
+        """逐行解析会话列表，尽量补齐字段。
+
+        接口（`getGeekFriendList`）没回来时才走这里，所以能拿多少算多少：
+        名字、最近一条消息、时间、公司、岗位都从行内 DOM 直接取，
+        取不到的留空字符串（由调用方转成 `None`），**绝不硬写成 None**——
+        那会让每一行都显示成「—」，看起来像列表构建失败。
+        """
         try:
             rows = page.evaluate(
-                r"""() => [...document.querySelectorAll('.user-list-content ul li')]
-                    .map((el, i) => {
-                        const nm = el.querySelector('.title, .name, .geek-name');
-                        return [i, (nm ? nm.textContent : '').trim(), el.innerText.replace(/\s+/g, ' ').trim()];
-                    })"""
+                r"""() => {
+                    const pick = (el, sels) => {
+                        for (const s of sels) {
+                            const n = el.querySelector(s);
+                            if (n && n.textContent && n.textContent.trim()) {
+                                return n.textContent.trim();
+                            }
+                        }
+                        return '';
+                    };
+                    return [...document.querySelectorAll('.user-list-content ul li')].map((el, i) => {
+                        const txt = (el.innerText || '').replace(/\s+/g, ' ').trim();
+                        return {
+                            i,
+                            name: pick(el, ['.title', '.name', '.geek-name']),
+                            company: pick(el, ['.company-name', '.brand-name', '.company']),
+                            title: pick(el, ['.job-name', '.position', '.geek-job']),
+                            last_msg: pick(el, ['.last-msg', '.msg-text', '.lastMessage']),
+                            last_time: pick(el, ['.time', '.last-time', '.msg-time']),
+                            unread: pick(el, ['.unread-count', '.badge', '.num']),
+                            txt,
+                        };
+                    });
+                }"""
             )
         except Exception:
             return []
-        return [(int(r[0]), str(r[1]), str(r[2])) for r in (rows or [])]
+        out: list[dict[str, Any]] = []
+        for r in rows or []:
+            if not isinstance(r, dict):
+                continue
+            out.append(
+                {
+                    "i": int(r.get("i") or 0),
+                    "name": str(r.get("name") or ""),
+                    "company": str(r.get("company") or ""),
+                    "title": str(r.get("title") or ""),
+                    "last_msg": str(r.get("last_msg") or ""),
+                    "last_time": str(r.get("last_time") or ""),
+                    "unread": str(r.get("unread") or ""),
+                    "txt": str(r.get("txt") or ""),
+                }
+            )
+        return out
 
     def _wait_items(self, page: Any, timeout_s: float = 12.0) -> int:
         t0 = time.time()
@@ -350,6 +399,15 @@ class ChatClient:
                 return n
             page.wait_for_timeout(300)
         return 0
+
+    @staticmethod
+    def _int_or_zero(text: Any) -> int:
+        """从「3」「99+」这类角标文字里取整数；取不到按 0 算。
+
+        列表兜底路径专用：未读数只是为了显示角标，解析失败不该让整行报废。
+        """
+        digits = re.sub(r"\D", "", str(text or ""))
+        return int(digits) if digits else 0
 
     def _poll(self, page: Any, expr: str, timeout_ms: int = 1500, step_ms: int = 60) -> bool:
         """轮询一段 JS 表达式直到为真。比 wait_for_selector 灵活：条件常是「值变了」。"""
@@ -444,21 +502,24 @@ class ChatClient:
             self._wait_items(page, timeout_s=1.0)
         if not self._friends_order:
             # 接口没回来时退回 DOM：至少让用户看到有哪些人，别整块空白
-            rows = self._item_rows(page)
+            rows = self._item_details(page)
             if not rows:
                 raise ChatError("没拿到会话列表：可能未登录，或 Boss 页面结构已变化")
             self.log("warn", "会话列表接口未返回，改用页面 DOM 兜底（部分字段缺失）")
             out = []
-            for i, name, txt in rows:
+            for r in rows:
+                # 整行文本兜底「最近一条消息」：Boss 的行 dom 结构常变，
+                # 选择器全落空时至少还有整行文字，不至于副行全空。
+                last = r["last_msg"] or r["txt"] or ""
                 out.append(
                     {
-                        "uid": f"dom:{i}",
-                        "name": name or txt[:20],
-                        "title": None,
-                        "company": None,
-                        "last_msg": txt,
-                        "last_time": None,
-                        "unread": 0,
+                        "uid": f"dom:{r['i']}",
+                        "name": r["name"] or r["txt"][:20],
+                        "title": r["title"] or None,
+                        "company": r["company"] or None,
+                        "last_msg": last or None,
+                        "last_time": r["last_time"] or None,
+                        "unread": self._int_or_zero(r["unread"]),
                         "avatar": None,
                     }
                 )

@@ -16,6 +16,7 @@ import {
   friendName,
   unreadText,
 } from '../../lib_ui/chat-model';
+import { needsSession } from '../../lib_ui/session';
 
 const props = withDefaults(
   defineProps<{
@@ -28,8 +29,12 @@ const props = withDefaults(
     error?: string;
     /** 搜索词由页面持有：两段列表共享同一个查询（用户看到的是一份会话）。 */
     search: string;
+    /** 「生成打招呼」进行中的 uid（按钮转「生成中…」）；其它行不受影响。 */
+    greetingUid?: string;
+    /** 可移除的行（手动打招呼新增的占位 HR）；判定在页面层，组件只渲染按钮。 */
+    removableUids?: readonly string[];
   }>(),
-  { loading: false, error: '' },
+  { loading: false, error: '', greetingUid: '', removableUids: () => [] },
 );
 
 const emit = defineEmits<{
@@ -37,6 +42,9 @@ const emit = defineEmits<{
   (e: 'refresh'): void;
   (e: 'search', value: string): void;
   (e: 'retry'): void;
+  /** 行内「打招呼」：先选中该行，再生成话术（由页面串起来）。 */
+  (e: 'greet', uid: string): void;
+  (e: 'remove', uid: string): void;
 }>();
 
 /**
@@ -91,6 +99,7 @@ defineExpose({ listEl });
     <div class="rail-head">
       <span class="rail-title">{{ props.title }}</span>
       <span class="chip" :data-testid="ids.count">{{ props.friends.length }}</span>
+      <slot name="rail-head" />
       <span class="spacer" />
       <span class="rail-head-actions">
         <button
@@ -129,7 +138,23 @@ defineExpose({ listEl });
         data-testid="chat-detach-rail-slot"
       >Boss 列表挂载点</span>
       <div
-        v-if="props.error !== ''"
+        v-if="props.error !== '' && needsSession(props.error) && props.friends.length === 0"
+        class="rail-state"
+        :data-testid="ids.guide"
+        role="status"
+      >
+        <span class="state-glyph" aria-hidden="true">●</span>
+        <span class="state-title">浏览器未连接</span>
+        <span class="state-sub">请先点「开始抓取」或「扫码登录」，再发送消息</span>
+        <span class="state-actions">
+          <button class="btn btn-sm" type="button" :data-testid="ids.retry" @click="emit('retry')">
+            重试
+          </button>
+        </span>
+      </div>
+
+      <div
+        v-else-if="props.error !== '' && props.friends.length === 0"
         class="rail-error"
         :data-testid="ids.error"
         role="alert"
@@ -178,6 +203,9 @@ defineExpose({ listEl });
           :title="friendName(f)"
           @click="emit('pick', f.uid)"
         >
+          <!-- 行内操作列：原先「生成打招呼 / 选简历」挤在对话区顶部的 chat-head 里，
+               那一行已按裁决移除。下沉到每一行后，「对谁打招呼」不再靠选中态隐式决定，
+               用户点哪一行就是对谁操作。@click.stop 防止同时触发整行的 pick。 -->
           <span class="avatar" aria-hidden="true">{{ friendName(f).slice(0, 1) }}</span>
           <span class="friend-main">
             <span class="friend-name" :data-testid="`friend-name-${f.uid}`">{{ friendName(f) }}</span>
@@ -191,6 +219,28 @@ defineExpose({ listEl });
               :data-testid="ids.unread(f.uid)"
               :title="`${f.unread} 条未读`"
             >{{ unreadText(f.unread) }}</span>
+          </span>
+          <span class="friend-acts">
+            <span
+              role="button"
+              tabindex="0"
+              class="friend-act"
+              :data-testid="`friend-greet-${f.uid}`"
+              :aria-disabled="props.greetingUid === f.uid ? 'true' : 'false'"
+              @click.stop="emit('greet', f.uid)"
+              @keydown.enter.stop.prevent="emit('greet', f.uid)"
+              @keydown.space.stop.prevent="emit('greet', f.uid)"
+            >{{ props.greetingUid === f.uid ? '生成中…' : '打招呼' }}</span>
+            <span
+              v-if="props.removableUids.includes(f.uid)"
+              role="button"
+              tabindex="0"
+              class="friend-act friend-act-remove"
+              :data-testid="`friend-remove-${f.uid}`"
+              @click.stop="emit('remove', f.uid)"
+              @keydown.enter.stop.prevent="emit('remove', f.uid)"
+              @keydown.space.stop.prevent="emit('remove', f.uid)"
+            >移除</span>
           </span>
         </button>
       </div>

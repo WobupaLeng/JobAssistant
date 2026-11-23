@@ -48,7 +48,7 @@ describe('options/项数锚点', () => {
     expect(WEEKEND_OPTIONS).toHaveLength(4);
     expect(HR_ACTIVE_OPTIONS).toHaveLength(4);
     expect(DEGREE_VETO_OPTIONS).toHaveLength(4);
-    expect(PLATFORMS).toHaveLength(3);
+    expect(PLATFORMS).toHaveLength(1);
     expect(RECOMMEND_KEYWORDS).toHaveLength(6);
   });
 

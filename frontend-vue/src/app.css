@@ -18,7 +18,10 @@ body,
  * :root（L136）＝ 12px × --ui-scale，本项目不新增 token，把同一个算式写在这里。
  *
  * 纵向滚动交回各列自己（主列 .page-dashboard / 右栏 .chat-rail / 对话框各段）：
- * 容器一旦自己滚，展开对话框时整页会被推走，「同屏压缩」就看不出来。 */
+ * 容器一旦自己滚，展开对话框时整页会被推走，「同屏压缩」就看不出来。
+ *
+ * 左右内边距对齐顶栏 `.topbar` 的 14px：卡片与右栏都是窗口里的玻璃块，
+ * 不能贴住窗口左右边；两列之间由 gap 分隔。 */
 .app-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -27,7 +30,7 @@ body,
   align-items: stretch;
   gap: calc(12px * var(--ui-scale));
   overflow: hidden;
-  padding-top: 10px;
+  padding: 10px 14px 0;
 }
 
 /* 页面还没接上时的占位文案（ui lane 接管后自然消失）。 */
@@ -160,12 +163,66 @@ body,
  * 吃掉剩余宽、min-width:0（否则对话框展开时它不缩，会把右栏顶出窗口）、
  * 自己滚、以及原型那条 flex-basis 过渡（宽度过渡只走 flex，禁 translateX，SPEC §2.2 硬约束 4）。 */
 .page-dashboard {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
+  /* 三窗布局全部由内部区段消化：抓取条/筛选栏/日志卡定高、岗位列表吃剩余，
+   * 页面自身不该再出滚动条（否则筛选抽屉展开时会多一条外层滚动条）。 */
+  overflow: hidden;
   transition: flex-basis 240ms var(--ease-glass);
+}
+
+/* 纵向布局：抓取条 / 筛选栏 / 错误条定高，岗位列表吃剩余高度，
+ * 决策日志卡定高吸底（高 220px，见 styles/vue-dashboard.css 的 .log-card）。
+ * 窗口变高变矮只改列表可见行数，日志卡尺寸不变、始终贴底。 */
+.page-dashboard > .app-error,
+.page-dashboard > .app-notice,
+.page-dashboard > .scrape-card,
+.page-dashboard > .scrape-filter-bar {
+  flex: 0 0 auto;
+}
+
+.page-dashboard > .job-fill {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 180px;
+}
+
+/* 筛选条件抽屉：盖在岗位列表原来的位置上（展开大小 = 列表大小），
+ * 不再把列表与日志卡往下顶，页面外层也就不出现滚动条。 */
+.job-fill > .scrape-filter-bar {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.job-fill > .scrape-filter-bar > .filter-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 抽屉内部自己滚（原来的 58vh 上限是给「页面内联」版留的） */
+.job-fill > .scrape-filter-bar .f-body {
+  flex: 1 1 auto;
+  max-height: none;
+}
+
+.page-dashboard > .job-fill > .job-list {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.page-dashboard > .log-card {
+  flex: 0 0 auto;
 }
 
 .scrape-filter-bar {

@@ -263,8 +263,43 @@ def start_cdp_chrome(profile_dir: str) -> tuple[Any, int]:
         "about:blank",
     ]
     proc = subprocess.Popen(args)
+    # 必须等调试端口真的监听上再返回：Chrome 从 spawn 到开 CDP 端口要 0.5~2 秒，
+    # 立刻返回会让调用方的 _port_listening() 探空 → 再起一个 Chrome → 窗口无限打开。
+    ready_port = _wait_cdp_ready(proc, port, log=None)
+    if ready_port is None:
+        # 端口没起来：进程要么已经死了，要么卡在被别的会话接管。
+        # 不回收的话它会在调用方抛错后变成孤儿，占着 profile 让下一次启动必败。
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"CDP Chrome 调试端口 {port} 在 15 秒内未就绪（进程退出码 {proc.returncode}）"
+        )
     print(f"[browser] CDP Chrome 已启动（127.0.0.1:{port}）", file=__import__("sys").stderr)
     return proc, port
+
+
+def _wait_cdp_ready(proc: Any, port: int, log: Any = None, timeout_s: float = 15.0) -> int | None:
+    """轮询等 `port` 上的 CDP 端口就绪。就绪返回端口，进程先死 / 超时返回 None。
+
+    只做 TCP connect 探测（不消耗 HTTP 并发槽，也不触发 devtools 限流）。
+    进程提前退出时立刻放弃：继续等只会让用户多看着一个空窗口。
+    """
+    import socket
+    import time
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return None
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                return port
+        except OSError:
+            time.sleep(0.2)
+    return None
 
 
 def reuse_or_new_page(ctx: Any) -> Any:

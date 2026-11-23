@@ -58,6 +58,23 @@ fn app_info(paths: tauri::State<'_, commands_config::AppPaths>) -> serde_json::V
     })
 }
 
+/// 无边框窗口的最小化 / 最大化切换 / 关闭。前端只经 invoke 调用（红线 1）。
+#[tauri::command]
+fn window_minimize(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.minimize().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn window_toggle_maximize(window: tauri::WebviewWindow) -> Result<(), String> {
+    let max = window.is_maximized().map_err(|e| e.to_string())?;
+    if max { window.unmaximize() } else { window.maximize() }.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn window_close(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.close().map_err(|e| e.to_string())
+}
+
 /// 应用毛玻璃效果。
 ///
 /// **为什么不用 `window_vibrancy::apply_acrylic`**：
@@ -627,6 +644,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_scoring_spec,
             app_info,
+            window_minimize,
+            window_toggle_maximize,
+            window_close,
             commands_db::list_jobs,
             commands_db::get_job,
             commands_db::db_overview,
@@ -641,6 +661,8 @@ pub fn run() {
             commands_db::allow_jobs,
             commands_db::mark_delivered,
             commands_db::list_decisions,
+        commands_db::count_decisions,
+        commands_db::decision_counts,
             commands_sensitive::sensitive_list,
             commands_sensitive::sensitive_remove,
             commands_config::get_app_config,

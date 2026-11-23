@@ -174,25 +174,44 @@ pub fn draft_for(
     write_greeting(client, Some(&prompt), job, &profile)
 }
 
-/// 取一个活着的 sidecar 会话的句柄；必要时先拉起来。
+/// 取一个**已经活着**的 sidecar 会话的句柄；没有就直接报错。
 ///
-/// 复用 `commands_scrape` 的 `ensure_session_locked` 与脚本目录解析，
-/// 保证「自动投递」与「抓取/登录」用的是同一套启动参数。
+/// **刻意不调用 `ensure_session_locked`**：自动投递是高频循环（前端每 1 秒一拍），
+/// 由它负责拉起会话意味着「没有 sidecar 就顺手起一个」——那会连带启动 Chrome。
+/// 用户在「自动投递」里点开始，期待的是往已有会话里发消息，而不是眼前突然
+/// 弹出一个浏览器窗口。浏览器只由主动入口拉起：`login_start` / `scrape_start` /
+/// `session_open`。
 fn ensure_handle(
     scrape: &ScrapeState,
     store_state: &StoreState,
 ) -> CmdResult<crate::core::sidecar::process::SidecarHandle> {
-    let script_dir = crate::commands_scrape::sidecar_script_dir()?;
-    let store = store_handle(store_state)?;
-    let mut guard = scrape
+    let _ = store_state;
+    let guard = scrape
         .0
         .lock()
         .map_err(|_| "抓取会话锁已中毒".to_string())?;
-    crate::core::scrape::ensure_session_locked(&mut guard, script_dir, store)?;
-    guard
-        .as_ref()
-        .map(|s| s.handle_clone())
-        .ok_or_else(|| "sidecar 尚未启动".to_string())
+    let session = guard.as_ref().ok_or_else(|| {
+        "浏览器尚未启动：请先扫码登录或开始抓取，再开启自动投递".to_string()
+    })?;
+    let handle = session.handle_clone();
+    if !handle.is_alive() {
+        return Err("浏览器进程已退出：请先重新扫码登录，再开启自动投递".to_string());
+    }
+    Ok(handle)
+}
+
+/// 当前会话报告的登录态；没有会话视为未登录。
+///
+/// 自动投递的前置条件：**登录有效**。用 sidecar 自己探测出的 `login_state`
+/// （`login.state` 事件或 `login_status` 写回）作为唯一真源，不在命令层另判。
+fn logged_in_now(scrape: &ScrapeState) -> bool {
+    let Ok(guard) = scrape.0.lock() else {
+        return false;
+    };
+    match guard.as_ref() {
+        Some(s) => s.progress().login_state == "logged_in",
+        None => false,
+    }
 }
 
 /// 找岗位对应的聊天入口：`ChatOpen{query}` → 回执里的 uid。
@@ -228,6 +247,31 @@ pub fn auto_greet_next(
     args: AutoNextArgs,
 ) -> CmdResult<AutoNextReply> {
     let now = now_ms();
+    // 0) 登录前置：**登录无效就不投**。
+    //
+    // 放在认领之前，是为了不留半截状态：未登录时连 `rt.start()` 都不该发生，
+    // 否则界面会显示「正在投递」却一条也发不出去。也不在这里去拉起浏览器——
+    // 那是 `login_start` / `scrape_start` 的职责，自动投递只消费已有会话。
+    if !logged_in_now(&scrape) {
+        let mut rt = state.0.lock().map_err(|_| "自动投递状态锁已中毒".to_string())?;
+        rt.pause("登录已失效，自动投递已暂停");
+        return Ok(AutoNextReply {
+            ok: false,
+            stage: "pick".into(),
+            error: "登录无效或已过期，请先扫码登录再开启自动投递".into(),
+            skip: false,
+            job_id: String::new(),
+            company: String::new(),
+            title: String::new(),
+            text: String::new(),
+            source: String::new(),
+            note: String::new(),
+            tokens: 0,
+            next_at_ms: 0,
+            remaining_ms: rt.remaining_ms(now),
+            sent: rt.sent,
+        });
+    }
     // 1) 认领一轮：暂停中直接拒绝，避免前端定时器在暂停后仍然投
     {
         let mut rt = state.0.lock().map_err(|_| "自动投递状态锁已中毒".to_string())?;

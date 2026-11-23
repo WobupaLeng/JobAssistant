@@ -30,8 +30,8 @@ import {
 
 /** 自动刷新间隔（与 Leptos AUTO_REFRESH_MS 一致）。 */
 export const AUTO_REFRESH_MS = 2000;
-/** 决策记录拉取上限（后端 limit=0 会回落 200，这里显式给 300）。 */
-export const DECISION_LIMIT = 300;
+/** 决策记录每页条数（无限滚动一次拉这么多；后端 limit=0 会回落 200）。 */
+export const DECISION_PAGE_SIZE = 10;
 
 /* ------------------------------------------------------------------ *
  * 运行日志：seq 游标
@@ -202,11 +202,10 @@ export function decisionRowFromRecord(r: DecisionRecord): DecisionRowView {
   };
 }
 
-export type DecisionFilter = 'all' | 'rescore' | 'reject' | 'accept' | 'other';
+export type DecisionFilter = 'all' | 'reject' | 'accept' | 'other';
 
 export const DECISION_FILTERS: readonly { slug: DecisionFilter; label: string }[] = [
   { slug: 'all', label: '全部' },
-  { slug: 'rescore', label: '重算' },
   { slug: 'reject', label: '排除' },
   { slug: 'accept', label: '入库' },
   { slug: 'other', label: '其它' },
@@ -217,8 +216,6 @@ export function decisionFilterAccepts(filter: DecisionFilter, tone: DecisionTone
   switch (filter) {
     case 'all':
       return true;
-    case 'rescore':
-      return tone === 'accent';
     case 'reject':
       return tone === 'bad';
     case 'accept':

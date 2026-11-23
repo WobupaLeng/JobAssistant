@@ -168,11 +168,12 @@ describe('三窗固定高 / 敏感库 720 / A54 方块', () => {
     );
   });
 
-  it('A53：打招呼方块 min-width = --fs-sm × 4.6，高 = 两行正文 + 12px', () => {
+  it('A53：打招呼方块缩小为紧凑按钮 min-width = --fs-sm × 3.6，高度 30px', () => {
     const css = stripComments(read('styles/vue-dashboard.css'));
-    expect(css).toContain('min-width: calc(var(--fs-sm) * 4.6)');
-    expect(css).toContain('height: calc(var(--fs-sm) * 1.55 * 2 + 12px)');
-    expect(css).toContain('aspect-ratio: 1 / 1');
+    expect(css).toContain('min-width: calc(var(--fs-sm) * 3.6)');
+    // 用户裁决：打招呼缩小（m01710），按钮定高 30px。
+    expect(css).toContain('height: 30px');
+    expect(css).not.toContain('aspect-ratio: 1 / 1');
   });
 
   // A54（states.md:809）：≤1599 展开态 `.job-card { min-width: calc(320px * var(--ui-scale)) }`。
@@ -246,7 +247,7 @@ describe('产物 CSS（dist/）包含几何契约', () => {
       expect(css).toContain(`--fs-${step}`);
     }
     expect(css).toContain('720px');
-    expect(css).toContain('calc(var(--fs-sm) * 4.6)');
+    expect(css).toContain('calc(var(--fs-sm) * 3.6)');
   });
 });
 

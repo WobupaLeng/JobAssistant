@@ -20,10 +20,12 @@ import {
   setChecked,
 } from '../src/lib_ui/longpress';
 import {
+  LLM_PREFILTER_DEFAULT,
   MAX_JD_CEILING,
   buttonClass,
   buttonLabel,
   buttonState,
+  clampPrefilter,
   lastTitleText,
   progressStats,
   progressText,
@@ -168,21 +170,31 @@ describe('进度文案（C9 逐字）', () => {
   });
 });
 
-describe('计分方式分段（LLM 段永不可选）', () => {
-  it('LLM 段恒 disabled、恒不 active；选中规则打分时规则段 active', () => {
-    const segs = scoreModeSegs('rule');
-    const llm = segs.find((s) => s.testId === 'scrape-mode-llm-seg');
-    expect(llm?.disabled).toBe(true);
-    expect(llm?.active).toBe(false);
-    const rule = segs.find((s) => s.testId === 'scrape-mode-rule-seg');
-    expect(rule?.disabled).toBe(false);
-    expect(rule?.active).toBe(true);
+describe('计分方式分段（规则 / 大模型）', () => {
+  it('两段都可选；选中谁谁 active', () => {
+    const rule = scoreModeSegs('rule');
+    expect(rule.find((s) => s.testId === 'scrape-mode-rule-seg')?.active).toBe(true);
+    expect(rule.find((s) => s.testId === 'scrape-mode-llm-seg')?.active).toBe(false);
+    const llm = scoreModeSegs('llm');
+    expect(llm.find((s) => s.testId === 'scrape-mode-llm-seg')?.active).toBe(true);
+    expect(llm.find((s) => s.testId === 'scrape-mode-rule-seg')?.active).toBe(false);
   });
 
-  it('即使传入 llm，LLM 段也不会被激活（本轮不给选）', () => {
-    const llm = scoreModeSegs('llm').find((s) => s.testId === 'scrape-mode-llm-seg');
-    expect(llm?.disabled).toBe(true);
-    expect(llm?.active).toBe(false);
+  it('大模型段用中文标签且不再 disabled', () => {
+    const llm = scoreModeSegs('rule').find((s) => s.testId === 'scrape-mode-llm-seg');
+    expect(llm?.label).toBe('大模型打分');
+    expect(llm?.disabled).toBe(false);
+  });
+
+  it('初筛线夹到 0-100，非数字回落默认 50', () => {
+    expect(clampPrefilter(0)).toBe(0);
+    expect(clampPrefilter(50)).toBe(50);
+    expect(clampPrefilter(120)).toBe(100);
+    expect(clampPrefilter(-3)).toBe(0);
+    expect(clampPrefilter(70.9)).toBe(70);
+    expect(clampPrefilter('60')).toBe(60);
+    expect(clampPrefilter('')).toBe(LLM_PREFILTER_DEFAULT);
+    expect(clampPrefilter(Number.NaN)).toBe(LLM_PREFILTER_DEFAULT);
   });
 });
 

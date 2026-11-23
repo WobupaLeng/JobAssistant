@@ -158,9 +158,16 @@
 .chat-head-text {
   flex: 1 1 auto;
   min-width: 0;
+  /* 名称与副标题必须各占一行；inline 排列会让两段文字挤在一行叠字 */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
 }
 
 .chat-head-name {
+  display: block;
+  max-width: 100%;
   font-size: var(--fs-sm);
   font-weight: 620;
   overflow: hidden;
@@ -169,6 +176,8 @@
 }
 
 .chat-head-sub {
+  display: block;
+  max-width: 100%;
   font-size: var(--fs-2xs);
   color: var(--text-3);
   overflow: hidden;

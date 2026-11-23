@@ -165,10 +165,6 @@ export interface PlatformOpt {
 
 export const PLATFORMS: readonly PlatformOpt[] = [
   { id: 'boss', name: 'Boss直聘', ready: true },
-  { id: 'zhilian', name: '智联招聘', ready: false },
-  // 展示名逐字照抄原型（`prototypes/ui-v1/index.html:1379` 写的就是 51job 这个
-  // 品牌名，不是它的中文全称）：写成中文全称会让按名字定位元素的断言落空。
-  { id: '51job', name: '51job', ready: false },
 ];
 
 /** 平台 id → 显示名。找不到时原样回显 id（旧版 `platformName`）。 */

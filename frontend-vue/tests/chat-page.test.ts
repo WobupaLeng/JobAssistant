@@ -80,6 +80,8 @@ function fakeInvoke(cmd: string, payload?: unknown): Promise<unknown> {
       });
     case 'chat_send':
       return Promise.resolve({ text: '回执文本', job_id: null });
+    case 'login_status':
+      return Promise.resolve({ platform: 'boss', state: 'logged_in', saved: true, error: '' });
     default:
       return Promise.resolve(true);
   }

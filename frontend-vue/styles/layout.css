@@ -15,7 +15,8 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  padding: 10px 14px 14px;
+  /* 去边界感：顶栏与页面主体共用同一块玻璃面板，外壳不再留缝。 */
+  padding: 0 0 14px;
   gap: 0;
 }
 
@@ -27,10 +28,11 @@
   gap: 10px;
   flex: 0 0 auto;
   padding: 8px 14px;
-  border-radius: var(--radius);
-  background: var(--glass-1);
-  border: 1px solid var(--hairline);
-  box-shadow: var(--shadow-near), var(--inner-light);
+  border-radius: 0;
+  background: transparent;
+  /* 去边界感：顶栏不再是独立玻璃块，与下方页面融为一块面板（不改结构与行为）。 */
+  border: 0;
+  box-shadow: none;
   backdrop-filter: blur(var(--blur-1)) saturate(var(--saturate-1));
   -webkit-backdrop-filter: blur(var(--blur-1)) saturate(var(--saturate-1));
 }

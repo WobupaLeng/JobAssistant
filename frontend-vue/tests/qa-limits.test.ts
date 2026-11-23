@@ -70,8 +70,14 @@ describe('DashboardPage 的接线', () => {
   });
 
   it('min_score / max_jd 从不进 set_app_config 的 patch（C11）', () => {
-    // 页面从不直接调 setAppConfig；配置页那边由 api 层 sanitize 兜底。
-    expect(page).not.toContain('setAppConfig(');
-    expect(page).not.toContain("min_score:");
+    // 打分方式 / 初筛线走 setAppConfig 是合法的（两者都在 WRITABLE_KEYS 里），
+    // 但门槛与上限那两把锁只能走 set_limit——任何 patch 里都不许出现它们。
+    const patches = [...page.matchAll(/setAppConfig\(\{([^}]*)\}\)/g)].map((m) => m[1]);
+    expect(patches.length).toBeGreaterThan(0);
+    for (const body of patches) {
+      expect(body).not.toContain('min_score');
+      expect(body).not.toContain('max_jd');
+    }
+    expect(page).not.toContain('min_score:');
   });
 });

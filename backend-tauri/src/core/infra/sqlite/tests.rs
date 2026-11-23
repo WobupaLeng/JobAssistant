@@ -984,6 +984,54 @@ use crate::core::infra::sqlite::admin::MAX_BATCH_IDS;
         assert_eq!(store.list_decisions(0, 0).unwrap().len(), 5);
     }
 
+    #[test]
+    fn list_decisions_before_pages_to_older_rows() {
+        let store = SqliteStore::open_in_memory().unwrap();
+        for i in 0..5 {
+            store
+                .log_decision("boss", &format!("公司{i}/Java"), "reject", "外包")
+                .unwrap();
+        }
+        // 首页：没有上界（before_id = 0）→ 最新的两条
+        let first = store.list_decisions_before(2, 0).unwrap();
+        assert_eq!(first.iter().map(|d| d.id).collect::<Vec<_>>(), vec![5, 4]);
+        // 向下翻：before_id = 上一页最小 id → 更旧的两条
+        let next = store.list_decisions_before(2, 4).unwrap();
+        assert_eq!(next.iter().map(|d| d.id).collect::<Vec<_>>(), vec![3, 2]);
+        let last = store.list_decisions_before(2, 2).unwrap();
+        assert_eq!(last.iter().map(|d| d.id).collect::<Vec<_>>(), vec![1]);
+        // 翻到底再往下就是空，前端据此停掉无限滚动
+        assert!(store.list_decisions_before(2, 1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn decision_counts_groups_by_raw_decision() {
+        let store = SqliteStore::open_in_memory().unwrap();
+        for _ in 0..3 {
+            store.log_decision("boss", "公司/Java", "reject", "外包").unwrap();
+        }
+        store.log_decision("boss", "公司/Java", "accept", "命中").unwrap();
+        store.log_decision("boss", "公司/Java", "stored", "入库").unwrap();
+        store.log_decision("boss", "公司/Java", "unknown_kind", "别的").unwrap();
+
+        let mut got = store.decision_counts().unwrap();
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("accept".to_string(), 1),
+                ("reject".to_string(), 3),
+                ("stored".to_string(), 1),
+                ("unknown_kind".to_string(), 1),
+            ]
+        );
+        // 总条数必须等于各档之和（前端「全部」用它兜底）
+        assert_eq!(
+            store.count_decisions().unwrap(),
+            got.iter().map(|(_, n)| *n).sum::<i64>()
+        );
+    }
+
     // ---------- app_config ----------
 
     #[test]

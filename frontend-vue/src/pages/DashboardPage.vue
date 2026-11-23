@@ -31,7 +31,7 @@ import {
 import { listLogs } from '../api/commands/logs';
 import { getScoringSpec } from '../api/commands/shell';
 import { scrapeDrain, scrapeProgress, scrapeStart, scrapeStop } from '../api/commands/scrape';
-import { getAppConfig, setLimit, setScrapeDefaults } from '../api/commands/config';
+import { getAppConfig, setAppConfig, setLimit, setScrapeDefaults } from '../api/commands/config';
 import { sensitiveList, sensitiveRemove } from '../api/commands/sensitive';
 import { loginStart, loginStatus } from '../api/commands/scrape';
 import { loginSave, logout } from '../api/commands/scrape';
@@ -74,8 +74,10 @@ import {
   type TimerHandle,
 } from '../lib_ui/longpress';
 import {
+  LLM_PREFILTER_DEFAULT,
   MAX_JD_CEILING,
   buttonState,
+  clampPrefilter,
   fromProgress,
   toFeedLine,
   trimFeed,
@@ -110,6 +112,7 @@ import {
 } from '../lib_ui/job-detail-model';
 import { PRIMARY_PLATFORM, pickPlatform } from '../lib_ui/platform-model';
 import { mergeLoginState } from '../lib_ui/login-model';
+import { CHAT_ACTIVE_COMPANY_EVENT, CHAT_ACTIVE_COMPANY_KEY } from '../lib_ui/chat-model';
 import {
   EMPTY_QUEUE,
   clearErrors,
@@ -212,10 +215,44 @@ let tickTimer: ReturnType<typeof setInterval> | null = null;
 let logTimer: ReturnType<typeof setTimeout> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let pressTimer: TimerHandle | null = null;
+let swallowNextClick = false;
 let pressStart: PointerSample | null = null;
 let pressJobId = '';
 
-const segs = computed(() => scoreModeSegs('rule'));
+/**
+ * 打分方式与初筛线都落 `app_config`（`score_mode` / `llm_prefilter`，两者都在
+ * 后端 `WRITABLE_KEYS` 里，走 `set_app_config` 即可，不走 `set_limit`）。
+ */
+const scoreMode = ref<'rule' | 'llm'>('rule');
+const llmPrefilter = ref(LLM_PREFILTER_DEFAULT);
+const segs = computed(() => scoreModeSegs(scoreMode.value));
+
+/** 切打分方式：先乐观切，写库失败再回滚（否则界面与配置两张皮）。 */
+async function onPickMode(key: 'rule' | 'llm'): Promise<void> {
+  if (scoreMode.value === key) return;
+  const prev = scoreMode.value;
+  scoreMode.value = key;
+  try {
+    await setAppConfig({ score_mode: key });
+  } catch (e) {
+    scoreMode.value = prev;
+    fail(`打分方式保存失败：${errText(e)}`, setAppConfig.name);
+  }
+}
+
+/** 初筛线：夹到 0-100 再写库；失败回滚，避免显示值与库值不一致。 */
+async function onPrefilter(v: number): Promise<void> {
+  const next = clampPrefilter(v);
+  if (next === llmPrefilter.value) return;
+  const prev = llmPrefilter.value;
+  llmPrefilter.value = next;
+  try {
+    await setAppConfig({ llm_prefilter: next });
+  } catch (e) {
+    llmPrefilter.value = prev;
+    fail(`初筛分数线保存失败：${errText(e)}`, setAppConfig.name);
+  }
+}
 const state = computed(() => buttonState(progress.value.running, pausedByUser.value));
 
 // ---------------------------------------------------------------- 错误
@@ -225,6 +262,10 @@ const state = computed(() => buttonState(progress.value.running, pausedByUser.va
  * 队列上限与去重都在 `pushError` 里（纯函数），这里不做判断。
  */
 function fail(message: string, code: string, retry: { label: string; run: () => void } | null = null): void {
+  // 同一来源（同 code）只保留一条：先清掉旧的同源卡片，再入队，避免错误堆叠。
+  const prior = errors.value.items.filter((it) => it.code === code);
+  for (const it of prior) retryActions.delete(it.id);
+  if (prior.length > 0) errors.value = prior.reduce((q, it) => dismissError(q, it.id), errors.value);
   errors.value = pushError(errors.value, message, code, Date.now(), retry?.label ?? null);
   if (retry) retryActions.set(errors.value.items[errors.value.items.length - 1]?.id ?? -1, retry.run);
 }
@@ -251,23 +292,46 @@ function onDismissAllErrors(): void {
 
 // ---------------------------------------------------------------- 读
 
+/** 每页条数；后端 `list_jobs` 按 `tab` 过滤后分页（`offset`）。 */
+const PAGE_SIZE = 50;
+const hasMore = ref(true);
+const pageLoading = ref(false);
+
+function listArgs(offset: number) {
+  return {
+    include_rejected: showAll.value || tabIncludeRejected(tab.value),
+    rejected_only: false,
+    ascending: sortAscending(sortDescending.value),
+    limit: PAGE_SIZE,
+    offset,
+    sort: sortField.value,
+    tab: tabQuery(tab.value, showAll.value),
+    order: sortOrder(sortDescending.value),
+  };
+}
+
+/** 滚到底部时追加下一页；不足一页即视为已拉完。 */
+async function loadMore(): Promise<void> {
+  if (!hasMore.value || pageLoading.value || listLoading.value) return;
+  pageLoading.value = true;
+  try {
+    const items = await listJobs(listArgs(jobs.value.length));
+    jobs.value = [...jobs.value, ...items];
+    hasMore.value = items.length === PAGE_SIZE;
+  } catch (e) {
+    fail(`加载更多失败：${errText(e)}`, 'list_jobs', { label: '重试', run: () => void loadMore() });
+  } finally {
+    pageLoading.value = false;
+  }
+}
+
 async function refreshList(): Promise<void> {
   listLoading.value = true;
   listError.value = '';
   try {
-    const [items, c] = await Promise.all([
-      listJobs({
-        include_rejected: showAll.value || tabIncludeRejected(tab.value),
-        rejected_only: false,
-        ascending: sortAscending(sortDescending.value),
-        limit: 500,
-        sort: sortField.value,
-        tab: tabQuery(tab.value, showAll.value),
-        order: sortOrder(sortDescending.value),
-      }),
-      jobTabCounts(),
-    ]);
+    const [items, c] = await Promise.all([listJobs(listArgs(0)), jobTabCounts()]);
     jobs.value = items;
+    hasMore.value = items.length === PAGE_SIZE;
     counts.value = c;
   } catch (e) {
     listError.value = errText(e);
@@ -294,9 +358,17 @@ async function refreshProgress(): Promise<void> {
   }
   // 运行中才拉事件流；停了立刻不再拉（Leptos 的 drain 定时器同口径）。
   if (progress.value.running) await drainFeed();
+  // 进度是「要不要轮询」的唯一判据，这里统一收口：抓取一开就挂上 tick，
+  // 一停就卸掉。调用方不必各自记得补一句 syncTick（挂载、启动、停止、
+  // 可见性恢复都会经过这里）。
+  syncTick();
 }
 
-async function loadLogs(): Promise<void> {
+/**
+ * 读日志。失败即**停止轮询**（见 `pollLogs`），不静默重试、不新增错误卡片——
+ * 日志是诊断通道，它自己失败时不能再制造错误堆叠。
+ */
+async function loadLogs(): Promise<boolean> {
   try {
     const reply = await listLogs(logSince.value);
     // C14 / 日志游标：`LogRing::since` 是闭区间，边界那一毫秒会重送一条，
@@ -310,9 +382,43 @@ async function loadLogs(): Promise<void> {
       logLines.value = merged.slice(-200);
       logSince.value = Math.max(...incoming.map((l) => l.ts));
     }
+    return true;
   } catch {
     /* 日志失败不提示：它本身就是诊断通道 */
+    return false;
   }
+}
+
+/**
+ * 日志轮询的唯一闸门：**已登录 + 抓取运行中**才允许继续轮询。
+ * 挂载时不启动；读失败（sidecar 不可用 / 管道关闭）即停，不循环重试。
+ */
+function canPollLogs(): boolean {
+  return isLoggedIn() && progress.value.running;
+}
+
+let logPollStopped = false;
+
+function startLogPolling(): void {
+  if (logTimer !== null || disposed || logPollStopped || !canPollLogs()) return;
+  logTimer = setTimeout(async () => {
+    logTimer = null;
+    // 定时器触发时再查一次闸门：停止后即便有残留回调也不发请求。
+    if (disposed || logPollStopped || !canPollLogs()) return;
+    const ok = await loadLogs();
+    if (!ok) {
+      // 失败：立即关闭闸门并清掉任何已排队的定时器，不再循环。
+      logPollStopped = true;
+      stopLogPolling();
+      return;
+    }
+    startLogPolling();
+  }, LOG_POLL_MS);
+}
+
+function stopLogPolling(): void {
+  if (logTimer !== null) clearTimeout(logTimer);
+  logTimer = null;
 }
 
 /**
@@ -357,6 +463,8 @@ async function loadSpecAndConfig(): Promise<void> {
     if (scoreMax.value === null) scoreMax.value = cfg.score_max;
     if (minScore.value === null) minScore.value = cfg.min_score;
     maxJd.value = cfg.max_jd;
+    scoreMode.value = cfg.score_mode === 'llm' ? 'llm' : 'rule';
+    llmPrefilter.value = clampPrefilter(cfg.llm_prefilter);
     // C12：后端权威优先；它一个字段都没给才回落本地草稿。
     const next = createDraft();
     const adopted = applyBackend(next, cfg.scrape_defaults);
@@ -405,13 +513,23 @@ function resetFilter(): void {
   applyNow();
 }
 
+/** 用户主动点「读取期望」入口。未登录只给提示，不发起请求（求职期望是被动能力）。 */
 function onReadExpect(): void {
+  if (!isLoggedIn()) {
+    filterNote.value = '请先登录后再读取求职期望';
+    return;
+  }
   void loadExpects();
 }
 
+/** 已登录守卫：只认 `login_status` / `login-state` 给出的 `logged_in`。 */
+function isLoggedIn(): boolean {
+  return login.value?.state === 'logged_in';
+}
+
 /**
- * 读求职期望（`list_expectations`）。失败进错误队列但**不挡操作**：
- * 期望只是关键词的推荐来源，读不到不影响手填。
+ * 读求职期望（`list_expectations`）。仅在用户点击且已登录时调用（见 `onReadExpect`）。
+ * 失败进错误队列但**不挡操作**，且**不做自动重试**——「重试」按钮只在用户点击时生效。
  */
 async function loadExpects(): Promise<void> {
   try {
@@ -419,7 +537,10 @@ async function loadExpects(): Promise<void> {
     expects.value = list;
     filterNote.value = `已读取 ${list.length} 条求职期望`;
   } catch (e) {
-    fail(`读取期望职位失败：${errText(e)}`, 'list_expectations', { label: '重试', run: () => void loadExpects() });
+    fail(`读取期望职位失败：${errText(e)}`, 'list_expectations', {
+      label: '重试',
+      run: () => onReadExpect(),
+    });
   }
 }
 
@@ -604,16 +725,57 @@ async function onLogout(): Promise<void> {
   }
 }
 
+/**
+ * 抓取进行中的进度轮询。**只在运行中挂载**，停了一拍就自己卸掉。
+ *
+ * 与已删除的 5 秒常驻 tick 的区别：空闲时完全不发 IPC。原来那个 tick 无论
+ * 在不在抓取都每 5 秒查一次登录态，而登录态查询会触碰浏览器（见 onMounted
+ * 注释），空闲时毫无收益却一直在驱动浏览器。
+ *
+ * 进度与日志仍靠它推进：`drainFeed` 是事件的唯一消费口（`scrape_drain`），
+ * 没有独立推送通道，所以运行中必须保留轮询。
+ */
+function syncTick(): void {
+  const need = progress.value.running;
+  if (need && tickTimer === null) {
+    tickTimer = setInterval(() => {
+      void refreshProgress();
+      if (canPollLogs()) startLogPolling();
+      else stopLogPolling();
+      // 抓取已结束：立刻卸掉轮询，不让空闲态继续发请求。
+      if (!progress.value.running) {
+        void refreshCounts();
+        syncTick();
+      }
+    }, TICK_MS);
+    return;
+  }
+  if (!need && tickTimer !== null) {
+    clearInterval(tickTimer);
+    tickTimer = null;
+    void refreshCounts();
+  }
+}
+
 /** WebView 从挂起恢复：`setTimeout` / 事件都可能断过，补一次权威查询。 */
 function onVisibilityChange(): void {
-  if (document.visibilityState === 'visible') void refreshLogin();
+  if (document.visibilityState === 'visible') {
+    void refreshLogin();
+    syncTick();
+  }
 }
 
 async function onGreet(jobId: string): Promise<void> {
   const job = jobs.value.find((j) => j.job_id === jobId);
-  setGreetDraft(job?.company ?? '', job?.title ?? '');
+  setGreetDraft(job?.company ?? '', job?.title ?? '', undefined, jobId);
   // 不切页：草稿留给同屏的聊天层就地消费（匹配好友 ⇒ 选中 ⇒ 预填 + focus ⇒ 不发送）。
   emit('greet');
+}
+
+/** 抽屉「去跟 Boss 聊」：与卡片打招呼同一条草稿路径，并收起抽屉让聊天层接管。 */
+function onDetailChat(jobId: string): void {
+  detail.value = closeDetail();
+  void onGreet(jobId);
 }
 
 // ---------------------------------------------------------------- 长按
@@ -633,6 +795,8 @@ function onGridPointerDown(e: PointerEvent): void {
   pressTimer = armLongPress(() => {
     pressTimer = null;
     if (pressJobId === '') return;
+    // 长按触发后松开会补发一次 click：吞掉它，否则同一张卡会被"再点一次"切掉。
+    swallowNextClick = true;
     selection.value = {
       selecting: true,
       checked: selection.value.selecting
@@ -654,6 +818,10 @@ function cancelPress(): void {
 }
 
 function onGridClick(e: MouseEvent): void {
+  if (swallowNextClick) {
+    swallowNextClick = false;
+    return;
+  }
   const card = cardOf(e.target);
   if (!card) {
     selection.value = clickBlank(selection.value);
@@ -786,42 +954,54 @@ function errText(e: unknown): string {
 
 // ---------------------------------------------------------------- 生命周期
 
+/* 跨页联动：聊天页展开某 Boss 时，概览页高亮同公司的岗位（键由 chat-model 统一定义）。 */
+const highlightCompany = ref('');
+function readHighlightCompany(): string {
+  try {
+    return localStorage.getItem(CHAT_ACTIVE_COMPANY_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+function onStorageHighlight(ev: StorageEvent): void {
+  if (ev.key === CHAT_ACTIVE_COMPANY_KEY || ev.key === null) highlightCompany.value = readHighlightCompany();
+}
+/** 同页事件（写入方是本标签页的聊天层）：直接重读，不依赖 storage 事件。 */
+function onSamePageHighlight(): void {
+  highlightCompany.value = readHighlightCompany();
+}
+
 onMounted(() => {
   tailInTopbar.value = document.querySelector('.tb-embed') !== null;
+  highlightCompany.value = readHighlightCompany();
+  window.addEventListener('storage', onStorageHighlight);
+  window.addEventListener(CHAT_ACTIVE_COMPANY_EVENT, onSamePageHighlight);
   void loadSpecAndConfig();
   void refreshList();
   void refreshProgress();
-  void loadLogs();
+  // 日志与求职期望都是被动能力：挂载时不拉取、不无条件轮询（见 `startLogPolling` 的闸门）。
   void refreshLogin();
   void subscribeLoginState();
   document.addEventListener('visibilitychange', onVisibilityChange);
-  void loadExpects();
-  // C16：setInterval 在 WebView 挂起时同样不触发；恢复后下一次立即生效。
-  // 同一个 tick 兼管进度与事件流：运行中才真的发命令（见 refreshProgress）。
-  tickTimer = setInterval(() => {
-    void refreshCounts();
-    void refreshProgress();
-    // 5s tick 兼做登录态兜底：事件断流（emit 失败/会话重启）时也不会长期显示旧态。
-    void refreshLogin();
-  }, TICK_MS);
-  const pollLogs = (): void => {
-    logTimer = setTimeout(() => {
-      void loadLogs();
-      pollLogs();
-    }, LOG_POLL_MS);
-  };
-  pollLogs();
+  // **不再有 5 秒常驻 tick**：空闲时既不该查登录态也不该查进度。
+  // 原来那个 `setInterval` 每 5 秒调一次 `loginStatus`，而它会经 Rust
+  // `login_status` → sidecar `session.open` 把浏览器导航一遍——用户看到的是
+  // 浏览器窗口/标签页被反复打开。登录态改由 `login-state` 事件驱动
+  // （`subscribeLoginState`），断流时只在下述运行态或用户主动操作时补查。
+  syncTick();
 });
 
 onBeforeUnmount(() => {
   disposed = true;
   document.removeEventListener('visibilitychange', onVisibilityChange);
+  window.removeEventListener('storage', onStorageHighlight);
+  window.removeEventListener(CHAT_ACTIVE_COMPANY_EVENT, onSamePageHighlight);
   if (unlistenLogin !== null) {
     unlistenLogin();
     unlistenLogin = null;
   }
   if (tickTimer !== null) clearInterval(tickTimer);
-  if (logTimer !== null) clearTimeout(logTimer);
+  stopLogPolling();
   if (saveTimer !== null) clearTimeout(saveTimer);
   cancelPress();
 });
@@ -853,14 +1033,19 @@ watch(
         :login="login"
         :login-busy="loginBusy"
         :action-busy="loginActionBusy"
+        :segs="segs"
+        :llm-prefilter="llmPrefilter"
         @pick="onPickPlatform"
         @login="onLogin"
         @save="onSaveLogin"
         @logout="onLogout"
+        @pick-mode="onPickMode"
+        @update:prefilter="onPrefilter"
       />
 
       <TopbarTail
         :segs="segs"
+        :llm-prefilter="llmPrefilter"
         :tokens-total="tokensTotal"
         :tokens-greet="tokensGreet"
         :tokens-score="tokensScore"
@@ -871,6 +1056,8 @@ watch(
             sensitiveOpen = !sensitiveOpen;
           }
         "
+        @pick-mode="onPickMode"
+        @update:prefilter="onPrefilter"
         @open-config="emit('navigate', 'config')"
         @toggle-theme="
           () => {
@@ -898,23 +1085,7 @@ watch(
       @update:min-score="onMinScore"
     />
 
-    <div v-if="filterOpen" class="card scrape-filter-bar" data-testid="scrape-filter-bar">
-      <FilterPanel
-        :draft="draft"
-        :keywords="keywords"
-        :expects="expects"
-        :saving="saving"
-        :note="filterNote"
-        @update:draft="onDraft"
-        @update:keywords="keywords = $event"
-        @apply="applyNow"
-        @cancel="filterOpen = false"
-        @reset="resetFilter"
-        @read-expect="onReadExpect"
-      />
-    </div>
-
-    <div @pointerdown="onGridPointerDown" @pointermove="onGridPointerMove" @pointerup="cancelPress" @pointerleave="cancelPress" @pointercancel="cancelPress" @click="onGridClick">
+    <div class="job-fill" @pointerdown="onGridPointerDown" @pointermove="onGridPointerMove" @pointerup="cancelPress" @pointerleave="cancelPress" @pointercancel="cancelPress" @click="onGridClick">
       <JobListView
         :jobs="jobs"
         :counts="counts"
@@ -924,19 +1095,49 @@ watch(
         :sort-descending="sortDescending"
         :selection="selection"
         :score-max="scoreMax"
+        :highlight-company="highlightCompany"
         :loading="listLoading"
         :error="listError"
+        :has-more="hasMore"
+        :page-loading="pageLoading"
+        @load-more="loadMore"
         @update:tab="onTab"
         @update:show-all="onShowAll"
         @sort="onSort"
+        @open="onOpenDetail"
         @refresh="refreshList()"
         @toggle="selection = { ...selection, checked: toggleChecked(selection.checked, $event) }"
-        @check-all="selection = setChecked(selection.checked.length > 0 ? [] : jobs.map((j) => j.job_id))"
+        @check-all="(checked: boolean) => (selection = setChecked(checked ? jobs.map((j) => j.job_id) : []))"
         @batch="batch"
         @greet="onGreet"
         @empty-filter="filterOpen = true"
         @empty-start="onStart"
       />
+      <!-- 筛选抽屉：盖在岗位列表原位置上（展开大小 = 列表大小），
+           不再把列表和日志卡往下顶，页面外层也就不出现滚动条。 -->
+      <div
+        v-if="filterOpen"
+        class="card scrape-filter-bar"
+        data-testid="scrape-filter-bar"
+        @click.stop
+        @pointerdown.stop
+        @pointermove.stop
+        @pointerup.stop
+      >
+        <FilterPanel
+          :draft="draft"
+          :keywords="keywords"
+          :expects="expects"
+          :saving="saving"
+          :note="filterNote"
+          @update:draft="onDraft"
+          @update:keywords="keywords = $event"
+          @apply="applyNow"
+          @cancel="filterOpen = false"
+          @reset="resetFilter"
+          @read-expect="onReadExpect"
+        />
+      </div>
     </div>
 
     <LogCard
@@ -955,6 +1156,7 @@ watch(
       :score-max="scoreMax"
       @close="onCloseDetail"
       @act="onDetailAction"
+      @chat="onDetailChat"
     />
 
     <SensitivePanel

@@ -15,7 +15,7 @@ import { PLATFORMS } from '../src/lib_ui/options';
 describe('platform-model / 平台常量（C15：只从 options 常量表取）', () => {
   it('三平台与 options.ts 完全一致', () => {
     expect(platformIds()).toEqual(PLATFORMS.map((p) => p.id));
-    expect(platformIds()).toEqual(['boss', 'zhilian', '51job']);
+    expect(platformIds()).toEqual(['boss']);
   });
 
   it('主平台是 Boss', () => {
@@ -25,7 +25,7 @@ describe('platform-model / 平台常量（C15：只从 options 常量表取）',
 
   it('testid 前缀照原型', () => {
     expect(platformPrefix('boss')).toBe('platform-boss');
-    expect(platformPrefix('51job')).toBe('platform-51job');
+    expect(platformPrefix('boss')).toBe('platform-boss');
   });
 });
 
@@ -42,17 +42,6 @@ describe('platform-model / 卡片视图', () => {
     expect(boss.loginTestId).toBe('platform-boss-login-btn');
   });
 
-  it('未接入的平台永远 is-off、禁选、未被选中', () => {
-    for (const id of ['zhilian', '51job']) {
-      const c = platformCards('boss', false).find((x) => x.id === id)!;
-      expect(c.mode).toBe('off');
-      expect(c.checked).toBe(false);
-      expect(c.loginVisible).toBe(false);
-      expect(c.cardClass).toContain('is-off');
-      expect(c.title).toBe('未接入');
-    }
-  });
-
   it('登录进行中时按钮禁用', () => {
     const boss = platformCards('boss', true).find((c) => c.id === 'boss')!;
     expect(boss.loginDisabled).toBe(true);
@@ -60,20 +49,10 @@ describe('platform-model / 卡片视图', () => {
     expect(idle.loginDisabled).toBe(false);
   });
 
-  it('选中项换到别的 id 时 checked 跟着走', () => {
-    const cards = platformCards('zhilian', false);
-    expect(cards.find((c) => c.id === 'boss')!.checked).toBe(false);
-  });
 });
 
 describe('platform-model / pickPlatform', () => {
-  it('可以切到已接入的平台', () => {
-    expect(pickPlatform('boss', 'boss')).toBe('boss');
-  });
-
   it('未接入的平台不生效', () => {
-    expect(pickPlatform('boss', 'zhilian')).toBe('boss');
-    expect(pickPlatform('boss', '51job')).toBe('boss');
     expect(pickPlatform('boss', 'nope')).toBe('boss');
   });
 
@@ -83,8 +62,10 @@ describe('platform-model / pickPlatform', () => {
 });
 
 describe('platform-model / 登录状态点', () => {
-  it('运行中算未知（还在扫码）', () => {
-    expect(loginDot({ running: true, state: 'ok' })).toBe('unknown');
+  it('颜色与 running 无关：运行中且已登录仍为 ok', () => {
+    expect(loginDot({ running: true, state: 'logged_in' })).toBe('ok');
+    expect(loginDot({ running: true, state: 'ok' })).toBe('ok');
+    expect(loginDot({ running: true, state: 'no_login' })).toBe('bad');
     expect(loginDotClass('unknown')).toBe('status-dot');
   });
 
@@ -96,9 +77,12 @@ describe('platform-model / 登录状态点', () => {
     expect(loginDotLabel('ok')).toBe('已登录');
   });
 
-  it('其余算未登录；完全没状态时是未知', () => {
+  it('明确未登录为 bad；state 缺失/unknown 或没查过为 unknown', () => {
+    expect(loginDot({ state: 'no_login' })).toBe('bad');
     expect(loginDot({ state: 'idle' })).toBe('bad');
-    expect(loginDot({})).toBe('bad');
+    expect(loginDot({})).toBe('unknown');
+    expect(loginDot({ state: 'unknown' })).toBe('unknown');
+    expect(loginDot({ state: 'waiting', running: true })).toBe('unknown');
     expect(loginDot(null)).toBe('unknown');
     expect(loginDot(undefined)).toBe('unknown');
     expect(loginDotClass('bad')).toBe('status-dot is-bad');

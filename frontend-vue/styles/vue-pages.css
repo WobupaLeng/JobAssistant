@@ -192,6 +192,13 @@
   flex-direction: column;
   gap: 4px;
 }
+.dl-more {
+  flex: 0 0 auto;
+  padding: 6px 0 2px;
+  text-align: center;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
 .dl-row {
   display: grid;
   grid-template-columns: 62px 66px 100px minmax(0, 1fr);
@@ -213,6 +220,12 @@
 .dl-row > .dl-verdict {
   font-weight: 540;
   font-variant-numeric: tabular-nums;
+}
+.dl-row.is-in {
+  background: var(--good-soft);
+  border-radius: var(--radius-sm);
+  padding-left: 6px;
+  padding-right: 6px;
 }
 .dl-row.is-in > .dl-verdict {
   color: var(--good);

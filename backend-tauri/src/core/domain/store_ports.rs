@@ -203,6 +203,25 @@ pub trait DecisionStore {
         limit: u32,
         after_id: i64,
     ) -> Result<Vec<DecisionRecord>, Self::Error>;
+
+    /// `id < before_id`，按 `id DESC` 取至多 `limit` 条（向更旧翻页）。
+    ///
+    /// `after_id` 只能取「比游标更新」的记录，无法往下翻，决策日志的无限滚动
+    /// 走这条；`before_id <= 0` 等价于「没有上界」，即从最新一条开始。
+    fn list_decisions_before(
+        &self,
+        limit: u32,
+        before_id: i64,
+    ) -> Result<Vec<DecisionRecord>, Self::Error>;
+
+    /// 决策日志总条数（与翻页无关的全表计数，供界面显示「共 N 条」）。
+    fn count_decisions(&self) -> Result<i64, Self::Error>;
+
+    /// 各决策行为（`decision` 原值）的条数。
+    ///
+    /// 「排除 / 入库 / 其它」怎么分档只在 `frontend-vue/src/lib_ui/logfmt.ts`
+    /// 的 `decisionTone` 里定义（单一真源），后端不重复判定，只按原值分组。
+    fn decision_counts(&self) -> Result<Vec<(String, i64)>, Self::Error>;
 }
 
 /// `app_config` 键值表端口。

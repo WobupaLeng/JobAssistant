@@ -65,14 +65,8 @@ describe('元数据常量', () => {
     expect(slugs).toEqual(['decision', 'runtime']);
     expect(new Set(slugs).size).toBe(2);
   });
-  it('DECISION_FILTERS 五档', () => {
-    expect(DECISION_FILTERS.map((f) => f.slug)).toEqual([
-      'all',
-      'rescore',
-      'reject',
-      'accept',
-      'other',
-    ]);
+  it('DECISION_FILTERS 四档（重算已移除）', () => {
+    expect(DECISION_FILTERS.map((f) => f.slug)).toEqual(['all', 'reject', 'accept', 'other']);
   });
 });
 
@@ -80,8 +74,7 @@ describe('decisionFilterAccepts — 按 tone 判定', () => {
   it('all 收一切', () => {
     expect(decisionFilterAccepts('all', 'default')).toBe(true);
   });
-  it('rescore↔accent / reject↔bad / accept↔primary / other↔default', () => {
-    expect(decisionFilterAccepts('rescore', 'accent')).toBe(true);
+  it('reject↔bad / accept↔primary / other↔default', () => {
     expect(decisionFilterAccepts('reject', 'bad')).toBe(true);
     expect(decisionFilterAccepts('accept', 'primary')).toBe(true);
     expect(decisionFilterAccepts('other', 'default')).toBe(true);

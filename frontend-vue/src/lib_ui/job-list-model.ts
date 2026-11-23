@@ -126,9 +126,8 @@ export function isDeliveredJob(job: Job): boolean {
 /**
  * 界面侧再过滤一次。
  *
- * 后端 `list_jobs` 目前不认 `tab`（命令层没把它转进 `JobQuery`），
- * 所以点「已投递」看到的还是全部。等后端支持后这层是幂等的
- * （`state.rs:266-285`）。
+ * 后端 `list_jobs` 已按 `tab` 过滤并分页（`JobQuery::for_tab`），
+ * 这层是幂等的兜底，不再是唯一过滤。
  */
 export function visibleJobs(jobs: readonly Job[], tab: ListTab, showAll: boolean): Job[] {
   if (showAll) return jobs.slice();
@@ -256,6 +255,8 @@ export interface CardView {
   readonly jobId: string;
   readonly title: string;
   readonly company: string;
+  /** 原始公司名（未做「未知公司」占位替换），仅用于与聊天 Boss 的公司联动匹配。 */
+  readonly rawCompany: string;
   readonly salary: string;
   readonly meta: string[];
   readonly metaText: string;
@@ -289,6 +290,7 @@ export function cardView(job: Job, maxScore: number | null): CardView {
     jobId: job.job_id,
     title,
     company,
+    rawCompany: job.company.trim(),
     salary,
     meta,
     metaText: meta.length > 0 ? meta.join(' / ') : DASH,

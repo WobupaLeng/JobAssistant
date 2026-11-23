@@ -445,6 +445,43 @@ impl DecisionStore for SqliteStore {
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
     }
+
+    fn list_decisions_before(&self, limit: u32, before_id: i64) -> Result<Vec<DecisionRecord>> {
+        let conn = self.conn.lock().expect("存储锁中毒");
+        let mut stmt = conn.prepare(
+            "SELECT id, platform, company_job, decision, reason, created_at, old_score, new_score
+             FROM jd_decisions WHERE ?1 <= 0 OR id < ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let limit = if limit == 0 { 200 } else { limit };
+        let rows = stmt.query_map(params![before_id, i64::from(limit)], |r| {
+            Ok(DecisionRecord {
+                id: r.get(0)?,
+                platform: r.get(1)?,
+                company_job: r.get(2)?,
+                decision: r.get(3)?,
+                reason: r.get(4)?,
+                created_at: r.get(5)?,
+                old_score: r.get::<_, Option<i64>>(6)?.and_then(|v| u8::try_from(v).ok()),
+                new_score: r.get::<_, Option<i64>>(7)?.and_then(|v| u8::try_from(v).ok()),
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+    }
+
+    fn count_decisions(&self) -> Result<i64> {
+        let conn = self.conn.lock().expect("存储锁中毒");
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM jd_decisions", [], |r| r.get(0))?;
+        Ok(n)
+    }
+
+    fn decision_counts(&self) -> Result<Vec<(String, i64)>> {
+        let conn = self.conn.lock().expect("存储锁中毒");
+        let mut stmt = conn.prepare(
+            "SELECT COALESCE(decision, ''), COUNT(*) FROM jd_decisions GROUP BY 1",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+    }
 }
 
 impl ConfigStore for SqliteStore {

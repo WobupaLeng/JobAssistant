@@ -60,12 +60,14 @@ const showStop = computed(() => mode.value !== 'idle');
 <template>
   <div
     class="auto-apply-bar"
-    :class="{ 'rail-auto-bar': true }"
     data-testid="auto-apply-bar"
     :data-mode="mode"
     :title="detail"
   >
     <span :class="labelClass" data-testid="auto-apply-state" aria-live="polite">{{ label }}</span>
+    <!-- 弹性占位：按钮组因此贴住条的右内边，标签留在左边（原先靠 space-between，
+         但 .auto-apply-acts 是 flex 0 0 auto 的内容宽盒，按钮实际跟着标签走）。 -->
+    <span class="spacer" />
     <span class="auto-apply-acts">
       <button
         :class="mainClass"
@@ -83,10 +85,6 @@ const showStop = computed(() => mode.value !== 'idle');
         :disabled="props.busy"
         @click="emit('stop')"
       >结束</button>
-    </span>
-    <span class="auto-apply-counts">
-      <span data-testid="auto-apply-pending">待投递 <b>{{ props.status.pending }}</b></span>
-      <span data-testid="auto-apply-done">已投递 <b>{{ props.status.sent }}</b></span>
     </span>
   </div>
 </template>

@@ -27,6 +27,10 @@ from typing import Any
 
 MAX_LINE_BYTES = 1024 * 1024
 
+# 登录期间「窗口被关 → 重开」的失败上限。超过即放弃：不设上限时，重连持续失败会
+# 每轮重启一次 Chrome，表现为「窗口无限打开」（关一个弹一个）。
+MAX_REOPEN_FAILURES = 3
+
 # 浏览器常驻单车道（scraper/AGENTS.md §4.10：碰浏览器的命令必须排队到同一个
 # 工作线程）。patchright 的 sync API 绑死创建它的线程：旧实现每条命令各起一个
 # 新线程，首条命令的线程一退出，_pw/_ctx 就成了尸体——第二条命令探活必报
@@ -166,10 +170,19 @@ def ensure_context(log_fn: Any) -> Any:
 
     global _cdp_proc, _cdp_port
     with _pw_lock:
-        # 已有可连的 CDP Chrome（上一轮遗留或本模块拉起）就直接复用，不再起新的：
-        # 同一 profile 只能有一个 Chrome 持锁，新起的会把请求移交给旧进程后退出。
-        if _cdp_port is None or not _port_listening(_cdp_port):
-            if _cdp_proc is None or _cdp_proc.poll() is not None:
+        # 已有可连的 CDP Chrome（上一轮遗留或本模块拉起）就直接复用，不再起新的。
+        # 判据必须**先看进程**：同一 profile 只能有一个 Chrome 持锁，新起的进程
+        # 会把请求移交给旧进程后自己退出，而用户看到的是**又一个浏览器窗口**。
+        # 只有确认进程已死（poll 有退出码）才允许再起；否则只做端口探活。
+        if _cdp_proc is None or _cdp_proc.poll() is not None or _cdp_port is None:
+            _cdp_proc, _cdp_port = browser_mod.start_cdp_chrome(str(profile_dir()))
+        elif not _port_listening(_cdp_port):
+            # 进程活着但端口短暂不响应：等一轮再判定，别急着再 spawn 一个 Chrome
+            for _wait in range(10):
+                time.sleep(0.3)
+                if _port_listening(_cdp_port) or _cdp_proc.poll() is not None:
+                    break
+            if _cdp_proc.poll() is not None:
                 _cdp_proc, _cdp_port = browser_mod.start_cdp_chrome(str(profile_dir()))
         if _pw is None:
             from patchright.sync_api import sync_playwright
@@ -360,6 +373,8 @@ def _run_login(payload: dict[str, Any]) -> None:
 
         platform = payload.get("platform") or "boss"
         timeout_s = int(payload.get("timeout_sec") or 900)
+        # 重开窗口的失败上限：超过就放弃，避免「关一个弹一个」的死循环
+        reopen_failures = 0
 
         log("info", f"准备打开 {platform} 登录页")
         ctx = ensure_context(log)
@@ -389,14 +404,24 @@ def _run_login(payload: dict[str, Any]) -> None:
                     except Exception:
                         pass
                 return
-            # 浏览器被用户关掉：重新拉起来，别让登录流程卡死
+            # 浏览器被用户关掉：重新拉起来，别让登录流程卡死。
+            # **必须退避**：重连若持续失败（profile 被占 / Chrome 起不来），
+            # 每 1.5 秒重启一次就是「窗口无限打开」——用户点关闭，下一个立刻弹出。
             try:
                 ctx.cookies()
             except Exception:
-                log("warn", "登录窗口被关闭，正在重新打开…")
+                if reopen_failures >= MAX_REOPEN_FAILURES:
+                    raise RuntimeError(
+                        f"登录窗口连续 {MAX_REOPEN_FAILURES} 次重新打开失败，已放弃"
+                    )
+                reopen_failures += 1
+                log("warn", f"登录窗口被关闭，正在重新打开（第 {reopen_failures} 次）…")
+                time.sleep(min(2.0 * reopen_failures, 8.0))
                 _ctx = None
                 ctx = ensure_context(log)
                 page = browser_mod.find_page_for(ctx, platform, log)
+                reopen_failures = 0
+                continue
             _stop.wait(1.5)
 
         if _stop.is_set():
@@ -662,12 +687,17 @@ def _run_session_open(cmd: dict[str, Any]) -> None:
                 # 没有就新开一个并 goto——它就是唯一真源，别在这里另写一份 goto
                 chat_mod.ChatClient(log).chat_page(ctx)
             elif not target:
-                # 无目标页时，把启动留下的 about:blank 直接导航到平台首页，
-                # 避免用户面前停着一片空白
-                home = browser_mod.PLATFORM_HOME.get(platform)
-                if home:
-                    page = browser_mod.reuse_or_new_page(ctx)
-                    page.goto(home, wait_until="domcontentloaded", timeout=45_000)
+                # 无目标页 = **被动查询登录态**，只探测 cookie，不做任何导航。
+                #
+                # 这条分支曾经会 `reuse_or_new_page()` + `goto(首页)`，于是前端 5 秒
+                # tick 里那次 `login_status` 每轮都把浏览器导航一次；首页导航完就不再
+                # 是 about:blank，下一轮找不到空白页就 `ctx.new_page()` 再开一个
+                # ——用户看到的就是「浏览器窗口无限打开」。
+                #
+                # 首页导航属于「打开浏览器」这个主动动作（`session_open`），
+                # 查询登录态不该改浏览器状态：`login_status` 的 Rust 注释也写明
+                # 「不 spawn、不 session.open、不拉起 Chrome」。
+                pass
         emit({"id": cid, "ok": True, "data": {
             "logged_in": bool(logged),
             "state": "logged_in" if logged else "no_login",

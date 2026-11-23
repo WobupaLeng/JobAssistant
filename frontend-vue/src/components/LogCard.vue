@@ -13,7 +13,6 @@
 import { computed } from 'vue';
 import {
   lastTitleText,
-  progressStats,
   srSummary,
   type FeedLine,
   type ScrapeProgressLike,
@@ -45,7 +44,6 @@ const emit = defineEmits<{
   (e: 'open-decisions'): void;
 }>();
 
-const stats = computed(() => progressStats(props.progress));
 const summary = computed(() => srSummary(props.progress));
 const last = computed(() => lastTitleText(props.progress.last_title));
 const spec = computed(() =>
@@ -68,12 +66,6 @@ const spec = computed(() =>
       </button>
     </div>
     <div class="card-body">
-      <div class="tb-stats" data-testid="scrape-progress">
-        <div v-for="s in stats" :key="s.testId" class="stat" :class="s.tone" :data-testid="s.testId">
-          <span class="stat-label">{{ s.label }}</span>
-          <span class="stat-value" :class="s.tone">{{ s.value }}</span>
-        </div>
-      </div>
       <p class="sr-only" data-testid="scrape-sr-summary" aria-live="polite">{{ summary }}</p>
       <ol class="log-rows" data-testid="log-rows">
         <li v-if="lines.length === 0" class="empty" data-testid="log-empty">

@@ -135,8 +135,9 @@ export function startDisabled(starting: boolean, running: boolean): boolean {
 /**
  * 数据库里三条 `status` 之外，计算模式的选择。
  *
- * LLM 打分本轮**不可选**（`scrape-mode-llm-seg` 恒 disabled + aria-disabled）：
- * 那需要配置里填 key，没配时选了只会每个岗位报一次错。
+ * 大模型打分可选中：选中后顶栏多一个 0-100 的初筛输入（`llm_prefilter`），
+ * 语义是「规则分低于该值就不调大模型」，默认 50（`DEFAULT_LLM_PREFILTER`）。
+ * 初筛判定在后端 `scoring_llm::decide`，前端只负责选值与落库。
  */
 export interface ScoreModeSeg {
   readonly key: 'rule' | 'llm';
@@ -157,13 +158,27 @@ export function scoreModeSegs(selected: 'rule' | 'llm'): ScoreModeSeg[] {
     },
     {
       key: 'llm',
-      label: 'LLM 打分',
-      // LLM 恒不激活：即使配置里有 key，本轮也不给选（SPEC 裁决）。
-      active: false,
-      disabled: true,
+      label: '大模型打分',
+      active: selected === 'llm',
+      disabled: false,
       testId: 'scrape-mode-llm-seg',
     },
   ];
+}
+
+/** 初筛线默认值，与后端 `DEFAULT_LLM_PREFILTER` / `LLM_PREFILTER_DEFAULT` 对齐。 */
+export const LLM_PREFILTER_DEFAULT = 50;
+
+/** 初筛线上限（百分制）。 */
+export const LLM_PREFILTER_MAX = 100;
+
+/** 初筛线夹到 0-100 的整数；非数字回落到默认 50（输入框被清空时不写脏值）。 */
+export function clampPrefilter(v: unknown): number {
+  // 空串不能被 Number() 当成 0：输入框清空时回落默认值，而不是偷偷设成「不设初筛」
+  if (typeof v === 'string' && v.trim() === '') return LLM_PREFILTER_DEFAULT;
+  const n = typeof v === 'number' ? v : Number(v);
+  if (!Number.isFinite(n)) return LLM_PREFILTER_DEFAULT;
+  return Math.min(LLM_PREFILTER_MAX, Math.max(0, Math.trunc(n)));
 }
 
 /** 积分显示：「1,234」千分位；数字越小越不该占位。 */

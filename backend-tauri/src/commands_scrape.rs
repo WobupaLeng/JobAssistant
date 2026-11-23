@@ -528,17 +528,27 @@ pub fn login_status(
     platform: Option<String>,
 ) -> CmdResult<LoginStatusReply> {
     let platform = platform.unwrap_or_else(|| scrape::DEFAULT_PLATFORM.to_string());
-    let script_dir = sidecar_script_dir()?;
     let store_arc = store_handle(&store)?;
     // 标记是库内状态，与本次 sidecar 查询成败无关：两个分支都要填。
     let saved = login_marker_saved(store_arc.as_ref(), &platform);
+    // 被动查询：sidecar 不在线（无会话 / 子进程已退出）时直接降级返回，
+    // **不 spawn、不 session.open、不拉起 Chrome**。前端 5s tick 会反复调用本命令，
+    // 若在此处 ensure_session_locked，就会形成 sidecar/Chrome 循环拉起。
+    // 拉起浏览器只属于「登录 / 抓取」的主动路径（login_start / scrape_start）。
     let handle = {
-        let mut guard = state.0.lock().map_err(|_| "抓取锁已中毒".to_string())?;
-        scrape::ensure_session_locked(&mut guard, script_dir, store_arc)?;
-        guard
-            .as_ref()
-            .map(|s| s.handle_clone())
-            .ok_or_else(|| "sidecar 尚未启动".to_string())?
+        let guard = state.0.lock().map_err(|_| "抓取锁已中毒".to_string())?;
+        match guard.as_ref().map(|s| s.handle_clone()) {
+            Some(h) if h.is_alive() => h,
+            _ => {
+                return Ok(LoginStatusReply {
+                    platform,
+                    state: "unknown".to_string(),
+                    running: false,
+                    message: "抓取进程未启动，点「扫码登录」或开始抓取后可查看登录态".to_string(),
+                    saved,
+                });
+            }
+        }
     };
     // 锁外等回执：登录态查询要 reload 一次页面，几秒钟很正常
     match crate::commands_chat::request_chat(

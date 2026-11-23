@@ -69,6 +69,11 @@ export function startAutoQueue(hooks: AutoQueueHooks): AutoQueue {
     if (status !== null && shouldSend(Date.now(), status, inFlight)) {
       await sendOne();
     }
+    // 后端已不在跑（暂停 / 结束 / 上次未启动）：停止轮询，避免每秒一次 status IPC。
+    if (status !== null && !status.running) {
+      alive = false;
+      return;
+    }
     schedule(AUTO_TICK_MS);
   }
 

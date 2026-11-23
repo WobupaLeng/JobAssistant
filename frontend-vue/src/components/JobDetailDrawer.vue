@@ -53,6 +53,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'act', action: DetailAction): void;
+  (e: 'chat', jobId: string): void;
 }>();
 
 const panel = ref<HTMLElement | null>(null);
@@ -159,6 +160,12 @@ const deliverMeta = computed(() =>
 function act(a: DetailAction): void {
   if (!j.value) return;
   emit('act', a);
+}
+
+/** 「去跟 Boss 聊」：把当前岗位交给页面写草稿，由聊天层同屏消费（不是写操作，不走 act）。 */
+function chatWithBoss(): void {
+  if (!j.value) return;
+  emit('chat', j.value.job_id);
 }
 
 /** 供页面在动作成功后同步本地态（避免等下一次 refresh 才更新）。 */
@@ -298,6 +305,7 @@ defineExpose({ patch, closeDetail, jdLoading, jdError });
       >
         {{ deliverMeta.label }}
       </button>
+      <button class="btn btn-ghost" data-testid="job-detail-chat" @click="chatWithBoss">去跟 Boss 聊</button>
       <span class="spacer" />
       <span class="detail-foot-note" data-testid="job-detail-foot-note">
         {{ rejected ? '该岗位已被规则否决' : '单条操作，多选用列表批量条' }}

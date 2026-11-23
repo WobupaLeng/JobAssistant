@@ -10,14 +10,13 @@
  */
 import { computed } from 'vue';
 
-import type { ChatMessage, Friend, GreetReply, ResumeItem } from '../../api/types';
+import type { ChatMessage, Friend, GreetReply } from '../../api/types';
 import {
   CHAT_DETACH_EMPTY_SUB,
   CHAT_DETACH_EMPTY_TITLE,
   CHAT_STATE_ANNOUNCE_TEXT,
   RECALL_TEXT,
   TYPING_TEXT,
-  headSub,
   msgTestId,
   senderSlug,
   splitThread,
@@ -29,9 +28,6 @@ const props = withDefaults(
     friend: Friend | null;
     messages: readonly ChatMessage[];
     loadingMessages?: boolean;
-    resumes?: readonly ResumeItem[];
-    resumesOpen?: boolean;
-    resumesLoaded?: boolean;
     greet?: GreetReply | null;
     generating?: boolean;
     sendingGreet?: boolean;
@@ -39,9 +35,6 @@ const props = withDefaults(
   }>(),
   {
     loadingMessages: false,
-    resumes: () => [],
-    resumesOpen: false,
-    resumesLoaded: false,
     greet: null,
     generating: false,
     sendingGreet: false,
@@ -51,8 +44,6 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: 'generate-greet'): void;
-  (e: 'toggle-resumes'): void;
-  (e: 'send-resume', resumeId: string): void;
   (e: 'recall'): void;
   (e: 'send-greet'): void;
   (e: 'greet-to-draft'): void;
@@ -60,6 +51,10 @@ const emit = defineEmits<{
 }>();
 
 const split = computed(() => splitThread(props.messages));
+
+/* `peerName` / `subText` 随 `chat-head` 整行一起移除：这条头行已不再渲染，
+   留在脚本里的计算属性只会变成没人读的死代码。Boss 列表用
+   `chat-model.friendName` / `friendLine` 取名与副行。 */
 
 function bubbleClass(sender: string): string {
   const slug: SenderSlug | string = senderSlug(sender);
@@ -78,15 +73,7 @@ function greetChip(greet: GreetReply): string {
   return greet.tokens > 0 ? `大模型 · ${greet.tokens} tokens` : '大模型';
 }
 
-function confirmSendResume(resume: ResumeItem): void {
-  const peer = props.friend === null ? '' : props.friend.name || props.friend.company;
-  const ok = window.confirm(`确定把简历「${resume.name}」发给「${peer}」？发出去之后无法收回。`);
-  if (ok) emit('send-resume', resume.resume_id);
-}
 
-function confirmRecall(): void {
-  if (window.confirm('确定撤回最近一条自己发的消息？')) emit('recall');
-}
 </script>
 
 <template>
@@ -101,58 +88,14 @@ function confirmRecall(): void {
     </div>
 
     <template v-else>
-      <div class="chat-head">
-        <div class="chat-head-text">
-          <span class="chat-head-name" data-testid="chat-head-name">
-            {{ props.friend.name || props.friend.uid }}
-          </span>
-          <span class="chat-head-sub" data-testid="chat-head-sub">{{ headSub(props.friend) }}</span>
-        </div>
-        <div class="chat-head-actions">
-          <button
-            class="btn btn-sm btn-ghost"
-            type="button"
-            data-testid="chat-greet-btn"
-            :disabled="props.generating"
-            @click="emit('generate-greet')"
-          >{{ props.generating ? '生成中…' : '生成打招呼' }}</button>
-          <button
-            class="btn btn-sm btn-ghost"
-            type="button"
-            data-testid="chat-resume-btn"
-            :aria-expanded="props.resumesOpen ? 'true' : 'false'"
-            @click="emit('toggle-resumes')"
-          >选简历</button>
-          <button
-            class="btn btn-sm btn-ghost"
-            type="button"
-            data-testid="chat-recall-btn"
-            :disabled="props.recalling"
-            @click="confirmRecall"
-          >{{ props.recalling ? '撤回中…' : '撤回上一条' }}</button>
-        </div>
-      </div>
-
-      <div v-if="props.resumesOpen" class="resume-bar" data-testid="chat-resume-bar">
-        <span class="section-label">简历</span>
-        <button
-          v-for="r in props.resumes"
-          :key="r.resume_id"
-          class="chip chip-accent as-btn"
-          type="button"
-          :data-testid="`chat-resume-${r.resume_id}`"
-          @click="confirmSendResume(r)"
-        >{{ r.name }}</button>
-        <span v-if="props.resumesLoaded && props.resumes.length === 0" class="cfg-hint" data-testid="chat-resume-empty">
-          没读到简历列表。确认 Boss 账号里已上传附件简历。
-        </span>
-        <span class="spacer" />
-        <button class="btn btn-sm btn-ghost" type="button" data-testid="chat-resume-close" @click="emit('toggle-resumes')">
-          收起
-        </button>
-      </div>
+      <!-- 对话头整行已移除（用户裁决）：HR 名与「生成打招呼 / 选简历」原本挤在
+           这一条里，公司/岗位字段一缺就只剩两个按钮悬在中间。名字已在展开态的
+           左上标题行（`.chat-detach-head`）显示，两个按钮下沉到 Boss 列表的
+           每一行（`FriendList.vue`），那里才有「对谁打招呼、给谁发简历」的上下文。 -->
 
       <div class="rail-body-slot" data-testid="chat-detach-slot">
+        <!-- 顶部提示条（发送失败 / 未登录 / 未连接等）：由页面经 notices 插槽提供，贴在消息流最上方。 -->
+        <slot name="notices" />
         <div class="chat-feed rail-body" data-testid="chat-detach-thread">
           <div v-if="props.loadingMessages && split.bubbles.length === 0" class="rail-state">
             <span class="skel-line" />

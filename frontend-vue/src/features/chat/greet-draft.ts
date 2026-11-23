@@ -11,6 +11,8 @@
 export interface GreetDraft {
   readonly company: string;
   readonly text: string;
+  /** 被点击的岗位 id：发送成功后据此只标记该岗位已投递（同公司其它岗位不动）。 */
+  readonly jobId: string;
   /** 生成时间（毫秒）。用于丢弃过期的意图。 */
   readonly atMs: number;
 }
@@ -21,10 +23,11 @@ export const GREET_DRAFT_TTL_MS = 10 * 60 * 1000;
 let current: GreetDraft | null = null;
 
 /** 写入意图。重复点不同岗位会覆盖——只保留最后一次。 */
-export function setGreetDraft(company: string, text: string, nowMs = now()): void {
+export function setGreetDraft(company: string, text: string, nowMs = now(), jobId = ''): void {
   current = {
     company: company.trim(),
     text,
+    jobId: jobId.trim(),
     atMs: nowMs,
   };
 }

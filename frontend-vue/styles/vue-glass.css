@@ -48,8 +48,6 @@
 
 /* 各宿主直接内容子项压在克隆层（z-index:0）之上：job-card / drawer / sensitive-panel。
  * 内容默认静态定位会被定位的克隆层盖过，故显式 relative + z-index:1（只动这些子项，不碰宿主布局）。 */
-.glass-l2 > .job-card-top,
-.glass-l2 > .job-meta,
 .glass-l2 > .job-info,
 .glass-l2 > .drawer-head,
 .glass-l2 > .drawer-body,

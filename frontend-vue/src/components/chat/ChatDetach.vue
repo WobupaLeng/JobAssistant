@@ -36,24 +36,32 @@ const emit = defineEmits<{ (e: 'close'): void }>();
     :aria-hidden="props.open ? 'false' : 'true'"
     :hidden="!props.open"
   >
-      <div class="chat-detach-head" data-testid="chat-detach-head">
-      <span class="card-title" data-testid="chat-detach-title">
-        {{ CHAT_DETACH_TITLE }}
-        <span class="chip" data-testid="chat-detach-count">{{ props.count }}</span>
-      </span>
-      <span class="chat-detach-sub" data-testid="chat-detach-sub">{{ headSub(props.friend) }}</span>
-      <slot name="head" />
-      <span class="spacer" />
-      <button
-        class="btn btn-sm btn-ghost"
-        type="button"
-        data-testid="chat-detach-close-btn"
-        title="Esc"
-        @click="emit('close')"
-      >{{ CHAT_CLOSE_LABEL }}</button>
+    <div class="chat-detach-head" data-testid="chat-detach-head">
+      <!-- 两行：第一行是标题行（标题 / 计数 / 副行 / 自动投递按钮），
+           第二行是自动投递条的计数（待投递 / 已投递，role="head" 插槽）。
+           计数原先挤在标题行里，和「开始自动投递」抢同一行的宽度。 -->
+      <div class="chat-detach-head-row">
+        <span class="card-title" data-testid="chat-detach-title">
+          {{ CHAT_DETACH_TITLE }}
+          <span class="chip" data-testid="chat-detach-count">{{ props.count }}</span>
+        </span>
+        <span class="chat-detach-sub" data-testid="chat-detach-sub">{{ headSub(props.friend) }}</span>
+        <slot name="head-sub" />
+        <slot name="head" />
+      </div>
     </div>
 
     <div class="chat-detach-body" data-testid="chat-detach-body">
+      <button
+        class="chat-detach-collapse"
+        type="button"
+        data-testid="chat-detach-close-btn"
+        title="Esc"
+        aria-label="收起对话框"
+        @click="emit('close')"
+      >
+        <span class="chat-detach-collapse-label">{{ CHAT_CLOSE_LABEL }}</span>
+      </button>
       <div class="chat-detach-rail" data-testid="chat-detach-rail">
         <span class="sr-only">{{ CHAT_DETACH_RAIL_TITLE }}</span>
         <slot name="rail" />

@@ -246,12 +246,17 @@ pub fn mark_delivered(state: tauri::State<'_, StoreState>, args: JobIdsArgs) -> 
 
 // ---------- 决策记录 ----------
 
-/// 决策记录入参。`afterId` 是游标（取更早的记录时传当前最小 id）。
+/// 决策记录入参。
+///
+/// 两种翻页方向互斥：`afterId` 取「比它更新」的记录（追新），
+/// `beforeId` 取「比它更旧」的记录（决策日志的无限滚动，传上一页最后一条的 id）。
 #[derive(Debug, Deserialize)]
 pub struct DecisionsArgs {
     pub limit: Option<u32>,
     #[serde(default, alias = "afterId")]
     pub after_id: Option<i64>,
+    #[serde(default, alias = "beforeId")]
+    pub before_id: Option<i64>,
 }
 
 /// 决策记录列表（分数变化优先取 old/new 列；旧行两列为 NULL）。
@@ -261,8 +266,39 @@ pub fn list_decisions(
     args: DecisionsArgs,
 ) -> CmdResult<Vec<DecisionRecord>> {
     let limit = args.limit.unwrap_or(0);
-    let after = args.after_id.unwrap_or(0);
-    with_store(&state, |s| s.list_decisions(limit, after).map_err(store_err))
+    match args.before_id {
+        Some(before) => {
+            with_store(&state, |s| s.list_decisions_before(limit, before).map_err(store_err))
+        }
+        None => {
+            let after = args.after_id.unwrap_or(0);
+            with_store(&state, |s| s.list_decisions(limit, after).map_err(store_err))
+        }
+    }
+}
+
+/// 决策日志总条数（界面「共 N 条」用，不受翻页条数影响）。
+#[tauri::command]
+pub fn count_decisions(state: tauri::State<'_, StoreState>) -> CmdResult<i64> {
+    with_store(&state, |s| s.count_decisions().map_err(store_err))
+}
+
+/// 单条决策行为的条数（`decision` 是库里的原值，未做中文换算）。
+#[derive(Debug, Serialize)]
+pub struct DecisionCount {
+    pub decision: String,
+    pub count: i64,
+}
+
+/// 各决策行为的条数。分档（排除/入库/其它）由前端按 `decisionTone` 归属，
+/// 后端只负责按原值 `GROUP BY`，避免两套口径漂移。
+#[tauri::command]
+pub fn decision_counts(state: tauri::State<'_, StoreState>) -> CmdResult<Vec<DecisionCount>> {
+    let rows = with_store(&state, |s| s.decision_counts().map_err(store_err))?;
+    Ok(rows
+        .into_iter()
+        .map(|(decision, count)| DecisionCount { decision, count })
+        .collect())
 }
 
 /// 数据库概览：总条数、各打分制条数。用于 UI 顶部的数据健康提示。
@@ -853,6 +889,19 @@ mod tests {
             .expect("全空应取默认值");
         assert_eq!(dflt.limit, None);
         assert_eq!(dflt.after_id, None);
+        assert_eq!(dflt.before_id, None);
+    }
+
+    #[test]
+    fn decisions_args_accept_camel_before_id() {
+        let args = serde_json::from_value::<DecisionsArgs>(serde_json::json!({
+            "limit": 10,
+            "beforeId": 7
+        }))
+        .expect("驼峰 beforeId 应可解析");
+        assert_eq!(args.limit, Some(10));
+        assert_eq!(args.before_id, Some(7));
+        assert_eq!(args.after_id, None);
     }
 
     #[test]

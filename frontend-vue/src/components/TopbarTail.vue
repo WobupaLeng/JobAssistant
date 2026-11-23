@@ -24,48 +24,63 @@
  *   （tokens_greet/tokens_score），零新增 invoke。Rust 核心暂无累计写入路径，
  *   读数为旧库遗留值（见 HANDOFF 偏差②更正），前端不造数。
  */
-import { tokenText, type ScoreModeSeg } from '../lib_ui/scrape-panel-model';
+import { computed } from 'vue';
+import {
+  clampPrefilter,
+  LLM_PREFILTER_DEFAULT,
+  LLM_PREFILTER_MAX,
+  tokenText,
+  type ScoreModeSeg,
+} from '../lib_ui/scrape-panel-model';
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     segs: readonly ScoreModeSeg[];
+    llmPrefilter?: number;
     tokensTotal?: number;
     tokensGreet?: number;
     tokensScore?: number;
     sensitiveOpen?: boolean;
     themeLabel?: string;
   }>(),
-  { tokensTotal: 0, tokensGreet: 0, tokensScore: 0, sensitiveOpen: false, themeLabel: '深色' },
+  {
+    llmPrefilter: LLM_PREFILTER_DEFAULT,
+    tokensTotal: 0,
+    tokensGreet: 0,
+    tokensScore: 0,
+    sensitiveOpen: false,
+    themeLabel: '深色',
+  },
 );
 
 const emit = defineEmits<{
   (e: 'pick-mode', key: 'rule' | 'llm'): void;
+  (e: 'update:prefilter', value: number): void;
   (e: 'toggle-sensitive'): void;
   (e: 'open-config'): void;
   (e: 'toggle-theme'): void;
 }>();
+
+/**
+ * 大模型打分被选中时才露初筛输入框——规则打分下它没有意义，
+ * 常驻会把顶栏撑乱（SPEC §11.3 的落位顺序不变）。
+ */
+const llmActive = computed(() => props.segs.some((s) => s.key === 'llm' && s.active));
+
+function onPrefilterInput(ev: Event): void {
+  const el = ev.target as HTMLInputElement | null;
+  if (!el) return;
+  const next = clampPrefilter(el.value);
+  // 被夹过的值要写回输入框，否则用户看到「200」但库里是 100
+  el.value = String(next);
+  if (next !== props.llmPrefilter) emit('update:prefilter', next);
+}
 </script>
 
 <template>
   <div class="tb-tail">
-    <div class="segmented" role="radiogroup" aria-label="打分方式" data-testid="scrape-mode-segmented">
-      <button
-        v-for="s in segs"
-        :key="s.key"
-        class="seg"
-        :class="{ 'is-active': s.active }"
-        type="button"
-        role="radio"
-        :aria-checked="s.active"
-        :disabled="s.disabled"
-        :aria-disabled="s.disabled"
-        :title="s.disabled ? '大模型打分暂未开放，当前只支持规则打分' : undefined"
-        :data-testid="s.testId"
-        @click="!s.disabled && emit('pick-mode', s.key)"
-      >
-        {{ s.label }}
-      </button>
-    </div>
+    <!-- 打分方式分段已移到 PlatformCard（紧贴 Boss 登录按钮之后）。 -->
+    <!-- 初筛线已移到 PlatformCard（紧贴大模型打分之后）。 -->
     <button
       class="btn btn-sm btn-ghost"
       type="button"

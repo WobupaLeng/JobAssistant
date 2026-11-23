@@ -85,7 +85,7 @@ describe('greet-draft 的消费语义（只读消费，不改模块）', () => {
     const friends = [friend({ uid: 'u9', company: '别的公司' })];
     expect(matchFriendByCompany(friends, '星瀚科技')).toBeNull();
     const placeholder = pendingFriend('job-7', '星瀚科技', '星瀚科技');
-    expect(placeholder.name).toBe('待打招呼 · 星瀚科技');
+    expect(placeholder.name).toBe('星瀚科技');
     expect(isPendingFriend(placeholder)).toBe(true);
     // 占位会话只能走「生成打招呼 → 发送这句」，不能走 chat_send。
     expect(isSendableFriend(placeholder)).toBe(false);
@@ -309,6 +309,14 @@ describe('CSS 契约（C6 同族）', () => {
 
   it('展开态右栏让位（.is-chat-open 下 chat-rail 不显示）', () => {
     expect(css).toMatch(/\.app-shell\.is-chat-open \.chat-rail\s*\{\s*display:\s*none/);
+  });
+
+  it('展开态计数与自动投递条同一行，计数靠 margin-left:auto 整组吸右', () => {
+    // 计数（`.rail-counts`）与条同在标题行 `.chat-detach-head-row`，计数用
+    // `margin-left: auto` 把自己与条推到行尾；条是定宽项（`0 0 auto`），不再抢剩余空间。
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(rules).toMatch(/\.chat-detach-head-row > \.rail-counts\s*\{[^}]*margin:\s*0 0 0 auto/);
+    expect(rules).toMatch(/\.chat-detach-head \.auto-apply-bar\s*\{[^}]*flex:\s*0 0 auto/);
   });
 
   it('M3 入场动效：rail-error 带 rail-in、对话框气泡带 bubble-in（原型 L1179/L1196）', () => {

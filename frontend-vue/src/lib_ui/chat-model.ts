@@ -150,7 +150,7 @@ export const CHAT_EMPTY_TITLE = '没有会话';
 export const CHAT_DETACH_EMPTY_TITLE = '在左侧 Boss 列表点一位，开始聊天';
 export const CHAT_DETACH_EMPTY_SUB = '点左侧 Boss 列表里的任意一位即可查看聊天';
 /** 收起按钮逐字（§5）。 */
-export const CHAT_CLOSE_LABEL = '收起对话框 ›';
+export const CHAT_CLOSE_LABEL = '收起对话框';
 /** 输入框占位与发送按钮逐字（§5）。 */
 export const CHAT_COMPOSE_PLACEHOLDER = '输入消息…';
 export const CHAT_SEND_LABEL = '发送';
@@ -271,11 +271,14 @@ export function matchFriendByCompany(friends: readonly Friend[], company: string
  *
  * uid 用 `g` + 岗位标识（SPEC §16.5：`uid='g'+job.id`）。这类会话后端不认识，
  * 所以只能走到「生成打招呼 → 发送这句」那条路，不能 chat_send。
+ *
+ * 名字只用公司名：这一行就是 Boss 好友列表的「公司」那一列，前缀「待打招呼 · 」
+ * 曾挤掉公司名本身的可用宽度（且和对话区那排按钮的语义重复），已删除。
  */
 export function pendingFriend(uid: string, company: string, title = ''): Friend {
   return {
     uid: `${PENDING_UID_PREFIX}${uid}`,
-    name: `待打招呼 · ${company}`,
+    name: String(company ?? '').trim(),
     company,
     title,
     last_msg: '',
@@ -290,19 +293,61 @@ export function isPendingFriend(friend: Friend): boolean {
   return friend.uid.startsWith(PENDING_UID_PREFIX) && friend.last_time === '' && friend.unread === 0;
 }
 
-/**
- * 该会话能不能用 `chat_send` 发消息。
- *
- * 占位会话（`待打招呼 · 公司`）后端不认识它的 uid，只能走
- * 「生成打招呼 → 发送这句」，直接 chat_send 会拿回一条 uid 不存在的错误。
- */
+/** 该会话能不能用 `chat_send` 发消息（占位会话的 uid 以 `g` 开头）。 */
 export function isSendableFriend(friend: Friend): boolean {
-  return !friend.name.startsWith('待打招呼 · ');
+  return !isPendingFriend(friend);
 }
 
 /** 会话列表 + 占位（占位永远排在最前）。 */
 export function withPending(head: Friend[], pending: Friend | null): Friend[] {
   return pending === null ? head : [pending, ...head];
+}
+
+/* ------------------------------------------------------------------ *
+ * 占位会话持久化：刷新页面不得丢掉「生成打招呼」刚加入的 HR。
+ * 只存占位字段（无密钥、无 cookie），读写失败一律静默降级为空。
+ * ------------------------------------------------------------------ */
+
+export const PENDING_STORAGE_KEY = 'chat.pendingFriends';
+
+/** 跨页联动键：当前展开聊天的 Boss 公司名（聊天页写，概览页读）。 */
+export const CHAT_ACTIVE_COMPANY_KEY = 'chat.activeCompany';
+/** 同页事件名：写入方在本标签页触发，概览页监听它（storage 事件对写入方不触发）。 */
+export const CHAT_ACTIVE_COMPANY_EVENT = 'chat-active-company';
+
+export function loadPendingFriends(storage: Storage | null = safeStorage()): Friend[] {
+  if (storage === null) return [];
+  try {
+    const raw = storage.getItem(PENDING_STORAGE_KEY);
+    if (raw === null) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (f): f is Friend =>
+        typeof f === 'object' && f !== null && typeof (f as Friend).uid === 'string' && isPendingFriend(f as Friend),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function savePendingFriends(friends: readonly Friend[], storage: Storage | null = safeStorage()): void {
+  if (storage === null) return;
+  try {
+    const pending = friends.filter(isPendingFriend);
+    if (pending.length === 0) storage.removeItem(PENDING_STORAGE_KEY);
+    else storage.setItem(PENDING_STORAGE_KEY, JSON.stringify(pending));
+  } catch {
+    /* 配额满 / 隐私模式：静默降级 */
+  }
+}
+
+function safeStorage(): Storage | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage;
+  } catch {
+    return null;
+  }
 }
 
 /* ------------------------------------------------------------------ *

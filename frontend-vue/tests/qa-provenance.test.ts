@@ -32,10 +32,10 @@ describe('选项表注释不再指向不存在的规格文件', () => {
   });
 });
 
-describe('平台名与原型逐字一致（原型 1379 用「51job」）', () => {
-  it('PLATFORMS 三张卡的展示名', () => {
-    expect(PLATFORMS.map((p) => p.name)).toEqual(['Boss直聘', '智联招聘', '51job']);
-    expect(platformName('51job')).toBe('51job');
+describe('平台名与原型逐字一致', () => {
+  it('PLATFORMS 仅保留 Boss直聘 卡片', () => {
+    expect(PLATFORMS.map((p) => p.name)).toEqual(['Boss直聘']);
+    expect(platformName('boss')).toBe('Boss直聘');
   });
 
   it('「前程无忧」这个别名不再出现在选项表里', () => {
@@ -43,6 +43,6 @@ describe('平台名与原型逐字一致（原型 1379 用「51job」）', () =>
   });
 
   it('platformCards() 的卡片视图沿用同一批名字', () => {
-    expect(platformCards('boss', false).map((c) => c.name)).toEqual(['Boss直聘', '智联招聘', '51job']);
+    expect(platformCards('boss', false).map((c) => c.name)).toEqual(['Boss直聘']);
   });
 });

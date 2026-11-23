@@ -44,6 +44,7 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  flex: 0 0 auto;
   padding: 10px 14px 6px;
 }
 
@@ -77,9 +78,10 @@
   border-color: var(--hairline-strong);
 }
 
+/* 选中页签与卡片选中 / 联动同一套主题色：主色柔底 + 柔边，不再用实色描边。 */
 .pill.is-active {
   background: var(--primary-soft);
-  border-color: var(--primary);
+  border-color: var(--primary-soft);
   color: var(--text-1);
 }
 
@@ -134,6 +136,7 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  flex: 0 0 auto;
   margin: 0 14px 8px;
   padding: 5px 10px;
   min-height: 30px;
@@ -168,16 +171,64 @@
   display: none;
 }
 
-/* ---------- 卡片网格：3 列 → 2 列 → 1 列（唯一断点是 1599px） ---------- */
+/* 卡片网格：3 列 → 2 列 → 1 列（唯一断点是 1599px） */
+/* 网格吃满岗位列表卡剩下的高度（页面上方与底部日志卡定高，见 src/app.css 的
+ * .page-dashboard），行高由 --job-card-h 固定，窗口越高露出的行数越多；
+ * 溢出在卡片内部滚动，滚动条隐藏（不占位、不可见），由滚轮 / 触摸滚动。 */
 .job-grid {
+  --job-card-h: 132px;
+  /* 卡片间隙与网格内边距同档（14px，对齐 .app-body 的左右留白）：10px 间距 + 1px
+   * 发丝边在 132px 的小卡片上仍像连成一片，贴容器边也只剩 6px。 */
+  --job-grid-gap: 14px;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  /* 行高就是 --job-card-h：`minmax(…, auto)` 会让「内容稍多」的行整行长高，
+   * 三行屏幕就装不下（实测露出两行半、第三行被裁）。卡片内容已按该高度排好。 */
+  /* 行高固定为 --job-card-h（不拉伸）：三个 tab 的卡片尺寸完全一致，
+   * 岗位多于三行时落到隐式行，同样是 --job-card-h，不会重叠。 */
+  grid-template-rows: repeat(3, var(--job-card-h));
+  grid-auto-rows: var(--job-card-h);
+  gap: var(--job-grid-gap);
   align-content: start;
+  /* 同列卡片要等高：卡片是 flex 列，高度随内容（有无地址行 / 分数行）变化；
+   * `align-items: start` 会让每张卡只占自身高度，同行的卡片高低不齐、行与行之间
+   * 的间距忽大忽小（实测像「上下边距不一致」）。撑满单元格后行距恒为 gap。 */
+  align-items: stretch;
   flex: 1 1 auto;
   min-height: 0;
+  max-height: none;
   overflow-y: auto;
-  padding: 2px 14px 14px;
+  /* 滚动条槽常驻：有无滚动条都占同样宽度，三个 tab 卡片宽度才一致。 */
+  scrollbar-gutter: stable;
+  /* 行高恒为 --job-card-h（不做 1fr 拉伸）：三个 tab 的卡片尺寸完全一致；
+   * 多出来的空间留在网格底部，不摊到每一行上。 */
+  /* 岗位多于 3 行时要有可见滚动条：细条 + 透明轨道，贴右内边（被 jobs.css 的
+   * margin-right: 10px 让出的那道）而不是压住卡片描边。 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline-strong) transparent;
+  /* 上下留白与左右同档：卡片贴着列表卡头 / 窗口底边会露出被裁的玻璃边缘光，
+   * 也让第一行卡片压在分界线上。 */
+  padding: 10px 14px 14px;
+}
+
+/* 旧版把滚动条整根隐藏（scrollbar-width: none），岗位多于三行时看不到「还有内容」。
+ * 这里恢复成一条 6px 的细条（WebView2 是 Chromium，走 webkit 伪元素）。 */
+.job-grid::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.job-grid::-webkit-scrollbar-thumb {
+  border-radius: var(--radius-pill);
+  background: var(--hairline-strong);
+}
+
+.job-grid::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+}
+
+.job-grid::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 @media (max-width: 1599px) {
@@ -216,9 +267,16 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  /* 上下对称：顶部与底部留白相同，文字行距由 .job-info-main 统一给。 */
+  gap: 0;
+  justify-content: center;
+  /* 内容必须裁在卡片自己的边框里：超出的文字 / 方块不得压到上下相邻的行。 */
+  overflow: hidden;
   min-width: 0;
-  padding: 10px 12px;
+  /* 高度跟随网格单元格（行高弹性拉伸），三行网格在岗位不足时也能均分，不留下大片空隙。 */
+  height: 100%;
+  min-height: var(--job-card-h);
+  padding: 8px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--hairline);
   background: var(--glass-0);
@@ -237,6 +295,24 @@
 .job-card.is-checked {
   border-color: var(--primary);
   background: var(--primary-soft);
+  box-shadow: 0 0 0 1px var(--primary) inset, 0 0 14px -3px var(--primary);
+}
+
+/* 聊天联动：当前展开聊天的 Boss 所在公司的岗位，描边高亮（不改背景，避免与多选冲突）。 */
+/* 无限滚动哨兵：占一小段高度供 IntersectionObserver 观察，并显示「加载中」。 */
+.job-load-sentinel {
+  grid-column: 1 / -1;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-soft);
+  font-size: var(--fs-sm);
+}
+
+.job-card.is-linked {
+  border-color: var(--primary-soft);
+  box-shadow: 0 0 0 1px var(--primary-soft) inset, 0 0 12px -4px var(--primary-soft);
 }
 
 .job-card-top {
@@ -266,53 +342,94 @@
 
 .job-title {
   min-width: 0;
-  font-size: var(--fs-sm);
-  font-weight: 620;
+  /* 卡片字号整体上调一档：标题 sm→md、副行 xs→sm、右列三格 md→lg，
+   * 行高同步放宽（行高 18 → 20px，见下方 .job-info 各行等高）。 */
+  font-size: var(--fs-md);
+  font-weight: 650;
   color: var(--text-1);
   line-height: 1.4;
+  /* 单行省略：标题换行会把卡片撑出固定行高，三行列表就不再刚好占满。 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .job-salary {
   flex: 0 0 auto;
-  font-size: var(--fs-sm);
-  font-weight: 620;
+  /* 薪资是卡片里的第一眼信息：与标题同档再放大一级（lg）。 */
+  font-size: var(--fs-lg);
+  font-weight: 700;
   color: var(--primary);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
 }
 
 .job-meta {
-  font-size: var(--fs-xs);
+  min-width: 0;
+  font-size: calc(14px * var(--ui-scale));
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* 地址行（上）+ 分值（左下）+ 打招呼方块（右侧跨两行）。 */
+/* 卡片主体：左侧四行文字 + 右侧一列（薪资 / 分数 / 打招呼）。
+ * 两列的子项各自成行、行高相等，所以薪资与职位标题同在第一行，
+ * 分数对齐「经验学历」行、方块对齐「地址」行。右列 `flex: 0 0 auto` 不被左列挤压，
+ * 左列 min-width: 0 只吃自己的省略号。 */
 .job-info {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
-  column-gap: 8px;
-  row-gap: 6px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px 10px;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.job-info-main {
+  display: flex;
+  flex-direction: column;
+  /* 卡片变高后四行均匀铺开：行间距随可用高度伸缩，不再挤在顶部。 */
+  justify-content: space-evenly;
+  gap: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.job-info-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  /* 与左列同口径：薪资 / 分值 / 打招呼三格纵向均分。 */
+  justify-content: space-evenly;
+  gap: 0;
+  flex: 0 0 auto;
+}
+
+/* 左列四行与右列三格的每一行必须等高，否则两列逐行对齐会在中段漂移。
+ * 20px = 主行 --fs-sm（13px）× 1.5 行高，右列最大的方块也按这个高度放。 */
+.job-info-main > *,
+.job-info-side > * {
+  height: 22px;
+}
+
+.job-info-side > .job-salary {
+  display: flex;
   align-items: center;
-  margin-top: auto;
 }
 
-.job-info .job-addr {
-  grid-column: 1;
-  grid-row: 1;
-}
-
-.job-info .score-box {
-  grid-column: 1;
-  grid-row: 2;
-  justify-self: start;
+/* 分值占两行：盒子高度 = 两个 22px 行 + 行距，数字居中于这两行之间。 */
+.job-info-side > .score-box {
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .job-addr {
   min-width: 0;
-  font-size: var(--fs-xs);
+  font-size: calc(13px * var(--ui-scale));
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -327,55 +444,85 @@
   display: inline-flex;
   align-items: baseline;
   gap: 2px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 6px;
-  border: 1px solid var(--hairline);
-  background: var(--glass-3);
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--text-1);
-  font-size: var(--fs-md);
+  /* 分值放大：字号高于 --fs-lg（20px），所在行高由 .job-info-side > * 统一给。 */
+  font-size: calc(24px * var(--ui-scale));
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  line-height: 20px;
-}
-
-.score-box i {
-  font-size: var(--fs-2xs);
-  font-style: normal;
-  font-weight: 500;
-  color: var(--text-3);
+  line-height: 1;
+  /* 分值占两行：「分」换到数字下方，形成竖排两行的分值块。 */
+  flex-direction: column;
+  align-items: center;
 }
 
 .score-box.is-hi {
-  background: var(--primary-soft);
-  border-color: var(--primary-border);
   color: var(--primary-text);
 }
 
-/* 打招呼方块：正方、跨两行、主色底白字（裁决 W2）。 */
-/* 裁决 A53：方块高度 = 两行正文（行高 1.55）+ 上下内边距 6px×2；最小宽度按
- * 「三字横排可读」取 --fs-sm × 4.6；aspect-ratio 1/1 兜住两者不一致的一帧。
- * --fs-sm 已经随 --ui-scale 联动，所以大屏上方块与字号一起变大。 */
+/* 分值流光炫彩：多色渐变从左到右平移，经 background-clip:text 只落在数字上。 */
+.score-box .score-num {
+  /* 分值必须大于薪资（--fs-lg = 20px）；覆盖 jobs.css 全局 .score-num 的 --fs-xs。 */
+  font-size: calc(26px * var(--ui-scale));
+  line-height: 1;
+  background-image: linear-gradient(
+    100deg,
+    var(--iri-1) 0%,
+    var(--iri-2) 20%,
+    var(--iri-3) 40%,
+    var(--iri-4) 60%,
+    var(--iri-5) 80%,
+    var(--iri-1) 100%
+  );
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: score-iridescent 4s linear infinite;
+}
+
+@keyframes score-iridescent {
+  from { background-position: 0% 50%; }
+  to   { background-position: 250% 50%; }
+}
+
+/* 炫彩强度三档：分越高，流动越快、色带越饱和（filter 提亮）。 */
+.score-box.score-lv-1 .score-num { animation-duration: 8s; filter: saturate(0.7); }
+.score-box.score-lv-2 .score-num { animation-duration: 5s; filter: saturate(1.1); }
+.score-box.score-lv-3 .score-num {
+  animation-duration: 2.5s;
+  filter: saturate(1.6) brightness(1.15);
+  text-shadow: 0 0 10px var(--iri-glow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .score-box .score-num { animation: none; }
+}
+
+/* 打招呼方块：主色底白字（裁决 W2）。
+ * 缩小为紧凑按钮：高度 30px（独占右列末一行略高的位置），字号 --fs-sm，宽度按三字横排取 --fs-sm × 3.6。 */
 .job-greet {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  align-self: stretch;
+  flex: 0 0 auto;
+  /* 覆盖 .job-info-side > * 的统一行高：按钮自身定高 */
+  height: 30px !important;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: calc(var(--fs-sm) * 1.55 * 2 + 12px);
-  min-width: calc(var(--fs-sm) * 4.6);
-  aspect-ratio: 1 / 1;
-  padding: 0 8px;
+  margin-top: auto;
+  min-width: calc(var(--fs-sm) * 3.6);
+  padding: 0 10px;
   border: 0;
   border-radius: var(--radius-sm);
   background: var(--primary);
   color: var(--on-primary);
   font-size: var(--fs-sm);
-  font-weight: 620;
+  font-weight: 700;
   letter-spacing: 0.02em;
   white-space: nowrap;
-  line-height: 1.55;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -532,15 +679,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.scrape-last {
-  margin: 0;
-  padding: 0 14px 10px;
-  font-size: var(--fs-2xs);
-  color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+
 
 /* ---------- 筛选面板（原型 .f-* 一套） ---------- */
 .scrape-filter-bar {
@@ -768,6 +907,44 @@ body {
   overflow-y: hidden;
 }
 
+/* 窗口控件 _ □ ×：无边框窗口的最小化/最大化/关闭。颜色只用既有令牌（红线 8）。 */
+.win-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  flex: 0 0 auto;
+}
+
+.win-btn {
+  width: 36px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: inherit;
+  font-size: var(--fs-md, var(--fs-sm));
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.win-btn:hover,
+.win-btn:focus-visible {
+  opacity: 1;
+  background: var(--glass-0);
+}
+
+.win-close:hover,
+.win-close:focus-visible {
+  filter: brightness(1.4);
+}
+
+/* 平台卡去勾选框：保留 DOM 与 testid，仅隐藏视觉，点击切换仍走卡片事件。 */
+.platform-card > input.check {
+  display: none;
+}
+
 /* 顶栏尾段：margin-left: auto 把整组顶到右端（原型 L512，断言 A33），
  * 所以它与前面的分段控件之间不需要占位 spacer。 */
 .tb-tail {
@@ -775,14 +952,18 @@ body {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  /* 靠右：整组顶到顶栏右端（原型 L512，断言 A33）。 */
   margin-left: auto;
 }
 
 .segmented {
+  /* 贴近「登录」：与平台卡同属顶栏左侧一组，紧随平台卡之后。 */
+  order: -1;
   display: inline-flex;
   padding: 2px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--hairline);
+  /* 去边界感：胶囊描边与顶栏同色，不再画出可见分隔线。 */
+  border: 1px solid transparent;
   background: var(--glass-0);
 }
 
@@ -809,6 +990,34 @@ body {
   background: transparent;
   border-color: var(--hairline);
   color: var(--text-3);
+}
+
+/* 大模型打分的初筛线：只在选中「大模型打分」时出现（TopbarTail 的 llmActive）。
+ * 数字框跟胶囊同高，避免顶栏因多出一个控件而长高。 */
+.seg-prefilter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-0);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.seg-prefilter-input {
+  width: 44px;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--glass-input);
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 /* 裁决 O（SPEC §14.3）：禁用态与选中态组合时必须透明兜底，绿色高亮绝不能出现。 */

@@ -11,7 +11,6 @@ import { MAX_JD_CEILING } from '../lib_ui/scrape-panel-model';
 import {
   buttonClass,
   buttonLabel,
-  lastTitleText,
   progressText,
   srSummary,
   startDisabled,
@@ -44,7 +43,6 @@ const emit = defineEmits<{
 
 const brief = computed(() => progressText(props.progress));
 const summary = computed(() => srSummary(props.progress));
-const lastText = computed(() => lastTitleText(props.progress.last_title));
 const label = computed(() => buttonLabel(props.state));
 const cls = computed(() => buttonClass(props.state));
 const startOff = computed(() => startDisabled(props.starting, props.state === 'running'));
@@ -125,9 +123,7 @@ function onMain(): void {
       </label>
       <span class="scrape-brief" data-testid="scrape-brief">{{ brief }}</span>
       <span class="spacer"></span>
-      <span class="scrape-total" data-testid="scrape-total">已入库 {{ scrapedTotal }} 条</span>
     </div>
     <p class="sr-only" data-testid="scrape-sr-summary" aria-live="polite">{{ summary }}</p>
-    <p class="scrape-last" data-testid="scrape-last-title">{{ lastText }}</p>
   </div>
 </template>

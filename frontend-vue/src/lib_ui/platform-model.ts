@@ -103,12 +103,19 @@ export interface LoginStatusLike {
   readonly saved?: boolean;
 }
 
+/**
+ * 颜色只由登录状态决定，与 `running` 无关（运行中也照样判绿/红）。
+ * - 已登录（state 为 ok/ready/logged_in，或 saved===true）→ ok
+ * - 明确未登录（state 为 no_login/logged_out 等已知非登录值）→ bad
+ * - state 缺失/空/unknown 且无 saved 信息（没查过）→ unknown，不猜
+ */
 export function loginDot(status: LoginStatusLike | null | undefined): LoginDot {
   if (!status) return 'unknown';
-  if (status.running === true) return 'unknown';
   const state = (status.state ?? '').toLowerCase();
   if (state === 'ok' || state === 'ready' || state === 'logged_in') return 'ok';
   if (status.saved === true) return 'ok';
+  // 扫码进行中（waiting）尚无结论：灰，不误报红。与 running 无关，只看 state。
+  if (state === '' || state === 'unknown' || state === 'waiting') return 'unknown';
   return 'bad';
 }
 

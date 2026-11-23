@@ -23,6 +23,7 @@
 import { onMounted } from 'vue';
 
 import { scrapeClose } from '../api/commands/scrape';
+import { windowClose, windowMinimize, windowToggleMaximize } from '../api/commands/window';
 import { useCanvasScale } from '../lib_ui/use-canvas-scale';
 import { useGlassSupport } from '../lib_ui/use-glass-support';
 import GlassCanvas from './GlassCanvas.vue';
@@ -43,6 +44,11 @@ onMounted(() => {
   void scrapeClose().catch(() => undefined);
 });
 
+/** 窗口控件：失败静默（窗口操作不影响业务，错误不进错误队列）。 */
+const onMinimize = (): void => void windowMinimize().catch(() => undefined);
+const onMaximize = (): void => void windowToggleMaximize().catch(() => undefined);
+const onClose = (): void => void windowClose().catch(() => undefined);
+
 /**
  * 全景几何接线：resize → 先写 `--ui-scale`，再写 `--rail-w` / `--detach-w`
  * （原型 `syncUiScale()` 先行于 `syncDetachWidth()`；顺序由 `syncCanvas()` 内部保证）。
@@ -58,16 +64,23 @@ useGlassSupport();
 
 <template>
   <div class="app-shell" :class="{ 'is-chat-open': props.isChatOpen }" data-testid="app-root">
-    <header class="topbar" data-testid="topbar">
+    <header class="topbar" data-testid="topbar" data-tauri-drag-region>
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">职</span>
-        AI 求职助手
+        <span class="brand-name">AI 求职助手</span>
       </div>
 
       <!-- 概览的业务尾段（平台卡 · 打分分段 · 敏感库 · token · 配置 · 主题） teleport 到这里。
            `display: contents`（`styles/app-shell.css` 口径见 vue-dashboard.css 的 `.tb-embed`）
            让这个空盒不产生新的 flex 容器：teleport 进来的元素是 `.topbar` 的直接 flex 子项。 -->
       <div class="tb-embed" data-testid="topbar-tail-mount" />
+
+      <!-- 窗口控件（无边框窗口）：最右侧 _ □ × -->
+      <div class="win-ctrl" data-testid="win-controls">
+        <button class="win-btn" type="button" aria-label="最小化" data-testid="win-minimize-btn" @click="onMinimize">_</button>
+        <button class="win-btn" type="button" aria-label="最大化" data-testid="win-maximize-btn" @click="onMaximize">□</button>
+        <button class="win-btn win-close" type="button" aria-label="关闭" data-testid="win-close-btn" @click="onClose">×</button>
+      </div>
     </header>
 
     <!-- 页面骨架：页面分发槽。锚点 page-<slug> 由各页面自己挂，外壳不重复挂（C8）。 -->
