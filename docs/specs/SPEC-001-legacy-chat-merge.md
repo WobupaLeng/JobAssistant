@@ -1,7 +1,7 @@
 # SPEC-001-legacy · 聊天编排同屏合并（chat-merge）
 
 > 状态：**READY_FOR_IMPLEMENTATION**（规格冻结，2026-11-23）
-> 修订：**Rev 6**（2026-11-23，theme 锚点定谳=`theme-toggle`〔基线 L157，v3 未覆盖〕，见 UI-SPEC §20；M2 已知偏差路由意见；Rev 5 占位会话用户裁决；Rev 4 A6 分配宽口径；Rev 3 DOM 顺序定谳；Rev 2 撤导航；Rev 1 首冻）
+> 修订：**Rev 7**（2026-11-23，偏差②按后端真源更正〔DTO 已下发三键，缺口=核心无累计写入路径〕+ 累计写入范围/时机裁决 ADR-005；Rev 6 theme 锚点定谳=`theme-toggle`〔基线 L157，v3 未覆盖〕，见 UI-SPEC §20；Rev 5 占位会话用户裁决；Rev 4 A6 分配宽口径；Rev 3 DOM 顺序定谳；Rev 2 撤导航；Rev 1 首冻）
 > 决策依据：[`ADR-004`](../adr/ADR-004-legacy-chat-orchestration.md)（用户裁决「方案 1」：实现向 SPEC 对齐，整页化否决；§9 追加裁决：撤除二级导航）
 > 设计真源：[`UI-SPEC-chat-detach-v3`](../ui/UI-SPEC-chat-detach-v3.md)（冻结，一字不动）+ `prototypes/ui-v1/index.html`；其余条款见 `UI-SPEC-legacy-baseline.md`
 > 证据基线：HEAD `a4bb3d5`，工作区干净
@@ -165,11 +165,13 @@ SPEC 与原型修订；后端/scraper/三条契约改动；A–H 剩余像素差
 
 1. **M0 架构落文档**：本 Rev 2 + ADR-004 §9 补录，提交。
 2. **M1 前端编码**：结构合并 + 顶栏单行合并（F 顶栏归本批）+ 二级导航撤除 → 门禁全绿 → 提交（角色身份，`--only` 精确路径，前后 `git status --porcelain` / `git show --stat HEAD` 核对，锚点增删列明）。
-3. **M2 有稿设计**：剩余 A–H 像素项（F 顶栏已由 M1 做掉，不再碰）。
+3. **M2 前端编码**（用户裁决改派；有稿设计只出差距清单与设计复核，不写实现）：剩余 A–H 像素项 + F 文案/testid/禁用 CSS（F 顶栏已由 M1 做掉，不再碰）——已收口 `9a60d3f`。
 4. **M3 前端打磨**：视觉收尾（动效接线等，先出《微调改动范围》再动手）。
 5. **M4 QA**：按汇总重锚清单重锚 + 零 Mock 验收。
 
 M1 期间 `frontend-vue/` 单写者；M2/M3 同样单写者串行，严禁 UI 设计与前端编码/打磨并行。门禁（M1 完工前真实执行）：根 §5 槽位 A 全项（独占 `CARGO_TARGET_DIR=%TEMP%\jt-<lane>`，显式 `$env:TEMP`；后端零改动亦跑，防陈旧产物重放）+ typecheck + vitest 全绿；改 CSS 后 build 数选择器；交付前槽位 C `npx tauri build --no-bundle` + 工作区外产物冒烟。
+
+Chief 当前全局顺序（2026-11-23 派单）：M3 前端打磨（视觉收尾 + 分项 token 展示，DTO 现成不等后端）→ M4 QA 重锚 → 后端累计写入（ADR-005，M4 之后开工、可与 M4 并行）→ 发布。后端累计写入**不属本 SPEC 交付面**（Non-goals「后端改动」仍成立），此处仅路由记录；其范围/时机/验收以 [ADR-005](../adr/ADR-005-legacy-token-accumulation.md) 为唯一真源。
 
 ## 回滚方案
 
@@ -197,6 +199,8 @@ M1 期间 `frontend-vue/` 单写者；M2/M3 同样单写者串行，严禁 UI �
 - 本 SPEC 与 ADR-004 同日冻结；实施细化不得突破契约面与 AC，突破即熔断回存量架构设计修订。
 - 架构侧门禁快照（Rev 5，HEAD `c4913a2` + M2 在途工作树）：架构 lane 实跑槽位 A 全绿——cargo test 392 过 0 败（1 ignored=已知 sidecar_smoke）、typecheck 0 错、compileall 过。vitest 当轮 567/568，唯一失败为 `geometry.test.ts:137` hex 守卫命中 M2 在途 `.chat-rail::before` mask `#000`（非 HEAD 缺陷、非本文档所致）。**已由前端编码接手处置（M2 改派后）**：整条 `::before` 规则移进 `styles/layout.css`（与 `.card::before` 同宿主，原型 L1055–1057 数值逐字保留）；`.avatar` 顶边内高光 `rgba(255,255,255,.5)`（原型 L1158）新增语义令牌 `--spec-avatar-top` 落 `tokens.css`，vue 系改 `var()`。修后 typecheck 0 错、vitest 34 文件 568 全绿、build 通过（前端编码实跑）。
 - **theme 锚点定谳（Rev 6，前端编码提请）**：保持 `theme-toggle`——基线 L157 明文且 v3 未覆盖，v3 全文无主题锚点异名；原型 `shell-theme-toggle`（L1408/states.md L96）为 mock 内部命名，不构成下游契约。config 照 v3 §11.3 `shell-config-btn`（覆盖基线 `config-open`）。M2 现状合规，零返工；UI-SPEC §20 已澄清。
-- **M2 已知偏差（前端编码报告项，路由意见供 Chief 派单）**：① ChatThread `.chat-head` 三按钮原型无——属合法功能 additions（C 契约保行为，原型是 mock 不穷举真实功能），**保留**，C8 testid 已在；视觉融合归 M3 打磨裁量。② 顶栏「模型打分/打招呼」分项 stats 未接线——先核后端有无分项 token 数据源（疑似仅 tokens_total），**前端不得造数**；无数据源则属后端数据缺口，是否派后端由 Chief 定。③ `<1200` body overflow 裁剪 vs 原型横向滚动条——真偏差（基线 §2.3 根 min-width:1200 经 v3 §1 保留，窄窗应横向滚动不裁剪），建议 M3 修，AC 补「<1200 横向滚动条、无裁剪」。
+- **M2 已知偏差（前端编码报告项，路由意见供 Chief 派单）**：① ChatThread `.chat-head` 三按钮原型无——属合法功能 additions（C 契约保行为，原型是 mock 不穷举真实功能），**保留**，C8 testid 已在；视觉融合归 M3 打磨裁量。② 顶栏「模型打分/打招呼」分项 stats 未接线——**Rev 7 事实更正**（前端编码核查 `76685f1`，架构复核采纳）：config DTO **已下发** `tokens_total/tokens_greet/tokens_score`（commands_config.rs L58–60/L126–128；前端 types.ts L290–292 类型已在），「后端未下发」不成立；三键属 `CONFIG_READ_ONLY_KEYS`（store_ports.rs L216–223，**只读派生键、非可写键**，set_app_config 静默跳过且有守卫测试 commands_config.rs L385）。真实缺口＝Rust 核心**无累计写入路径**：greet/score 逐次 tokens 只回传不落库，`jobs.token_used` 列仅声明（schema.rs L134）无写入，读数只反映旧 Python 库遗留值。**路由（Chief 已派单）**：分项展示＝纯前端，归 M3 前端打磨（不等后端）；后端累计写入＝ADR-005（M4 之后开工、可与 M4 并行，🔒 六单点零触碰，前端零改动）；**前端不得造数**，后端未接前读数为遗留值/0 属如实展示。③ `<1200` body overflow 裁剪 vs 原型横向滚动条——真偏差（基线 §2.3 根 min-width:1200 经 v3 §1 保留，窄窗应横向滚动不裁剪），建议 M3 修，AC 补「<1200 横向滚动条、无裁剪」。
 - M2 收口基线：`9a60d3f`（15 路径 +436/−230，ExpectRow.vue 删除），门禁全绿（typecheck 0、vitest 34 文件 570、build 75.71 kB 选择器可达、cargo exit 0、compileall 0，前端编码实跑；架构 lane 槽位 A 复核同绿）。
 - **AC5 缺口跟踪**：敏感库面板不回应 Esc（冻结 §6.1 Esc 分层含敏感库）——Chief 已派 M4 QA 重锚轮一并处理；AC5 不降标，M4 闭合前该子项记未过。
+- **偏差②更正与累计写入裁决（Rev 7，Chief 派单、后端编码勘探提请四问）**：裁决全文见 [ADR-005](../adr/ADR-005-legacy-token-accumulation.md)——累计点置 `LlmClient::complete` 边界（domain `TokenMeter` 装饰器，4 接线点按 kind 构造），重试/降级/空内容全计（parse_completion 对空内容仍回 Ok 带真 tokens，llm.rs L173–183；Unparsable 系 domain 后置构造，scoring_llm.rs L368）；`ConfigStore` 加 `bump_tokens`（实现方恰 2 处：admin.rs L449 + commands_greet.rs L238 测试桩）；单事务三键 SQL 侧原子自增（Δtotal=Δgreet+Δscore）；`rescore.rs`/`app_config.rs`/domain 服务/infra llm 零改动；`jobs.token_used` 本批不动（无消费方）；reply.tokens 语义与打分决策顺序/降级语义不变；真实计费口径不另立里程碑。可写范围恰 8 文件（ADR-005 Implementation Plan），🔒 六单点零触碰，前端零改动。
+- 架构侧门禁快照（Rev 7，HEAD `c0183ca` + M3 分项展示在途工作树 4 文件）：架构 lane 实跑槽位 A 全绿——cargo test 392 过 0 败（1 ignored=已知 sidecar_smoke）、typecheck 0 错、compileall 过。vitest 归 M3 lane 实跑（前端打磨报告其批次 572 全绿，非本 lane 数字）。
