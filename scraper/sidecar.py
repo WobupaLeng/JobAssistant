@@ -140,12 +140,18 @@ def ensure_context(log_fn: Any) -> Any:
         # 探活：浏览器被用户手动关掉后 ctx.pages 仍可能返回旧列表，
         # 所以必须真正问一次浏览器。用 cookies() 而非 new_page()+close()
         # ——后者会让登录流程每秒闪一个新标签页。
-        try:
-            _ctx.cookies()
-            return _ctx
-        except Exception:
-            log_fn("warn", "浏览器上下文已失效，重新启动")
-            _teardown_playwright()
+        # 单次探活失败不等于浏览器没了（可能是瞬时的 driver 抖动或窗口刚被手动关），
+        # 直接 teardown 会 `_pw.stop()` 连带关掉应用拉起的 Chrome。先重试一次，
+        # 两次都失败才认定失效，且只丢引用、不在存活的 driver 上 stop。
+        for _attempt in range(2):
+            try:
+                _ctx.cookies()
+                return _ctx
+            except Exception:
+                time.sleep(0.5)
+        log_fn("warn", "浏览器上下文已失效，重新启动")
+        _ctx = None
+        _teardown_playwright()
     import browser as browser_mod
 
     with _pw_lock:
@@ -205,6 +211,10 @@ def _job_to_event(item: dict[str, Any]) -> dict[str, Any]:
 def _run_scrape(payload: dict[str, Any]) -> None:
     """真正跑一次抓取。异常一律转成 log 事件，绝不让线程静默死掉。"""
     global _occupant
+    # 无论哪条路径收尾（自然完成 / 早退 / 异常 / 用户停止），finally 都必须
+    # 发 scrape.finished：Rust 侧靠它清 running，缺了界面永停「抓取中」。
+    count = 0
+    err = ""
     try:
         import base as base_mod
         import boss as boss_mod
@@ -227,7 +237,8 @@ def _run_scrape(payload: dict[str, Any]) -> None:
             daily_limit=int(payload.get("daily_limit") or 100),
         )
         if not cfg.keywords:
-            log("error", "没有关键词，无法搜索")
+            err = "没有关键词，无法搜索"
+            log("error", err)
             return
 
         log("info", f"数据目录：{data_dir()}")
@@ -236,7 +247,8 @@ def _run_scrape(payload: dict[str, Any]) -> None:
         # 开抓前先确认登录态：未登录时 Boss 会把搜索页重定向到
         # /web/user/，空跑几分钟才报「没有拿到任何岗位」，用户不知道要干什么
         if not browser_mod.detect_logged_in(ctx, "boss"):
-            log("error", "尚未登录 Boss，请先执行登录（login.start）并扫码")
+            err = "尚未登录 Boss，请先执行登录（login.start）并扫码"
+            log("error", err)
             return
 
         page = ctx.new_page()
@@ -262,10 +274,21 @@ def _run_scrape(payload: dict[str, Any]) -> None:
             except Exception:
                 pass
     except Exception as exc:
-        log("error", f"抓取异常：{type(exc).__name__}: {exc}")
+        err = f"{type(exc).__name__}: {exc}"
+        log("error", f"抓取异常：{err}")
     finally:
         # 放手时清空占用标记，否则「正在抓取」会一直挂在提示语里
         _occupant = None
+        # 完成帧（additive 事件，与 protocol.rs Event::ScrapeFinished 逐字对齐）：
+        # count 是 sidecar 自报数（权威入库计数在 Rust）；stopped 区分用户停止；
+        # error 非空 = 异常收尾。stdout 可能已被父进程关闭，发不出去就算了。
+        try:
+            emit({
+                "event": "scrape.finished",
+                "data": {"count": count, "stopped": _stop.is_set(), "error": err},
+            })
+        except Exception:
+            pass
 
 
 def _run_login(payload: dict[str, Any]) -> None:
