@@ -70,6 +70,13 @@
   pointer-events: auto;
 }
 
+/* 宿主同时挂 glass-l2 时，vue-glass.css（后加载）的 .glass-l2{position:relative}
+ * 同特异性覆盖掉 position:fixed，面板会被压到 body 底部、视口外（打不开）。
+ * 这里用更高特异性把定位钉回 fixed，不改 glass-l2 的全局语义。 */
+.sensitive-panel.glass-l2 {
+  position: fixed;
+}
+
 /* 头部：左标题区可收缩，右侧「关闭」固定。 */
 .sensitive-head {
   flex: 0 0 auto;

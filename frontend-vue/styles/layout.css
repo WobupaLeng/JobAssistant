@@ -62,17 +62,6 @@
     inset 0 -1px 0 rgba(0, 0, 0, 0.18);
 }
 
-.build-tag {
-  font-family: var(--font-mono);
-  font-size: var(--fs-2xs);
-  color: var(--text-3);
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  background: var(--glass-input);
-  border: 1px solid var(--hairline);
-  white-space: nowrap;
-}
-
 /* ---------- 页面容器 ----------
  * 卡片纵向排列，间距统一 10px。滚动只发生在这里（顶栏不动）。 */
 .dashboard {
@@ -286,8 +275,5 @@
   .card-body {
     padding-left: 12px;
     padding-right: 12px;
-  }
-  .build-tag {
-    display: none;
   }
 }
