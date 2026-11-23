@@ -58,7 +58,7 @@
 - 新增：`chat-rail-empty-title` / `chat-rail-empty-refresh-btn`（及 `chat-detach-rail-*` 对应派生，`chat-contract` REQUIRED 已收）、`token-total-chip`（折叠 chip）。
 - 变更：`token-total` 从外层 span 移到读数 `<b>`（锚点名不变、落点变）；`job-empty-title`「暂无岗位」/`job-empty-sub`/`job-state-announce`/`FriendList` 空态「没有会话」/rail 错误 head「读取消息失败：<code>」/llm seg title/`LogCard` 标题 均逐字对齐原型。
 - 不变：四个废止 testid 仍 0；`nav-*`/`page-*` 仍 0；`theme-toggle`/`chat-rail`/`auto-apply-bar` 各恰一处；`shell-config-btn`/`shell-dashboard`/`topbar-tail-mount` 沿用 M1。
-- **已知偏差（报告项，不在 M2 修）**：`ChatThread` `.chat-head` 三按钮（生成打招呼/选简历/撤回）原型无＝功能 additions；顶栏「模型打分/打招呼」分项 stats 未接线（config 仅 `tokens_total`）；`<1200` body overflow 裁剪 vs 原型横向滚动条。
+- **已知偏差（报告项，不在 M2 修）**：`ChatThread` `.chat-head` 三按钮（生成打招呼/选简历/撤回）原型无＝功能 additions；顶栏「模型打分/打招呼」分项 stats 未接线——**更正（M2 后核查）**：config DTO 其实已下发 `tokens_greet`/`tokens_score`（`commands_config.rs` L58-60，`api/types.ts` L290-292 已有类型），但 Rust 核心**无累计写入路径**（三键在 `CONFIG_READ_ONLY_KEYS`、greet/score 逐次 `tokens` 只回传不持久化、jobs 表 `token_used` 列仅声明无写入），读数仅反映旧 Python 库遗留值；分项展示接线＝纯前端活，但是否派后端补累计由 Chief 定，前端不造数；`<1200` body overflow 裁剪 vs 原型横向滚动条。
 
 ---
 

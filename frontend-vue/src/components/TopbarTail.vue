@@ -70,7 +70,9 @@ const emit = defineEmits<{
       敏感库
     </button>
     <!-- 原型 L1400-1406：同一枚读数两种 DOM，CSS 在 1360 断点处互换显隐（A32 各唯一 1 份）。
-         模型打分 / 打招呼的分项读数后端未下发（config 只有 tokens_total），所以 title 只给累计值。 -->
+         config DTO 已下发 tokens_total/greet/score 三字段（commands_config.rs L58-60），但 Rust 核心
+         无累计写入路径（三键只读、greet/score 逐次 tokens 未持久化），读数仅反映旧库遗留值；
+         分项展示是否接线待派单，前端不造数，现 title 只给累计值。 -->
     <span class="tb-tokens" :title="`累计 ${tokenText(tokensTotal)} token`">累计
       <b class="token-total" data-testid="token-total">{{ tokenText(tokensTotal) }}</b> token</span>
     <span
