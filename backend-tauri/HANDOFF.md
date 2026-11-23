@@ -17,7 +17,7 @@
 
 **周末三档筛选已实现**（SPEC-004，提交 009c643）：`work_weekend` 支持 `double`/`no_bigweek`/`single`（double ⊂ no_bigweek ⊂ single），JD 命中按休息制度族归类（无休＞单休＞大小周，多重命中取最重族），未标注归一化为双休、三档均含；命中池补「无休」。前端 `single` 选项与 hint 校正归前端批（options.ts/types.ts），落地前两端字面量集尚未对齐。
 
-**唯一未验证的路径**是 sidecar 在真实 Tauri 窗口里拉起 Chrome，见根 `AGENTS.md` 7.2 第 1 项（阻塞项，根因在 WebView2，不在本模块代码）。**已知小缺口**：`login_status.saved` 恒 false（不读 `platform_login:{platform}` marker）。
+**Chrome 硬阻塞已除**（提交 `1f5910b`）：① sidecar 子进程 spawn 即纳入 Job Object（`KILL_ON_JOB_CLOSE`，`core/sidecar/process/job.rs`），shutdown/强杀关句柄回收 python + node driver + Chrome 整树；② `SidecarHandle::Drop` 加 `Arc::strong_count` 守卫——克隆共享子进程，只有最后一个持有者触发 shutdown，修掉「前端挂载即 `login_status`，其瞬态克隆出 scope 就关掉共享 stdin 杀掉会话」；③ sidecar 侧改常驻单车道执行器（见 `scraper/HANDOFF.md`）。真实小批量抓取 E2E 实测通过：`scrape_start`(Java, maxJd=10, 门槛 70) → scraped=15 / inserted=7 / below_threshold=5 / rejected=3，新入库行规则五维打分字段齐全，日志无撞名 / 无 `TargetClosedError`，`scrape_close` 整树回收约 1.6s，`login_save` → `saved=true` → `logout` → `saved=false` 标记链通过。`login_status.saved` 恒 false 已修（提交 `348eb1a`）。
 
 ---
 
@@ -43,6 +43,8 @@
 - **`commands_auto.rs` 有 2 个既有 unused import 警告**（`GreetingProfile`/`DEFAULT_PROFILE`）：历史遗留，与功能提交分开清理。
 - **`tauri.conf.json` 的 `version` 是 `0.2.0`，`Cargo.toml` 是 `0.1.0`**：两者不一致，改版本号时两个文件都要动。
 - **`beforeDevCommand` / `beforeBuildCommand` 已设为 `npm --prefix ../frontend-vue run dev` / `run build`**（Vue 重写后接线；`backend-tauri/package.json` 锚 `@tauri-apps/cli` 修 cwd，否则 `../frontend-vue` 解析到仓库外 ENOENT）。`tauri.conf.json` 的 csp 仍是唯一来源（`script-src 'self'`，`wasm-unsafe-eval` 已删，见根 `AGENTS.md` 3.1）。
+- **`SidecarHandle` 是共享克隆，Drop 必须查 `strong_count`**：全字段 Arc 共享、手写 Clone，任一克隆出 scope 都会跑 Drop。守卫在 `process/handle.rs` 的 Drop（`strong_count(&self.child) > 1` 直接 return）；删掉守卫 = 瞬态克隆（`login_status` / `request_chat` 的 `handle_clone`）随手杀会话。回归测试 `dropping_handle_clone_keeps_sidecar_alive` 钉住此行为。
+- **Job Object 回收的是整树不是单个 child**：python + node driver + Chrome 全在 job 里，shutdown 尾部 drop job 句柄触发 `KILL_ON_JOB_CLOSE`。不要「优化」成只 kill child——那会留下持 Chrome 单例窗的孤儿。
 
 ### 2.3 契约面
 
@@ -71,8 +73,8 @@
 
 ### 3.1 等外部条件
 
-1. **sidecar 拉 Chrome**：阻塞项，见根 `AGENTS.md` 7.2 第 1 项。修法方向已定（给 sidecar 的 Chrome 换不与 WebView2 撞名的 `--user-data-dir`），需要真实桌面环境验证。
-2. **`set_limit` 夹值语义**：`max_jd > 500` 时返回错误而非静默夹住，产品口径待定。
+1. **`set_limit` 夹值语义**：`max_jd > 500` 时返回错误而非静默夹住，产品口径待定。
+2. **新设备扫码登录全流程**：本轮 E2E 用已登录 profile；扫码 → 保存 → 抓取全流程待产品级验收（根 `AGENTS.md` §7.2）。
 
 ### 3.2 可独立开工的小项
 
@@ -81,3 +83,4 @@
 3. **`tauri.conf.json` 与 `Cargo.toml` 版本号对齐**：两个文件都是高冲突单点，**必须单线程做**。
 4. **`app/src-tauri/.agents/skills/rust-tauri` 的过期锚点**：仍写 `window-vibrancy 0.8`；`rust-domain-purity` / `rust-testing` 的分组用例数与实测不符。
 5. **`app/node_modules/` 用途不明**：`app/` 下没有 `package.json`，这个目录来源待查。查清前**不要删**，`npx tauri` 依赖它。
+6. **抓取自然完成信号**：sidecar 完成只发 log，`progress.running` 只在 stop/Exited 清，界面停在「抓取中」直到用户手动停止。需 `protocol.rs` 新增完成事件 + `session.rs` 消费 + 前端接线（高冲突单点，单线程做）。

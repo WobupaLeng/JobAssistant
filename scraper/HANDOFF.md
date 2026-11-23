@@ -3,27 +3,23 @@
 > **本文件只写「现状 / 坑 / 下一步」**，不写历史记录与用例明细。
 > 目录结构、协议、红线见 [`AGENTS.md`](AGENTS.md)，跨模块约束见根 [`AGENTS.md`](../AGENTS.md)。
 
-**最后更新**：2026-11-22
+**最后更新**：2026-11-23
 
 ---
 
 ## 1. 现状
 
-抓取、登录、聊天、求职期望四条链路**代码已完成**，协议对端（Rust `core/sidecar/`）已通，`python -m compileall -q scraper` 通过。
+抓取、登录、聊天、求职期望四条链路**运行态已通**：从 Tauri 子进程拉起真实 Chrome 已修复并实测（提交 `1f5910b`；取证与证据索引在 `%TEMP%\jt-chrome-fix\VERIFICATION.md`，t1/t2/t6/t7 各目录）。
 
-**唯一未通的是运行态**：从 Tauri 子进程里拉起**真实 Chrome** 仍失败。
+### 1.1 Chrome 撞名阻塞已除（三个预存缺陷，别再按旧结论排查）
 
-### 1.1 【阻塞】应用运行时拉不起 Chrome
+旧结论「WebView2 单例命名对象撞名」**是误诊**：Chromium 单例身份 = 标题为字面 user-data-dir 路径的 `Chrome_MessageWindow` 消息窗口，WebView2 UDF 与 sidecar UDF 路径不同，天然不撞。真凶是三个缺陷叠加：
 
-**现象**：应用运行中发起抓取，sidecar 的 Chrome 报「正在现有的浏览器会话中打开」并 `exitCode=0`；playwright 收到 CDP 管道关闭 → `TargetClosedError: BrowserType.launch_persistent_context: Target page, context or browser has been closed`。表现为聊天与求职期望全部失败。
+1. **强杀无整树回收**：杀 python 留下的孤儿 Chrome 持单例窗，下次 launch 撞名。修：Rust 侧 Job Object `KILL_ON_JOB_CLOSE`（`backend-tauri/src/core/sidecar/process/job.rs`），spawn 即纳入，shutdown/强杀回收整树。
+2. **每命令新线程 vs patchright 线程绑定**：首条命令线程退出后 `_pw/_ctx` 成尸体，第二条命令探活必炸 → 误判失效 → teardown 重启撞仍活着的 Chrome 单例窗 → `TargetClosedError`。修：常驻 `ThreadPoolExecutor(max_workers=1)` 单车道（`_browser_q`），所有浏览器命令含 `login.status` 探活与 EOF teardown 都排队到同一条线程（AGENTS §5）。
+3. **launch 失败复用死连接**：`ensure_context` 失败只置 `_ctx=None` 却保留 `_pw`，下次复用已断的 driver 连接。修：launch 异常立即 `_teardown_playwright()` 再抛。
 
-**根因**：应用运行时 `msedgewebview2.exe` 会在本机创建 Chromium 单例命名对象，sidecar 启动的 Chrome 探测到后判定「已有会话」直接退出。
-
-**已排除**（都试过，不要再试）：Job Object、环境变量（含 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`）、stdio / `CREATE_NO_WINDOW`、`--user-data-dir` 路径、profile 脏数据、Chrome 版本。
-
-**待定修法**：给 sidecar 的 Chrome 用一个与应用 WebView2 **不再撞名**的 user-data-dir；或分离 `--user-data-dir` 与 `--apps-user-data-dir`。
-
-**旁证**：单独运行 `python scraper/sidecar.py`（不经 Tauri）时 Chrome 能正常拉起——问题只在「作为应用子进程」时出现。
+真实小批量 E2E（Java，maxJd=10，门槛 70，已登录真实 profile）：scraped=15 / inserted=7 / below_threshold=5 / rejected=3，新入库行规则五维打分字段齐全，日志无撞名 / 无 `TargetClosedError`；`scrape_close` 整树回收约 1.6s；`login_save` → `saved=true` → `logout` → `saved=false` 标记链通过。
 
 ---
 
@@ -40,6 +36,8 @@
 ### 2.2 线程与生命周期
 
 - **跨线程碰浏览器必然炸**：`Cannot switch to a different thread`。patchright 同步 API 绑死创建它的线程。
+- **单车道必须常驻**：工作线程退出 = 连接死亡。所有浏览器命令（含探活、EOF teardown）submit 到 `_browser_q`，不许再每条命令起新线程。
+- **launch 失败必须清 `_pw`**：`ensure_context` 的 launch 异常分支已做 `_teardown_playwright()`；不清就会复用死 driver 连接，下次探活必炸。
 - **`scrape.stop` 只是置标志**，不结束进程。真正的收尾是 Rust 关 stdin → Python 的 `for raw in sys.stdin` 走 EOF → 置 `_stop`；超时才 `kill()`。
 - **不关 stdin 就是「命令卡住」**：进程挂在 `for raw in sys.stdin` 等下一行，界面看起来没反应。
 - **不能用 `time.sleep`**：最长 9.8 秒的反爬等待期间点停止会毫无反应。所有等待走 `interruptible_sleep`（每 0.2 秒查一次 `_stop`）。
@@ -81,10 +79,10 @@ Response.text: Connection closed while reading from the driver
 
 ## 3. 下一步
 
-### 3.1 等外部条件
+### 3.1 等产品级验收
 
-1. **Chrome 撞名问题**（第 1.1 节）：需要能在正常桌面实际启动应用做对照实验的人。中枢/沙箱环境的 shell 是 Low 完整性，跑不起 GUI。
-2. **登录入口接线**：`login.state` 事件链在 Python 侧是完整的（`sidecar.py:263/272/297/303` emit → Rust `process/codec.rs` 解析），但**主进程没有 emit 给 WebView**，前端 `login_status` / `login_save` / `logout` 调用点为 0。这是后端 + 前端两边的活。
+1. **新设备扫码登录全流程**：本轮 E2E 用的是已登录 profile；新设备 / 登录失效态的扫码 → 保存 → 抓取全流程未实测。
+2. **抓取自然完成信号**：`_run_scrape` 结束只发 log（`sidecar.py:258`），Rust `progress.running` 只在 stop/Exited 清，界面停在「抓取中」直到用户手动停止。需协议完成事件（动 `protocol.rs` 高冲突单点）+ 前端消费。
 
 ### 3.2 可独立开工
 

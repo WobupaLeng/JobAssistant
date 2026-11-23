@@ -13,13 +13,13 @@
 
 ## 0. 状态看板（动手前必读）
 
-**当前阶段**：`INTEGRATION_PENDING` —— 前端 Vue 3 重写 + 后端功能接线（`scrape_defaults` 运行时消费 / serde alias / `login-state` emit）+ 前端登录接线均已完成并各自门禁通过；待端到端联调与最终产物冒烟。**真实抓取/扫码登录的端到端仍受 §6.2「Tauri 子进程拉不起真实 Chrome」阻塞**（既有硬阻塞，非本轮引入）。
+**当前阶段**：`E2E_VERIFIED` —— 「Tauri 子进程拉不起真实 Chrome」硬阻塞已除（Job Object 整树回收 + sidecar 常驻单车道线程模型 + `SidecarHandle` 克隆 Drop 守卫，提交 `1f5910b`）；真实小批量抓取端到端实测通过（抓取 → 入库 → 规则打分 → 回读 → 整树回收），登录标记链（`login_save` → `saved=true` → `logout` → `saved=false`）实测通过。剩余：新设备扫码登录全流程与长时间抓取的产品级验收（见 §7.2）。
 
 | 层 | 状态 |
 |---|---|
-| `backend-tauri/` | ✅ 可用。命令全部定义且全部注册；CSP 已显式声明 `script-src`（缺失即白屏，见 §3.1） |
-| `scraper/` | ⚠️ 抓取 / 登录 / 聊天 / 求职期望已通；**从 Tauri 子进程拉起真实 Chrome 仍失败**（见 §6.2） |
-| `frontend-vue/` | ✅ Vue 3 重写完成：四页接线 + M5 补遗、Leptos `.rs` 计数 0、QA 复审收口（A54 几何/11 testid 对齐原型/A36）、vitest 全绿；CSP 收紧（删 `wasm-unsafe-eval`）+ `tauri build --no-bundle` 产物工作区外冒烟通过（Vue 渲染 + IPC 回读正常，非白屏） |
+| `backend-tauri/` | ✅ 可用。命令全部定义且全部注册；CSP 已显式声明 `script-src`（缺失即白屏，见 §3.1）；sidecar 子进程 spawn 即纳入 Job Object（`KILL_ON_JOB_CLOSE`），shutdown/强杀整树回收 |
+| `scraper/` | ✅ 抓取 / 登录 / 聊天 / 求职期望已通，从 Tauri 子进程拉起真实 Chrome 已修复并实测；浏览器命令走常驻单车道执行器（见模块 AGENTS §5） |
+| `frontend-vue/` | ✅ Vue 3 重写完成：四页接线 + M5 补遗、Leptos `.rs` 计数 0、QA 复审收口（A54 几何/11 testid 对齐原型/A36）、vitest 全绿；CSP 收紧（删 `wasm-unsafe-eval`）+ `tauri build --no-bundle` 产物工作区外冒烟通过（Vue 渲染 + IPC 回读正常，非白屏）；Liquid Glass L2 折射克隆层 / L3 WebGL 透镜已实现（SPEC-003），周末三档前端批已落地（SPEC-004） |
 | `docs/ui/` + `prototypes/ui-v1/` | ✅ 界面设计 `UI_READY`：聊天抽屉 v3–v10 裁决已冻结（[UI-SPEC-chat-detach-v3](docs/ui/UI-SPEC-chat-detach-v3.md)），单文件原型带三套无浏览器自检脚本 |
 
 - **状态只升不降**，推进时原地替换整表。
@@ -152,12 +152,12 @@ python -m compileall -q scraper
 | 日志游标 | `LogRing::since` 是**闭区间**（`ts_ms >= since`），边界那一毫秒会重送一条，前端按 `(ts, level, message)` 多重集去重。需要恰好一次语义用 `since_seq(after_seq)`。**不要改回开区间**——同毫秒多条日志会永久取不到。 |
 | `schema.rs` 无外键 | 父子表靠应用层维护。`rusqlite` 的 `bundled` 默认 `foreign_keys=OFF`，加约束前先 `conn.pragma_update(None, "foreign_keys", "ON")`。 |
 | `core/` 禁 `use tauri::` | **是 code review 约定，不是编译期门禁**（`core/` 已不是独立 crate）。同类：`domain` 禁依赖 `rusqlite` / `ureq`。 |
+| Chrome 单例撞名 | Chromium Windows 单例身份 = 标题为**字面 user-data-dir 路径**的 `Chrome_MessageWindow` 消息窗口（不是路径哈希）；WebView2 UDF 与 sidecar UDF 路径不同，天然不撞名。真凶是孤儿 Chrome 持窗与 sidecar 自身「每命令新线程 → 探活必炸 → teardown 重启」循环。修法 = Job Object 整树回收 + 常驻单车道，**不是**换 UDF 躲名。 |
 
 ### 7.2 未决项
 
-1. **【阻塞】Tauri 子进程拉不起真实 Chrome**：`msedgewebview2.exe` 创建的 Chromium 单例命名对象让 sidecar 的 Chrome 报「正在现有的浏览器会话中打开」并退出 → `TargetClosedError`。已排除 Job Object、环境变量、stdio、`--user-data-dir` 路径、profile 脏数据、Chrome 版本。待试：给 sidecar 的 Chrome 换不撞名的 user-data-dir。
-2. **端到端联调待做**：`scrape_defaults` 运行时消费（协议扩 9 字段下发城市/薪资/排除词等、`ExcludeRules::from_keywords` 注入用户规则）、serde alias（`jobId`/`useLlm`/`logChanges`）、`login-state` emit（集中 watcher）与前端登录接线（`listenLoginState` + 保存/退出按钮 + 兜底查询）均已完成并门禁通过（[ARCH-003](docs/architecture/ARCH-003-vue-frontend-migration.md) / [ADR-003](docs/adr/ADR-003-frontend-leptos-to-vue.md)，进度见 `frontend-vue/HANDOFF.md`）。剩余：真实扫码登录→保存→抓取的端到端受 §6.2 Chrome 阻塞；`work_weekend=no_bigweek`（大小周）`rules.rs` 只实现 `double` 分支待补；`login_status.saved` 恒 false（不读 `platform_login:{platform}` marker）。
-3. **Liquid Glass 第二三层未做**：第二层 SVG 湍流折射，第三层 WebGL 卡片间真折射。第一层 CSS 玻璃已完成。规格原文从提交 `d39bae4` 的 `docs/ui/UI-SPEC-liquid-glass-l2-l3.md` 取回。
-4. **预筛否决的 `rule` 字段恒写 `"prescan"`**，丢失具体命中规则。需给 `ingest::PreScan::Rule` 加承载字段（纯后端，不动前端契约）。
-5. **`set_limit` 夹值语义未定**：`max_jd > 500` 时返回错误而非静默夹住，表现为「保存失败但上限已生效」。
-6. **`tests/sidecar_smoke.rs` 常年 `#[ignore]`**（需真实 Chrome + 登录态），是唯一未被门禁覆盖的集成路径。
+1. **新设备扫码登录全流程未实测**：本轮 E2E 用的是已登录的真实 profile；新设备 / 登录失效态的扫码 → 保存 → 抓取全流程待产品级验收。长时间 / 大批量抓取同样未实测。
+2. **抓取自然完成不清 `running`**：sidecar 抓取结束只发 log（`scraper/sidecar.py:258`），Rust 只在 stop/Exited 置 `running=false`（`core/sidecar/session.rs`），界面会停在「抓取中」直到用户手动停止。需协议完成信号 + 前端消费（动 `protocol.rs` 高冲突单点，必须单线程）。
+3. **预筛否决的 `rule` 字段恒写 `"prescan"`**，丢失具体命中规则。需给 `ingest::PreScan::Rule` 加承载字段（纯后端，不动前端契约）。
+4. **`set_limit` 夹值语义未定**：`max_jd > 500` 时返回错误而非静默夹住，表现为「保存失败但上限已生效」。
+5. **`tests/sidecar_smoke.rs` 常年 `#[ignore]`**（需真实 Chrome + 登录态），是唯一未被门禁覆盖的集成路径。

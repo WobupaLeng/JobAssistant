@@ -13,7 +13,7 @@
 
 | 文件 | 关键入口 / 职责 |
 |---|---|
-| `sidecar.py`（605 行） | 进程入口：stdin 行循环 + `handle()` 分发 + 工作线程 + `emit()` 出口。`log()` / `clamp_text()` / `interruptible_sleep()` / `data_dir()` / `profile_dir()` / `ensure_context()` / `_run_scrape()` / `_run_login()` / `busy_reason()` / `start_scrape()` / `start_login()` / `stop_scrape()` / `_run_chat()` / `_run_expect()` / `_run_session_open()` |
+| `sidecar.py` | 进程入口：stdin 行循环 + `handle()` 分发 + 常驻单车道执行器 + `emit()` 出口。`log()` / `clamp_text()` / `interruptible_sleep()` / `data_dir()` / `profile_dir()` / `ensure_context()` / `_teardown_playwright()` / `_run_scrape()` / `_run_login()` / `busy_reason()` / `_busy_now()` / `start_scrape()` / `start_login()` / `stop_scrape()` / `_run_chat()` / `_run_expect()` / `_run_session_open()` / `_WorkerHandle` |
 | `boss.py`（751 行） | 岗位抓取：卡片 DOM 解析 + 详情页补齐 + 无限滚动翻页。`decode_boss_salary()` / `map_salary_code()` / `build_search_url()` / `BossScraper`（`run` / `_load_more_by_scroll` / `_diagnose_empty_page` / `_parse_dom_cards` / `_parse_detail_dom`） |
 | `chat.py`（628 行） | 聊天：会话列表 / 历史消息 / 发送 / 发简历 / 撤回。`ChatClient`（`friends` / `messages` / `send` / `resumes` / `send_resume` / `recall`）、`normalize_friend()` / `normalize_message()` / `merge_dom_status()` / `strip_internal()` |
 | `browser.py`（294 行） | 持久化上下文启动、登录态判定、求职期望。`_launch_args()` / `_find_system_browser()` / `sanitize_profile_exit_state()` / `launch_context()` / `find_page_for()` / `detect_logged_in()` / `fetch_expectations()` |
@@ -30,18 +30,18 @@
 
 **三种帧，同一个 `Envelope{id, event, ok, data, error}`**：命令（含 `cmd`，Rust → stdin）／回执（含 `id`、**无** `event`，由 Rust `route_reply` 投递）／事件（含 `event`，主动推送）。
 
-**命令分发表（`sidecar.py:521-572`）**
+**命令分发表（`sidecar.py:557-632`）**
 
 | 命令 | 执行位置 | 说明 |
 |---|---|---|
 | `ping` | **主线程**直接回 | `{"pong": true}` |
-| `scrape.start` | 后台线程 | 已在跑则只打 warn 不报错，仍回 `accepted: true` |
+| `scrape.start` | 单车道执行器 | 已在跑则只打 warn 不报错，仍回 `accepted: true` |
 | `scrape.stop` | **主线程** | **只置 `_stop`**，立即回 `{"stopped": true}` |
-| `login.start` | 后台线程 | 浏览器被占则只打 warn，仍回 `accepted: true` |
-| `login.status` | **主线程** | 只读 cookie，`{"logged_in": bool}` |
-| `chat.*` | 后台线程 | `friends` / `messages` / `send` / `resumes` / `send_resume` / `recall`；`chat.open` **已废弃**，回 `CHAT_FAILED` |
-| `expectation.list` | 后台线程 | 要等一次网络往返 |
-| `session.open` | 后台线程 | 只拉起浏览器并报登录态 |
+| `login.start` | 单车道执行器 | 浏览器被占则只打 warn，仍回 `accepted: true` |
+| `login.status` | **主线程**投递探活到单车道（5s 超时） | 只读 cookie，`{"logged_in": bool}`；浏览器线程被长任务占用时超时按未登录回报 |
+| `chat.*` | 单车道执行器 | 主线程 `_busy_now` 预检，占用即回 `CHAT_FAILED`；`friends` / `messages` / `send` / `resumes` / `send_resume` / `recall`；`chat.open` **已废弃**，回 `CHAT_FAILED` |
+| `expectation.list` | 单车道执行器 | 主线程 `_busy_now` 预检；要等一次网络往返 |
+| `session.open` | 单车道执行器 | 主线程 `_busy_now` 预检；只拉起浏览器并报登录态 |
 | 其它 | — | `{"code": "UNKNOWN_CMD"}` |
 
 **事件**：`ready`（`data.pid`）、`log`（`{"level","msg"}`，`msg` 截到 4000 字符）、`job.scraped`（`_job_to_event` 只保留 21 个键，空值不发，`jd_text` / `company_intro` 经 `clamp_text`）、`login.state`（`:263` / `:272` / `:297` / `:303`）。
@@ -97,22 +97,28 @@
 
 ---
 
-## 5. 线程模型（单车道）
+## 5. 线程模型（常驻单车道）
 
 ```
 主线程      for raw in sys.stdin → handle()
-              ├── ping / scrape.stop / login.status   直接执行（不能阻塞）
-              └── 其余命令 → threading.Thread(daemon=True)
+              ├── ping / scrape.stop        直接执行（不能阻塞）
+              ├── login.status              submit 探活到单车道，.result(timeout=5)
+              └── 其余命令 → _busy_now 预检（占用即回 busy）
+                             → _browser_q.submit(...)
 
-工作线程    _run_scrape / _run_login / _run_chat / _run_expect / _run_session_open
-              └── 全部持同一把 _worker_lock + ensure_context()
+_browser_q   ThreadPoolExecutor(max_workers=1) 常驻单车道（sidecar.py:36）
+             _run_scrape / _run_login / _run_chat / _run_expect / _run_session_open
+             全部在同一条线程上排队，patchright 连接与进程同寿
 
+_WorkerHandle                长任务 Future 包装成 is_alive()（scrape/login 占用标记）
 _chat_busy                   同一时刻只有一条聊天命令在动浏览器
 _stop/_worker/_worker_lock/_occupant   模块级运行态
-_pw/_ctx                     patchright 实例与 context，只在工作线程里碰
+_pw/_ctx                     patchright 实例与 context，只在 _browser_q 线程里碰
 ```
 
-推论：**抓取进行中发起聊天会排队**（刻意取舍，宁可让用户看到「排队中」，也不为并发去碰线程铁律）；**长任务期间其它命令只能排队**，所以 Rust 对回执必须设超时；**`scrape.stop` 能在抓取中途生效**，正是因为抓取跑在独立线程、主线程始终在读 stdin。
+**为什么必须常驻**：patchright 同步 API 绑死创建它的线程。旧实现每条命令各起一个新线程，首条命令的线程一退出 `_pw/_ctx` 就成尸体——第二条命令探活必报 `Playwright connection closed`，随后误判「浏览器已失效」去 teardown 重启，撞上仍活着的 Chrome 单例窗（「正在现有的浏览器会话中打开」→ `TargetClosedError`）。跨线程 `pw.stop()` 同样必报 greenlet 错，等于没关。
+
+推论：**抓取进行中发起聊天会排队**（刻意取舍，宁可让用户看到「排队中」，也不为并发去碰线程铁律）；**长任务期间其它命令只能排队**，所以 Rust 对回执必须设超时；**`login.status` 至多阻塞主线程 5 秒**，超时按未登录回报；**`scrape.stop` 能在抓取中途生效**，正是因为抓取跑在单车道、主线程始终在读 stdin。**stdin EOF 的兜底 teardown 也必须投递到 `_browser_q`**（`main()` 尾部，仅无长任务占用时尝试）——主线程直接 stop 必炸。
 
 **`_occupant`** 取值 `"scrape"` / `"login"` / `None`，只用于把「占用中」说清楚。教训（`sidecar.py:312-323`）：早先所有占用场景都回「正在抓取或登录，请先停止再操作聊天」，但**登录期间根本没有停止按钮**——`stop_scrape` 会让登录循环误报「已取消登录」。**提示语必须指向一条真能走通的路。**
 
@@ -127,7 +133,7 @@ _pw/_ctx                     patchright 实例与 context，只在工作线程�
 ## 7. 新增 / 修改一条命令的检查表
 
 1. `sidecar.py::handle()` 加分支；兜底必须是 `UNKNOWN_CMD`。
-2. 需要浏览器就必须经 `_worker_lock` 派到工作线程（照 `_with_chat` / `start_scrape` 的写法）。
+2. 需要浏览器就必须 submit 到 `_browser_q` 单车道（照 `start_scrape` / `session.open` 分支的写法），主线程用 `_busy_now` 预检占用。
 3. 按 §2 的回执形状 `emit`，**`error` 是对象**。
 4. 同步改 Rust 侧 `protocol.rs` 的 `Command` 枚举与 `handle()` 参数名（**平铺，不加 `params` 包装**）。
 5. `python -m compileall -q scraper`。
