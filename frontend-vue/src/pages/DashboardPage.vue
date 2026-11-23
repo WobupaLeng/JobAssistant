@@ -96,7 +96,6 @@ import {
   type FilterDraft,
 } from '../lib_ui/scrape-filter-model';
 import { loadDraft, saveDraft } from '../features/scrape/filter';
-import { pageTestId } from '../lib_ui/nav';
 import { parseLogLevel } from '../lib_ui/logfmt';
 import { readInitialTheme, flipTheme, applyTheme } from '../lib_ui/theme';
 import {
@@ -128,7 +127,13 @@ import {
  */
 const props = defineProps<{ activeNav?: string }>();
 const emit = defineEmits<{
-  (e: 'navigate', nav: 'dashboard' | 'chat' | 'config' | 'logs'): void;
+  /**
+   * 浮层窗开关。只有 `config` / `logs` 两种：**聊天不是页**，
+   * 「Boss 消息」常驻右栏，招呼也在原地展开（SPEC-001 AC1/AC7）。
+   */
+  (e: 'navigate', nav: 'config' | 'logs'): void;
+  /** 卡片「打招呼」⇒ 请父级分发槽就地展开对话框并消费草稿（SPEC §16.5 / A48）。 */
+  (e: 'greet'): void;
 }>();
 
 const TICK_MS = 5000;
@@ -596,8 +601,8 @@ function onVisibilityChange(): void {
 async function onGreet(jobId: string): Promise<void> {
   const job = jobs.value.find((j) => j.job_id === jobId);
   setGreetDraft(job?.company ?? '', job?.title ?? '');
-  // M1 只把意图存好并切页；好友匹配与填入输入框是 M2 的事。
-  emit('navigate', 'chat');
+  // 不切页：草稿留给同屏的聊天层就地消费（匹配好友 ⇒ 选中 ⇒ 预填 + focus ⇒ 不发送）。
+  emit('greet');
 }
 
 // ---------------------------------------------------------------- 长按
@@ -753,7 +758,16 @@ async function removeSensitive(ids: number[]): Promise<void> {
   }
 }
 
-const pageId = pageTestId('dashboard');
+
+/**
+ * 概览业务尾段（平台卡 + `.tb-tail`）有没有落位进壳的那一行。
+ *
+ * `AppShell` 在 `<header class="topbar">` 里留了一个 `display: contents` 的
+ * `.tb-embed`（SPEC-001 决策 7 / AC10）：数据仍归本页所有，DOM 归顶栏那一行。
+ * 单测直接 `mount(DashboardPage)` 时壳不在场，落位点查不到 ⇒ Teleport `disabled`，
+ * 就地渲染，既有断言照旧成立。
+ */
+const tailInTopbar = ref(false);
 
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -762,6 +776,7 @@ function errText(e: unknown): string {
 // ---------------------------------------------------------------- 生命周期
 
 onMounted(() => {
+  tailInTopbar.value = document.querySelector('.tb-embed') !== null;
   void loadSpecAndConfig();
   void refreshList();
   void refreshProgress();
@@ -809,7 +824,8 @@ watch(
 </script>
 
 <template>
-  <section class="page page-dashboard" :data-testid="pageId">
+  <!-- 容器锚点照原型：shell-dashboard（SPEC-001 AC9，page-dashboard 随二级导航退役）。 -->
+  <section class="page page-dashboard" data-testid="shell-dashboard">
     <AppErrorBar
       :queue="errors"
       @dismiss="onDismissError"
@@ -817,38 +833,41 @@ watch(
       @retry="onRetry"
     />
 
-    <PlatformCard
-      :selected="platform"
-      :login="login"
-      :login-busy="loginBusy"
-      :action-busy="loginActionBusy"
-      @pick="onPickPlatform"
-      @login="onLogin"
-      @save="onSaveLogin"
-      @logout="onLogout"
-    />
+    <!-- 顶栏单行落位（SPEC-001 决策 7）：平台卡与尾段的数据在本页，DOM 属于壳的那一行，
+         所以整段 teleport 进 AppShell 的 `.tb-embed`。落位点不存在（单测独立挂载）时
+         disabled ⇒ 就地渲染，不产生 Teleport 警告。 -->
+    <Teleport to=".tb-embed" :disabled="!tailInTopbar" defer>
+      <PlatformCard
+        :selected="platform"
+        :login="login"
+        :login-busy="loginBusy"
+        :action-busy="loginActionBusy"
+        @pick="onPickPlatform"
+        @login="onLogin"
+        @save="onSaveLogin"
+        @logout="onLogout"
+      />
 
-    <TopbarTail
-      :score-max="scoreMax"
-      :min-score="minScore"
-      :segs="segs"
-      :tokens-total="tokensTotal"
-      :sensitive-open="sensitiveOpen"
-      :theme-label="themeLabel"
-      @toggle-sensitive="
-        () => {
-          sensitiveOpen = !sensitiveOpen;
-        }
-      "
-      @open-config="emit('navigate', 'config')"
-      @toggle-theme="
-        () => {
-          const t = flipTheme(themeLabel === '深色' ? 'dark' : 'light');
-          applyTheme(t);
-          themeLabel = t === 'dark' ? '深色' : '浅色';
-        }
-      "
-    />
+      <TopbarTail
+        :segs="segs"
+        :tokens-total="tokensTotal"
+        :sensitive-open="sensitiveOpen"
+        :theme-label="themeLabel"
+        @toggle-sensitive="
+          () => {
+            sensitiveOpen = !sensitiveOpen;
+          }
+        "
+        @open-config="emit('navigate', 'config')"
+        @toggle-theme="
+          () => {
+            const t = flipTheme(themeLabel === '深色' ? 'dark' : 'light');
+            applyTheme(t);
+            themeLabel = t === 'dark' ? '深色' : '浅色';
+          }
+        "
+      />
+    </Teleport>
 
     <ScrapeBar
       :progress="progress"

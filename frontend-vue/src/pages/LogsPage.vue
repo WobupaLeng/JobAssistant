@@ -12,7 +12,6 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { clearLogs, listLogs } from '../api/commands/logs';
 import { listDecisions } from '../api/commands/db';
-import { pageTestId } from '../lib_ui/nav';
 import { allLevels, levelCn, type LogLevel } from '../lib_ui/logfmt';
 import {
   AUTO_REFRESH_MS,
@@ -40,10 +39,10 @@ import RunLine from '../components/logs/RunLine.vue';
 
 defineProps<{ activeNav?: string }>();
 const emit = defineEmits<{
-  (e: 'navigate', nav: 'dashboard' | 'chat' | 'config' | 'logs'): void;
+  /** 浮层窗只有「回到概览」一个去向：聊天不是页（SPEC-001 AC9）。 */
+  (e: 'navigate', nav: 'dashboard'): void;
 }>();
 
-const pageId = pageTestId('logs');
 const view = ref<LogView>('decision');
 
 const runRows = ref<RunRow[]>([]);
@@ -145,6 +144,11 @@ function close(): void {
   emit('navigate', 'dashboard');
 }
 
+/* Esc 关闭（SPEC §6.1 / A10）：决策记录是最上面那一层，它不需要查「上层」。 */
+function onKeydown(ev: KeyboardEvent): void {
+  if (ev.key === 'Escape') close();
+}
+
 /* 自动刷新：setTimeout 链，卸载即杀；只有运行日志 + 开关开时才发 IPC。 */
 let autoTimer: ReturnType<typeof setTimeout> | null = null;
 let killed = false;
@@ -157,19 +161,22 @@ function scheduleAuto(): void {
 }
 
 onMounted(() => {
+  window.addEventListener('keydown', onKeydown);
   void loadRuns(true);
   void loadDecisions();
   scheduleAuto();
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown);
   killed = true;
   if (autoTimer !== null) clearTimeout(autoTimer);
 });
 </script>
 
 <template>
-  <section class="page page-logs" :data-testid="pageId">
+  <!-- 窗体锚点 decisions-panel 已唯一，页容器不再重复挂 page-logs（SPEC-001 AC9）。 -->
+  <section class="page page-logs">
     <div
       class="decisions-modal is-open"
       data-testid="decisions-panel"

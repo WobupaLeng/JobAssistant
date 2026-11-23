@@ -9,7 +9,7 @@
  *
  * 真源是 `prototypes/ui-v1/index.html`（UI_READY 冻结版）。
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -90,6 +90,45 @@ describe('日志行（原型 2526 用固定 log-row）', () => {
   it('每行都有 data-testid="log-row"', () => {
     const card = read('frontend-vue/src/components/LogCard.vue');
     expect(card).toContain('class="log-row" data-testid="log-row"');
+  });
+});
+
+describe('撤导航后的锚点净口径（用户裁决 5 / SPEC-001 AC9）', () => {
+  /** AC9 的「命中 0」必须覆盖整个 src，抽六个文件不够。 */
+  function readTree(dir: string): string {
+    const out: string[] = [];
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) out.push(readTree(p));
+      else if (/\.(vue|ts)$/.test(e.name)) out.push(readFileSync(p, 'utf8'));
+    }
+    return out.join('\n');
+  }
+  const src = readTree(join(ROOT, 'frontend-vue', 'src'));
+
+  it('nav-<slug> 与 page-<slug> 锚点、锚点助手、页签 class 全部命中 0', () => {
+    expect(src).not.toMatch(/data-testid="(nav|page)-/);
+    // 助手名只允许出现在注释里（说明它退役了），调用点必须为 0。
+    expect(src).not.toMatch(/\bnavTestId\s*\(/);
+    expect(src).not.toMatch(/\bpageTestId\s*\(/);
+    expect(src).not.toMatch(/\bNAV_BLOCK_CLASS\b/);
+    expect(src).not.toMatch(/class="[^"]*nav-tabs/);
+  });
+
+  it('撤导航后三个入口都还在：右栏 Boss 行 / 顶栏配置 / 日志卡头部决策记录', () => {
+    expect(src).toContain('data-testid="shell-config-btn"');
+    expect(src).toContain('data-testid="log-decisions-btn"');
+    expect(read('frontend-vue/src/components/chat/FriendList.vue')).toContain('`friend-${');
+  });
+
+  it('概览容器锚点照原型是 shell-dashboard（page-dashboard 已退役）', () => {
+    expect(src).toContain('data-testid="shell-dashboard"');
+  });
+
+  it('主题开关全站恰好一处（顶栏合并后壳不再自带）', () => {
+    const holders = SRC.filter(([, text]) => text.includes('data-testid="theme-toggle"'));
+    expect(holders).toHaveLength(1);
+    expect(holders[0]?.[0]).toBe('frontend-vue/src/components/TopbarTail.vue');
   });
 });
 

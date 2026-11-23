@@ -7,10 +7,10 @@
  * token 用量读数归顶栏 .tb-stats（AppShell / TopbarTail，本 lane 只读），此处不重复渲染。
  * 保存只提交 diff（features/config/model.buildPatch），掩码不回写、空串写 '' 不写 null。
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { getAppConfig, setAppConfig } from '../api/commands/config';
 import type { AppConfigReply } from '../api/types';
-import { pageTestId } from '../lib_ui/nav';
+import { hasHigherOverlay } from '../lib_ui/overlay-stack';
 import {
   buildPatch,
   defaultPrompt,
@@ -25,10 +25,10 @@ import ConfigSection from '../components/config/ConfigSection.vue';
 
 defineProps<{ activeNav?: string }>();
 const emit = defineEmits<{
-  (e: 'navigate', nav: 'dashboard' | 'chat' | 'config' | 'logs'): void;
+  /** 浮层窗只有「回到概览」一个去向：聊天不是页（SPEC-001 AC9）。 */
+  (e: 'navigate', nav: 'dashboard'): void;
 }>();
 
-const pageId = pageTestId('config');
 
 const config = ref<AppConfigReply | null>(null);
 const stored = ref<ConfigDraft>(emptyDraft());
@@ -100,10 +100,20 @@ function close(): void {
 }
 
 onMounted(load);
+
+/* Esc 关闭（SPEC §6.1 / A10）：一次 keydown 只关最上面那一层，决策记录在配置之上。 */
+function onKeydown(ev: KeyboardEvent): void {
+  if (ev.key !== 'Escape') return;
+  if (hasHigherOverlay('config')) return;
+  close();
+}
+onMounted(() => window.addEventListener('keydown', onKeydown));
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 </script>
 
 <template>
-  <section class="page page-config" :data-testid="pageId">
+  <!-- 窗体锚点 config-panel 已唯一，页容器不再重复挂 page-config（SPEC-001 AC9）。 -->
+  <section class="page page-config">
     <div
       class="config-modal is-open"
       data-testid="config-panel"

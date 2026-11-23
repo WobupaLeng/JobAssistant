@@ -699,12 +699,23 @@
   color: var(--text-3);
 }
 
-/* ---------- 顶栏尾段（概览页） ---------- */
+/* ---------- 顶栏单行：落位盒 + 尾段（SPEC-001 决策 7 / §11.3 / A33） ---------- */
+
+/* AppShell 在 header.topbar 里留的空盒：概览把平台卡与尾段 teleport 进来。
+ * `display: contents` 让这个盒子不产生新的 flex 容器——teleport 进来的元素成为
+ * 顶栏的直接 flex 子项，品牌 | 平台卡 | 尾段的间距与原型 L1363-1410 同一套。 */
+.tb-embed {
+  display: contents;
+}
+
+/* 顶栏尾段：margin-left: auto 把整组顶到右端（原型 L512，断言 A33），
+ * 所以它与前面的分段控件之间不需要占位 spacer。 */
 .tb-tail {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  margin-left: auto;
 }
 
 .segmented {

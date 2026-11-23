@@ -11,6 +11,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import type { Job } from '../api/types';
 import { getJob } from '../api/commands/db';
+import { hasHigherOverlay } from '../lib_ui/overlay-stack';
 import {
   DASH,
   actionFailPrefix,
@@ -109,9 +110,11 @@ watch(
 );
 
 // Esc 关闭。挂 window 而不是面板：用户焦点可能还停在列表里。
+// 分层判据（SPEC §6.1 / A10）：决策记录与配置在抽屉之上，它们开着时这层不出手。
 function onKeydown(ev: KeyboardEvent): void {
   if (ev.key !== 'Escape') return;
   if (!props.job) return;
+  if (hasHigherOverlay('drawer')) return;
   ev.preventDefault();
   close();
 }

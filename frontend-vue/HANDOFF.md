@@ -9,7 +9,9 @@
 
 ## 1. 现状
 
-`frontend-vue/` 已进入 **Vue 3 + Vite + TypeScript 原地重写**：ARCH-003 **阶段 0–4 完成 + 后端功能接线对齐 + 登录接线**——`src/api/**` 覆盖全部 48 条命令（`tests/commands-payload.test.ts` 守卫）、四页全部接线（`App.vue` 分发：概览常挂 + 聊天/配置/日志浮层）、`npm run typecheck` 0 错、`npm run build` 通过、vitest 全绿。
+`frontend-vue/` 已进入 **Vue 3 + Vite + TypeScript 原地重写**：ARCH-003 **阶段 0–4 完成 + 后端功能接线对齐 + 登录接线 + M1 同屏编排合并**——`src/api/**` 覆盖全部 48 条命令（`tests/commands-payload.test.ts` 守卫）、`npm run typecheck` 0 错、`npm run build` 通过、vitest 全绿。
+
+**`App.vue` 分发的当前形态（SPEC-001 / ADR-004，取代此前「四页 + 浮层」的写法）**：概览**常挂**＋**同屏聊天层**（`aside.chat-rail` 与 `.chat-detach` 是 `.app-body` 的直接 flex 子项，点 Boss 就地展开、压缩主列）＋**只有 config / logs 两个浮层窗**。聊天**不是页**，二级导航（概览｜Boss 消息｜配置｜决策记录）已按用户裁决撤除，顶栏合并为单行。
 
 **Leptos 0.8 `.rs` 已全部退役**（阶段 4 完成，用户裁决「先删除」）：`src/` 下 `.rs` 计数 **0**（pages 5 + 第一批 41 + 第二批 15，含 `lib.rs`/`main.rs`/两个 `mod.rs`；git 历史可取回，提交 53d05cb 之前）。注释溯源统一改写为「Leptos 版已退役，见 git 历史」。后端 `backend-tauri/` 不动。方案见 [`ARCH-003`](../docs/architecture/ARCH-003-vue-frontend-migration.md)。
 
@@ -17,7 +19,7 @@
 
 **M5 补遗完成**：`JobDetailDrawer.vue`（kv 十行/JD 四态/chips/单条 reject↔allow 同位单按钮/Esc 摘除）、`PlatformCard.vue`（三平台、boss 登录已接 `login_start`/`login_status`，智联/51job `is-off`）、`AppErrorBar.vue` 改 FIFO 队列（上限 5 + dropped 计数 + 逐条关闭 + aria-live）；视图模型 `lib_ui/{job-detail-model,platform-model,error-queue}.ts`。
 
-**测试现状**：`npx vitest run` 全量全绿（34 文件 565 用例）。秒/毫秒判据已修为 `1e11`（见 §2.3）。
+**测试现状**：`npx vitest run` 全量全绿（数字以现场实跑为准，本文件不记用例数）。秒/毫秒判据已修为 `1e11`（见 §2.3）。
 
 **几何契约补齐完成**（用户裁决「补齐实现，规格不动」）：原型 v7/v8 响应式几何已搬进 Vue——`tokens.css` 追加 `--ui-scale`（`lib_ui/canvas.ts` 的 `computeUiScale = clamp(1, innerWidth/1920, 1.5)`）+ 5 档 `--fs-{2xs,xs,sm,md,lg}`（11/12/13/15/20px × scale）；`lib_ui/use-canvas-scale.ts` 在 AppShell onMounted/resize（rAF 合并）按 `--ui-scale→--rail-w→--detach-w` 顺序写变量；**全部 174 处 font-size 声明用 var()，产物裸 px 字号归零**（vue 系 + 10 份契约 CSS 共享控件均收口）；三窗固定高乘 scale（config 640 / decisions 620 / sensitive 720），对话框宽 `clamp(600,50vw,80vw)` 不乘 scale，A54 job-greet 方块公式落地；`--detach-w` 单一来源（ChatPage 行内绑定已删，只留 syncCanvas + vue-chat.css 静态兜底）；敏感库居中窗规则从 vue-pages.css 覆写迁回 sensitive.css 本体。**残留非阻塞**：契约 CSS 160 处颜色字面量（vue 系已零，全量收口需另轮新增语义令牌）；非字号定值（.job-check/.score-box 等）原型本就是定值，未乘 scale。
 
@@ -26,6 +28,19 @@
 **后端功能接线对齐 + 登录接线完成**（提交链 d3cd57d→0cc998d→b6bebde→603de63）：① 载荷形状按 tauri 2 参数规则修正——`score_job` 收 `ScoreArgs` struct 改 `invokeArgs`（`args` 包裹）、`passes_threshold` 标量门槛键 `min_score`→`minScore`；② `scrape-filter-model.ts` 新增 `BACKEND_READ_KEYS`（14 条驼峰→蛇形，与后端 `KEY_SCRAPE_*` 逐字对齐），`applyBackend` 改蛇形回读（9 个多词键重启后正确回显），写入方向仍驼峰；③ 登录接线——`src/api/events.ts` `listenLoginState` 经 `window.__TAURI_INTERNALS__`（`plugin:event|listen` + `transformCallback`，零 `@tauri-apps/*` 依赖，非 Tauri 降级 no-op）消费冻结事件 `login-state`（payload 蛇形 `{platform,state,logged_in}`）；`lib_ui/login-model.ts`（`mergeLoginState` 未知态不覆盖已知态 + `loginBadge` + 保存/退出按钮派生 + `scanFlagVisible`）；`PlatformCard.vue` 新增 `platform-login-save-btn`/`platform-logout-btn`/`resolve-scan-flag`（waiting 态二维码，`data:image/` 才画）；`DashboardPage.vue` onMounted 订阅/onBeforeUnmount 退订 + visibilitychange/5s tick `login_status` 兜底。新增 login-{events,model,page} 41 用例。**`resolve-scan-flag` 无真源**（冻结规格仅裸名），按「waiting 态平台卡内显示二维码」推断落地，lead 已追认（可逆）。
 
 **最终集成产物冒烟通过**（release-smoke @0225c3c）：`tauri build --no-bundle` 独占 jt-release3 exit 0（4m45s），exe 7,241,216 B SHA256 `22F31652BA65795CB0F524FB0EB640FCFE6105F3B4C371F72730095E99103C46`；工作区外 jt-release-smoke3 启动无 os error 5、WebView2 renderer 拉起、CDP 取证仪表盘 28 岗位 + 分值 + 打招呼 + 筛选城市深圳 + 配置掩码 ****1883 不回写 + 敏感库 20；CSP 内嵌 `wasm-unsafe-eval`=0；`login-state` 经真实 `plugin:event|emit` 验证 listen→merge→渲染链路（save/logout 按钮 1ms 渲染），登录 DOM 门控以披露式合成态注入取证（prod `__TAURI_INTERNALS__.invoke` 冻结不可桩）。证据 `%TEMP%\jt-release-smoke3\cdp-{dashboard,filter-city,scan-flag,login-buttons}.png`。**真实扫码/抓取仍受根 §6.2 Chrome 阻塞**。
+
+**M1 同屏编排合并完成**（[`ADR-004`](../docs/adr/ADR-004-legacy-chat-orchestration.md) / [`SPEC-001-legacy-chat-merge`](../docs/specs/SPEC-001-legacy-chat-merge.md) 用户裁决「方案 1」，零后端改动）：
+① **编排提升**——`App.vue` 去整页分发，`ChatPage.vue` 改为壳级聊天层（多根 fragment，不再有 `<section class="page page-chat">`），`chatOpen` 上抛给唯一壳节点的 `.is-chat-open`；双层 `.app-shell`（`app-shell-slot` 外套 + `app-root` 内套）收敛为单层。
+② **裁决 X 复活**——`vue-dashboard.css` 那组「展开态列数 = 收起 −1」规则此前是死代码（展开时概览已卸载），现在真正生效；展开规则仍写在 ≤1599 断点之后（A52 顺序敏感，`tests/geometry.test.ts` 守）。
+③ **greet 就地链**——`DashboardPage.onGreet` 不再 `emit('navigate','chat')`，改 `emit('greet')` → `App.vue` 调聊天层的 `consumeGreetDraft()`：匹配好友 ⇒ 选中 ⇒ 预填 ⇒ `focus()`，不发送不换页（AC7）。
+④ **顶栏单行 + 撤导航**——`AppShell` 删页签行与自带 `theme-toggle`，改提供一个 `display: contents` 的 `.tb-embed` 落位盒；平台卡与尾段仍由概览持有数据、经 `<Teleport :disabled="!tailInTopbar" defer>` 搬进那一行（独立 mount 时落位盒不存在 ⇒ 就地渲染，用例口径不变）。`.tb-tail { margin-left: auto }`（A33），配置按钮锚点改 `shell-config-btn`，满分 chip 出顶栏（`score-spec` 唯一落点回到日志卡头部）。
+⑤ **Esc 分层**——新单源表 `lib_ui/overlay-stack.ts`（决策记录 → 配置 → 抽屉/敏感库 → 对话框），四个消费方共用；配置与决策记录补上了原先缺失的 Esc 关闭。**敏感库面板自己仍不回应 Esc**（只有 backdrop 与关闭按钮），留给下一轮。
+⑥ **几何兜底换宿主**——`--rail-w` / `--detach-w` 的静态兜底从 `.page-chat` 移到 `.app-body`（SPEC §2.1 口径），运行期真实值仍只由 `canvas.ts:syncCanvas()` 写。
+
+**M1 锚点增删清单（QA 重锚用，SPEC-001 §QA 重锚清单的实测结果）**：
+- 退役（全站命中 0，`tests/qa-testids.test.ts` 新增 describe 守）：`nav-dashboard` / `nav-chat` / `nav-config` / `nav-logs`、`page-dashboard` / `page-chat` / `page-config` / `page-logs`、`navTestId` / `pageTestId` 两个助手、`.nav-tabs` 页签 class 与 `controls.css` 的两条 `.nav*` 规则。
+- 新增：`shell-dashboard`（概览容器，原型 L1418）、`shell-config-btn`（顶栏配置入口）、`topbar-tail-mount`（`.tb-embed` 落位盒）。
+- 不变：四个废止 testid 仍 0；`chat-rail` 全站恰好一处且仍在 `src/pages/ChatPage.vue`（`qa-testids.test.ts:84` 的路径断言未改）；`theme-toggle` 全站恰好一处（现在只有 `TopbarTail` 挂）。
 
 ---
 
@@ -44,6 +59,8 @@
 | 焦点断言恒为 `<body>` | `mount()` 没 `attachTo`，元素不在文档里 | `mount(C, { attachTo: document.body })`，并在断言前 `await new Promise(r => setTimeout(r, 0))` 让 `nextTick` 里的 `focus()` 落地 |
 | 测「关闭后清空」时 `Unable to get [data-testid=...]` | 面板 `v-if` 已卸载，DOM 不存在 | 断言重开后的值，不要查已卸载的元素 |
 | `npm run build` 打印 `✓ built` 但样式大面积丢失 | `styles/pages.css` 的块注释里用反引号包了 `*/`，注释提前闭合，**其后四份样式表整体失效**，只报一条 `[css-syntax-error] Unexpected "\`"` | 改完 CSS **去产物里数选择器**：`(Select-String dist/assets/*.css -Pattern '\.xxx').Count`，不要只看构建成功 |
+| CSS 块注释的**收尾那一行**里出现反引号包住的代码字面量 | 反引号之后的文本里带 `*/`，注释提前闭合，整份样式表被静默判定非法（`geometry.test.ts:141` 就是为此而写）。`.app-body` 那批新注释第一版就踩了：`` `.nav-mid` `` 和 `*/` 落在同一行 | 行尾注释行不要出现反引号；改完跑 `npx vitest run` 里那条 CSS 注释用例 |
+| 概览常挂后右栏被挤掉一列 / 顶栏 teleport 落位盒变成布局盒 | `.app-body` 由 column 改 row 后，`config` / `logs` 的包裹 `<section>` 还留在 flex 流里占一格；`.tb-embed` 若不给 `display: contents` 就多做一层容器 | 浮层窗包裹层 `position: fixed; inset: 0; pointer-events: none`（弹窗本体 `pointer-events: auto`）；落位盒必须 `display: contents` |
 | `npm install` 报 `EBUSY ... node_modules/esbuild.exe` 或 SSL 失败 | 残留 `node` 进程持有 exe；直连 npmjs 被代理拦 | 先 `Remove-Item node_modules -Recurse -Force`，再 `npm install --registry https://registry.npmmirror.com` |
 | 批量改源码后出现 `from '../../api/types.'`、`.idle. | .running.` 这类怪串 | PowerShell `.Replace()` 把替换串里的单引号吃掉（根 AGENTS §6 明禁） | 批量字面量替换一律 Python `str.replace` 或 `edit` 工具；改完全仓扫 `(?<![\.\w])\.\.(?![\./\w])` 复核 |
 
@@ -72,9 +89,10 @@
 1. **QA 只读验收**：✅ 已完成（qa-verify 判 QA_FAILED → 用户裁决全部修 → 修复轮落地，474 用例全绿，见 §1）。
 2. **几何契约补齐**：✅ 已完成（用户裁决「补齐实现」，见 §1）——`--ui-scale` + 5 档 `--fs-*` 落地，174 处 font-size 全 var()、产物裸 px 归零，三窗 scale + 敏感库 720 居中窗 + A54，`--detach-w` 单一来源。残留：契约 CSS 160 处颜色字面量全量收口（非阻塞，另轮）。
 3. **槽位 C 产物冒烟**（根 AGENTS §5.3 / ARCH-003 §6 R5，用户已授权 release lane）：先删 CSP `'wasm-unsafe-eval'`（ARCH-003:248 阶段 4 遗漏，WASM 已不存在），再 `cd backend-tauri && npx tauri build --no-bundle`（独占 `CARGO_TARGET_DIR=%TEMP%\jt-release`），产物拷到**工作区外**启动，确认 Vue 真渲染（CSP 白屏唯一实测点）。
-4. **登出入口接线**（§3.3 #6，后端+前端两边）：主进程把 `login.state` emit 给 WebView；前端 PlatformCard 已接 `login_start`/`login_status`，缺 `login_save`/`logout` 与事件订阅。
-5. **Liquid Glass L2/L3**（根 §7.2 #3，待用户裁决是否开工）：规格 `git show d39bae4:docs/ui/UI-SPEC-liquid-glass-l2-l3.md`。
-6. 后端未决项（根 §7.2 #1/#4/#5）与 QA 低#1-3 alias 缺口，单独路由 legacy/backend lane。
+4. **登出入口接线**：✅ 已完成（`login-state` emit + 前端订阅 + 保存/退出按钮，见 §1）。
+5. **M1 同屏编排合并**：✅ 已完成（ADR-004 / SPEC-001，见 §1 的锚点增删清单）。下一手按 Chief 的顺序硬约束：**有稿设计**修 A–H 剩余像素（F 顶栏单行已由 M1 做掉）→ **前端打磨**收视觉与动效 → **QA** 按上面清单重锚 + 零 Mock 验收。
+6. **Liquid Glass L2/L3**（根 §7.2 #3，待用户裁决是否开工）：规格 `git show d39bae4:docs/ui/UI-SPEC-liquid-glass-l2-l3.md`。
+7. 后端未决项（根 §7.2 #1/#4/#5）与 QA 低#1-3 alias 缺口，单独路由 legacy/backend lane。
 
 ### 3.2 需要拍板的开放项
 

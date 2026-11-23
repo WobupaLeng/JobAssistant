@@ -1,6 +1,12 @@
 <script setup lang="ts">
 /**
- * Boss 消息页（M2）。
+ * 同屏聊天层（原「Boss 消息页」）。
+ *
+ * **决策溯源见改造入口 `App.vue`（ADR-004 只在那里落一处注释）**：聊天不再是一整页，
+ * 本组件随之从 `pages/` 的整页升为壳级常驻层（图纸
+ * [`SPEC-001-legacy-chat-merge`](../../docs/specs/SPEC-001-legacy-chat-merge.md) 决策 1）。
+ * 文件名保留 `ChatPage.vue`：`tests/chat-contract.test.ts` / `geometry-collect.test.ts` /
+ * `qa-testids.test.ts` 都按这个路径读源码取证，改名等于把 QA 锚点地图一起改掉。
  *
  * ## 口径
  * 结构与 testid 的唯一真源是冻结原型 `prototypes/ui-v1` + `docs/ui/UI-SPEC-chat-detach-v3.md`
@@ -11,14 +17,20 @@
  * - `chat-detach-close-btn` / `Esc` 收起并**保留** activeFriend，再点同一位重开；
  * - 全站唯一输入框在对话框聊天区底部；Boss 列表底部不设发送框。
  *
+ * ## DOM 形状（SPEC §2.1 / §2.4 / A15）
+ * 本组件是**多根 fragment**：`aside.chat-rail` 与 `.chat-detach` 直接成为外壳
+ * `.app-body` 的 flex 子项，中间不再套 `<section class="page-chat">`。套一层就多出一个布局盒，
+ * 对话框便不是「flex 压缩主列」而是被套住 —— A15 的 `position: static` 与主列宽度联动
+ * 判据都要求它按 `.app-body` 的子项参与布局。求职期望行与两条提示行归右栏末尾。
+ *
  * ## 数据
- * 好友列表 / 消息 / 简历 / 期望职位都走 `src/api/commands/*`，本页不假设任何后端形状。
- * 自动投递条的循环在这里起停（`features/auto/queue.ts`）：每秒问一次后端状态，
- * 到点才发一条；WebView 挂起时循环自然停（C16）。
+ * 好友列表 / 消息 / 简历 / 期望职位都走 `src/api/commands/*`，本层不假设任何后端形状。
+ * **层与概览同屏 ⇒ 会话列表在应用启动时就拉一次**（R1 的「不切页就能发现新消息」），
+ * 自动投递条的循环也随层起停（`features/auto/queue.ts`）：每秒问一次后端状态，到点才发一条；
+ * WebView 挂起时循环自然停（C16）。
  *
  * ## 独立 mount
- * 本页不依赖 `App.vue`：`nav` 只是给外壳用的可选项（`page-chat` 锚点由外壳给），
- * 测试可以直接 `mount(ChatPage)`。
+ * 本层不依赖 `App.vue`：测试可以直接 `mount(ChatPage)`（SPEC-001 测试口径「保留独立 mount」）。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
@@ -34,7 +46,6 @@ import {
 import { greetDraft, greetOne } from '../api/commands/greet';
 import { sessionOpen } from '../api/commands/scrape';
 import type { ChatMessage, Expectation, Friend, GreetReply, ResumeItem } from '../api/types';
-import type { Nav } from '../lib_ui/nav';
 import AutoApplyBar from '../components/chat/AutoApplyBar.vue';
 import ChatCompose from '../components/chat/ChatCompose.vue';
 import ChatDetach from '../components/chat/ChatDetach.vue';
@@ -73,18 +84,14 @@ import {
   withPending,
 } from '../lib_ui/chat-model';
 import { peekGreetDraft, takeGreetDraft } from '../features/chat/greet-draft';
+import { hasHigherOverlay } from '../lib_ui/overlay-stack';
 
-const props = withDefaults(
-  defineProps<{
-    /** 外壳当前页（本页只在 `chat` 时被渲染；留作断言/调试用）。 */
-    activeNav?: string;
-  }>(),
-  { activeNav: 'chat' },
-);
-
+/**
+ * 展开态上抛给 `App.vue` → `AppShell` 的 `.is-chat-open`：
+ * 右栏让位与「列数 = 收起态 − 1」（SPEC §16.9 裁决 X）的 CSS 钩子都挂在那一个壳节点上。
+ * 本层不再 emit `navigate` —— 聊天不是页，没有可去的页。
+ */
 const emit = defineEmits<{
-  (e: 'navigate', nav: Nav): void;
-  /** 展开态上抛给 App.vue → AppShell 的 `.is-chat-open`（右栏让位 / 列数 −1 的 CSS 钩子）。 */
   (e: 'chat-open', open: boolean): void;
 }>();
 
@@ -457,11 +464,13 @@ function onResize(): void {
 
 function onKeydown(ev: KeyboardEvent): void {
   if (ev.key !== 'Escape') return;
-  // Esc 分层：本页没有更上层的东西，直接收对话框（SPEC §6.1）。
-  if (ui.value.chatOpen) {
-    ev.stopPropagation();
-    close();
-  }
+  if (!ui.value.chatOpen) return;
+  // Esc 分层（SPEC §6.1 / A10）：一次 keydown 只关最上面那一层。
+  // 决策记录 / 配置 / 岗位抽屉 / 敏感库开着时，这层不出手（优先级表单源在
+  // `lib_ui/overlay-stack.ts`，四个消费方共用，不在各自文件里抄选择器）。
+  if (hasHigherOverlay('chat')) return;
+  ev.stopPropagation();
+  close();
 }
 
 onMounted(() => {
@@ -527,20 +536,65 @@ defineExpose({
 </script>
 
 <template>
-  <section class="page page-chat" data-testid="page-chat" :data-active-nav="props.activeNav">
-    <!-- ===== 右栏：Boss 列表（默认常驻） ===== -->
-    <aside class="chat-rail" data-testid="chat-rail">
+  <!-- ===== 右栏：Boss 列表（默认常驻，`.app-body` 的直接 flex 子项） ===== -->
+  <aside class="chat-rail" data-testid="chat-rail">
+    <AutoApplyBar
+      v-if="autoBarLocation === 'rail'"
+      :status="autoStatus"
+      :sending="autoSending"
+      :busy="autoBusy"
+      @toggle="onAutoToggle"
+      @stop="onAutoStop"
+    />
+    <FriendList
+      prefix="chat-rail"
+      :title="CHAT_RAIL_TITLE"
+      :friends="visibleFriends"
+      :active-uid="ui.activeFriendsUid"
+      :loading="loadingFriends"
+      :error="friendsError"
+      :search="search"
+      @pick="pick"
+      @refresh="loadFriends"
+      @retry="loadFriends"
+      @search="search = $event"
+    />
+    <!-- 右栏 aria-live 汇报区（SPEC §4.2 的 chat-rail-state-announce）：
+         与对话框里的 chat-detach-state-announce 同源，文案都由常量给出，不复制字面量。 -->
+    <span class="sr-only" data-testid="chat-rail-state-announce" aria-live="polite">{{
+      CHAT_STATE_ANNOUNCE_TEXT
+    }}</span>
+
+    <!-- 求职期望 + 两条提示行：整页化退役后归右栏末尾（原型里没有这三行，
+         属 Vue 侧既有功能；位置与像素由有稿设计在 A–H 轮定）。 -->
+    <ExpectRow :items="expectations" :loading="expectLoading" :error="expectError" />
+    <div v-if="note !== ''" class="cfg-hint chat-note" data-testid="chat-note">{{ note }}</div>
+    <div v-if="autoNote !== ''" class="cfg-hint chat-note" data-testid="auto-note">{{ autoNote }}</div>
+  </aside>
+
+  <!-- ===== 对话框：点 Boss 才展开 ===== -->
+  <ChatDetach
+    :open="ui.chatOpen"
+    :friend="activeFriend"
+    :count="friends.length"
+    @close="close"
+  >
+    <template #head>
       <AutoApplyBar
-        v-if="autoBarLocation === 'rail'"
+        v-if="autoBarLocation === 'detach'"
         :status="autoStatus"
         :sending="autoSending"
         :busy="autoBusy"
         @toggle="onAutoToggle"
         @stop="onAutoStop"
       />
+    </template>
+
+    <template #rail>
       <FriendList
-        prefix="chat-rail"
-        :title="CHAT_RAIL_TITLE"
+        v-if="ui.chatOpen"
+        prefix="chat-detach-rail"
+        :title="'Boss 列表'"
         :friends="visibleFriends"
         :active-uid="ui.activeFriendsUid"
         :loading="loadingFriends"
@@ -551,84 +605,38 @@ defineExpose({
         @retry="loadFriends"
         @search="search = $event"
       />
-      <!-- 右栏 aria-live 汇报区（SPEC §4.2 的 chat-rail-state-announce）：
-           与对话框里的 chat-detach-state-announce 同源，文案都由常量给出，不复制字面量。 -->
-      <span class="sr-only" data-testid="chat-rail-state-announce" aria-live="polite">{{
-        CHAT_STATE_ANNOUNCE_TEXT
-      }}</span>
-    </aside>
+    </template>
 
-    <!-- ===== 对话框：点 Boss 才展开 ===== -->
-    <ChatDetach
-      :open="ui.chatOpen"
-      :friend="activeFriend"
-      :count="friends.length"
-      @close="close"
+    <ChatThread
+      :friend="talkableFriend"
+      :messages="messages"
+      :loading-messages="loadingMessages"
+      :resumes="resumes"
+      :resumes-open="resumesOpen"
+      :resumes-loaded="resumesLoaded"
+      :greet="greet"
+      :generating="generating"
+      :sending-greet="sendingGreet"
+      :recalling="recalling"
+      @generate-greet="generateGreet"
+      @toggle-resumes="resumesOpen = !resumesOpen"
+      @send-resume="sendResume"
+      @recall="recall"
+      @send-greet="sendGreet"
+      @greet-to-draft="greetToDraft"
+      @discard-greet="greet = null"
     >
-      <template #head>
-        <AutoApplyBar
-          v-if="autoBarLocation === 'detach'"
-          :status="autoStatus"
-          :sending="autoSending"
-          :busy="autoBusy"
-          @toggle="onAutoToggle"
-          @stop="onAutoStop"
+      <template #compose>
+        <!-- 唯一输入框：显式绑 modelValue + update（不走 v-model 的模板展开）。 -->
+        <ChatCompose
+          v-if="canTalk"
+          ref="composeRef"
+          :model-value="draft"
+          :sending="sending"
+          @update:model-value="draft = $event"
+          @send="send"
         />
       </template>
-
-      <template #rail>
-        <FriendList
-          v-if="ui.chatOpen"
-          prefix="chat-detach-rail"
-          :title="'Boss 列表'"
-          :friends="visibleFriends"
-          :active-uid="ui.activeFriendsUid"
-          :loading="loadingFriends"
-          :error="friendsError"
-          :search="search"
-          @pick="pick"
-          @refresh="loadFriends"
-          @retry="loadFriends"
-          @search="search = $event"
-        />
-      </template>
-
-      <ChatThread
-        :friend="talkableFriend"
-        :messages="messages"
-        :loading-messages="loadingMessages"
-        :resumes="resumes"
-        :resumes-open="resumesOpen"
-        :resumes-loaded="resumesLoaded"
-        :greet="greet"
-        :generating="generating"
-        :sending-greet="sendingGreet"
-        :recalling="recalling"
-        @generate-greet="generateGreet"
-        @toggle-resumes="resumesOpen = !resumesOpen"
-        @send-resume="sendResume"
-        @recall="recall"
-        @send-greet="sendGreet"
-        @greet-to-draft="greetToDraft"
-        @discard-greet="greet = null"
-      >
-        <template #compose>
-          <!-- 唯一输入框：显式绑 modelValue + update（不走 v-model 的模板展开）。 -->
-          <ChatCompose
-            v-if="canTalk"
-            ref="composeRef"
-            :model-value="draft"
-            :sending="sending"
-            @update:model-value="draft = $event"
-            @send="send"
-          />
-        </template>
-      </ChatThread>
-    </ChatDetach>
-
-    <!-- ===== 求职期望 + 提示行 ===== -->
-    <ExpectRow :items="expectations" :loading="expectLoading" :error="expectError" />
-    <div v-if="note !== ''" class="cfg-hint chat-note" data-testid="chat-note">{{ note }}</div>
-    <div v-if="autoNote !== ''" class="cfg-hint chat-note" data-testid="auto-note">{{ autoNote }}</div>
-  </section>
+    </ChatThread>
+  </ChatDetach>
 </template>

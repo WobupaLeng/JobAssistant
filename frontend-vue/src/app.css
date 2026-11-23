@@ -11,15 +11,22 @@ body,
   height: 100%;
 }
 
-/* 页面分发槽：吃掉外壳剩下的高度、自己滚动
- * （等价于 Leptos 版 .dashboard 容器在 .app-shell 里的 flex 行为）。 */
+/* 同屏三兄弟的容器（SPEC §2.1 / §2.4 / A15，ADR-004 目标编排）。
+ *
+ * 原型 L555-559：`display:flex; flex-direction:row; align-items:stretch;
+ * flex:1 1 auto; min-height:0; gap:var(--rail-gap)`。`--rail-gap` 原型定义在
+ * :root（L136）＝ 12px × --ui-scale，本项目不新增 token，把同一个算式写在这里。
+ *
+ * 纵向滚动交回各列自己（主列 .page-dashboard / 右栏 .chat-rail / 对话框各段）：
+ * 容器一旦自己滚，展开对话框时整页会被推走，「同屏压缩」就看不出来。 */
 .app-body {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  overflow-x: hidden;
+  flex-direction: row;
+  align-items: stretch;
+  gap: calc(12px * var(--ui-scale));
+  overflow: hidden;
   padding-top: 10px;
 }
 
@@ -148,8 +155,17 @@ body,
  *
  * 容器不设底色，玻璃与边框借 .card；这里只负责一条横排、可换行、不撑破。
  */
+/* 主列（被压缩方）：原型 L560-567 的 .dashboard 口径。
+ * 内部仍是原来的块流（卡片自带外边距），这里只补「作为 flex 子项」的四件事：
+ * 吃掉剩余宽、min-width:0（否则对话框展开时它不缩，会把右栏顶出窗口）、
+ * 自己滚、以及原型那条 flex-basis 过渡（宽度过渡只走 flex，禁 translateX，SPEC §2.2 硬约束 4）。 */
 .page-dashboard {
   display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  transition: flex-basis 240ms var(--ease-glass);
 }
 
 .scrape-filter-bar {

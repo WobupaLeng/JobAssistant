@@ -126,13 +126,18 @@ async function mountPage(opts: { friends?: Friend[] } = {}) {
 }
 
 describe('展开 / 收起（SPEC §3 状态机 + 单处渲染）', () => {
-  it('首帧：右栏在、对话框 hidden，页面锚点是 page-chat', async () => {
+  it('首帧：右栏与对话框是层的两个根节点，`page-chat` 整页锚点已退役（ADR-004）', async () => {
     const w = await mountPage();
-    expect(w.find('[data-testid="page-chat"]').exists()).toBe(true);
-    expect(w.find('[data-testid="chat-rail"]').exists()).toBe(true);
-    const detach = w.find('[data-testid="chat-detach"]');
-    expect(detach.exists()).toBe(true);
-    expect(detach.attributes('hidden')).toBeDefined();
+    // 聊天不再是「页」：那个 <section class="page page-chat"> 一起删掉，
+    // 右栏与对话框直接成为外壳 .app-body 的 flex 子项（SPEC §2.1 / A15）。
+    expect(w.find('[data-testid="page-chat"]').exists()).toBe(false);
+    expect(w.find('.page-chat').exists()).toBe(false);
+    const roots = w.findAll('[data-testid="chat-rail"], [data-testid="chat-detach"]');
+    expect(roots).toHaveLength(2);
+    // DOM 顺序照原型 HTML（L1734 右栏 在前、L1773 对话框 在后）：Tab 序 = 主列 → 右栏 → 对话框。
+    expect(roots[0]!.attributes('data-testid')).toBe('chat-rail');
+    expect(roots[1]!.attributes('data-testid')).toBe('chat-detach');
+    expect(roots[1]!.attributes('hidden')).toBeDefined();
     w.unmount();
   });
 
@@ -148,6 +153,30 @@ describe('展开 / 收起（SPEC §3 状态机 + 单处渲染）', () => {
     expect(w.find('[data-testid="chat-detach-sub"]').text()).toContain('星瀚科技');
     // SPEC §4.1：消息容器的契约名是 chat-detach-thread（不是 Leptos 遗留的 chat-feed）。
     expect(w.find('[data-testid="chat-detach-thread"]').exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('Esc 只关最上面那一层：配置浮层开着时对话框不动（SPEC §6.1 / A10 / AC5）', async () => {
+    const w = await mountPage();
+    await w.find('[data-testid="friend-u1"]').trigger('click');
+    await flushPromises();
+    const detach = () => w.find('[data-testid="chat-detach"]');
+    expect(detach().attributes('hidden')).toBeUndefined();
+
+    // 上层（配置窗）在场：这层 Esc 不出手。
+    const overlay = document.createElement('div');
+    overlay.setAttribute('data-testid', 'config-panel');
+    document.body.appendChild(overlay);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await flushPromises();
+    expect(detach().attributes('hidden')).toBeUndefined();
+
+    // 上层关掉后，下一次 Esc 才收对话框（选中仍保留，A7）。
+    overlay.remove();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await flushPromises();
+    expect(detach().attributes('hidden')).toBeDefined();
+    expect(detach().classes()).not.toContain('is-open');
     w.unmount();
   });
 

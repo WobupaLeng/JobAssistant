@@ -309,26 +309,14 @@
   color: var(--primary);
 }
 
-/* 顶栏导航页签比列表页签大一点：它是主导航 */
-.nav-tabs .tab {
-  height: 26px;
-  padding: 0 12px;
-  font-size: var(--fs-sm);
-}
-
-/* 顶栏导航块：页签 + 敏感库入口捆在一起。
- * `display: contents` 让这层包裹盒不产生新的 flex 容器——页签与入口仍然
- * 是 `.topbar` 的直接 flex 子项，间距、垂直居中、换行行为全部不变，
- * 只是「决策记录」与敏感库按钮之间不再隔着 `.spacer` 的半个顶栏。 */
-.nav {
-  display: contents;
-}
-
-/* 敏感库入口住在顶栏导航里（用户裁决：放在「决策记录」旁边）。
- * 它的按钮是 `.btn.btn-sm`，而顶栏页签是 26px 的胶囊；两者混排时
- * 高度与圆角会打架，所以这里把它对齐成页签的尺寸。
- * 限制在 `.nav` 后代上：万一别处再挂一颗同名按钮，不该被顶栏的尺寸绑住。 */
-.nav button[data-testid='sensitive-open'] {
+/* 二级导航（概览 | Boss 消息 | 配置 | 决策记录）已按用户裁决撤除：
+ * legacy-baseline §9 Q-1「用户裁决：删除二级导航」+ §7-K4（结构树明写无 nav.page-tabs）、
+ * 原型 L1413「用户裁决 5」、ADR-004（聊天不再是整页，Boss 消息常驻右栏）。
+ * 随之退役两条规则：`.nav-tabs .tab`（页签尺寸）与 `.nav { display: contents }`（页签包裹盒）。
+ *
+ * 下面这条敏感库尺寸口径原本挂在 `.nav` 后代上，宿主改成顶栏尾段 `.tb-tail`，
+ * 数值一字未改——要改像素归有稿设计在 A–H 轮定。 */
+.tb-tail button[data-testid='sensitive-open'] {
   height: 26px;
   padding: 0 12px;
   border-radius: 7px;

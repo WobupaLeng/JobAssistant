@@ -22,10 +22,22 @@
   --vp-fs-md: var(--fs-md);
 }
 
+/* 概览常挂之后 `.app-body` 是横排 flex（SPEC-001 决策 1）：两个浮层窗的包裹
+ * section 不能再占一格，否则会把右栏挤掉一列。弹窗本体（.config-modal /
+ * .decisions-modal）自己就是 position: fixed，所以这里把外壳整体移出流、
+ * 并让指针穿过——它只留锚点与语义，不吃点击。 */
 .page-config,
 .page-logs {
+  position: fixed;
+  inset: 0;
   display: block;
   min-height: 0;
+  pointer-events: none;
+}
+
+.page-config .config-modal,
+.page-logs .decisions-modal {
+  pointer-events: auto;
 }
 
 /* ---- M3 配置弹窗：固定窗 ---- */
