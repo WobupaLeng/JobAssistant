@@ -130,6 +130,13 @@
 
 - **页面背景不透明 = 毛玻璃失效**：`tokens.css` 的 `body` 有 `background: transparent`，不要覆盖它。
 - **首帧闪白**：靠 `index.html` 的 3 条内联 `<style>` 压住，不要挪到外部 CSS 文件。
+- **敏感库面板被压到视口外**：`vue-glass.css:8` 的 `.glass-l2 { position: relative }` 后加载，同特异性会覆盖 `sensitive.css` 的 `position: fixed`，面板落到 body 底部（实测 `y=774`，超出 900px 视口）。已用 `styles/sensitive.css` 的 `.sensitive-panel.glass-l2 { position: fixed; }` 钉回（提交 `6b1ae9c`）。改动 `.glass-l2` 或面板定位时必须复测。
+- **CDP 实测方法**：用 headless Chrome `--remote-debugging-port=9333 --no-sandbox` 打开 `http://127.0.0.1:5173/`，经 `/json/list` 取页面 ws，用 `Runtime.evaluate` 读 `getBoundingClientRect` / `getComputedStyle`。注意每次加载都是新页面，重复点击会切换开关，判断前先确认初始状态。
+- **无 Tauri 后端时的表现**：所有 `invoke` 报 `__TAURI_INTERNALS__ 不可用`，列表与右栏均为错误态，只能验证结构，不能验证 Boss 列表数据与日志栏内容。
+- **右栏错误「叠字」未证实**：测得关闭对话框时只有 1 个 `.rail-error`（`FriendList.vue:133`），`h=131` 是内容撑开的结果。截图叠字疑似 `rail-in` 入场动画截帧，未复现，暂不改标记。
+- **`FriendList` 会渲染两份**：页面右栏与对话框 `#rail` 槽各挂一份（`ChatPage.vue` 的 `prefix="chat-rail"` 与 `chat-detach-rail`，后者 `v-if="ui.chatOpen"`）。改错误/空态时两处都要生效。
+- **顶栏右组未溢出**：1440 视口下 `.tb-tail.right=1389`，`.topbar` 内容宽 1388，恰好放下。不要因此改顶栏宽度。
+- **未核实项**：日志栏与 `section.page-dashboard` 是否缺 `.dashboard` 类导致 `.app-body` 行布局错位（未运行态确认）；`controls.css` 的 `.btn-danger` 浅色主题覆盖（8 处调用，定义存在，覆盖未核）；`ScrapeBar` 的 `scrape-stop-btn` 初始 disabled、`chat-detach-close-btn` 文案（C5/C9，未核）；`.dashboard` padding-top 对齐（A2，未核）。
 
 ---
 
