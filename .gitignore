@@ -87,3 +87,5 @@ nohup.out
 # 诊断取证产物（repro lane 的 runs/ logs/ 抓取快照，含本机路径与进程信息）
 .tmp-diag/
 .tmp-diag2/
+
+frontend-vue/.vite/
