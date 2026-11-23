@@ -1,7 +1,7 @@
 # SPEC-001-legacy · 聊天编排同屏合并（chat-merge）
 
 > 状态：**READY_FOR_IMPLEMENTATION**（规格冻结，2026-11-23）
-> 修订：**Rev 2**（2026-11-23，并入用户裁决·二级导航撤除〔原型用户裁决 5〕与 Chief 顺序硬约束；Rev 1 同日首冻）
+> 修订：**Rev 3**（2026-11-23，DOM 顺序定谳：唯一标准=原型 dashboard→chat-rail→chat-detach，见下节与 UI-SPEC §17；Rev 2 同日并入撤导航用户裁决；Rev 1 同日首冻）
 > 决策依据：[`ADR-004`](../adr/ADR-004-legacy-chat-orchestration.md)（用户裁决「方案 1」：实现向 SPEC 对齐，整页化否决；§9 追加裁决：撤除二级导航）
 > 设计真源：[`UI-SPEC-chat-detach-v3`](../ui/UI-SPEC-chat-detach-v3.md)（冻结，一字不动）+ `prototypes/ui-v1/index.html`；其余条款见 `UI-SPEC-legacy-baseline.md`
 > 证据基线：HEAD `a4bb3d5`，工作区干净
@@ -76,6 +76,19 @@
 | AC12 | 契约：C1–C17 一条不少；零 invoke/零配置键/零 sidecar/零路由命令改动；五段文案、时间判据 `1e11`、日志闭区间去重键不变；字号 5 档不新增 |
 | AC13 | 门禁：根 §5 槽位 A 全项 + `npm run typecheck` + `npx vitest run` 全绿（实跑，不拿静态计数冒充）；改 CSS 后 `npm run build` 并数 `dist/assets/*.css` 选择器；槽位 C 产物工作区外冒烟 |
 | AC14 | 文档：HANDOFF §1 口径修正 + 锚点清单 + ADR-004 溯源注释（入口一处）落盘 |
+| AC15 | DOM 顺序唯一标准：`.app-body` 子项 = dashboard → chat-rail → chat-detach（原型 L1731/1734/1773，UI-SPEC §17 定谳）；A17 体内左→右不变；不得以 §2.1 树序翻转 |
+
+## DOM 顺序定谳（Rev 3，2026-11-23，Chief 指派）
+
+- **争议**：冻结 SPEC §2.1/§2.4 树序（dashboard→detach→rail）vs 原型实际 DOM（dashboard→rail→detach，L1731/1734/1773）。
+- **裁决：原型顺序为唯一标准**。§2.1 树为逻辑示意；§2.4 等式对可见子集成立。证据（已核）：rail 与 detach **互斥可见**——展开时 rail 立即 `display:none`（原型 L1132），收起时 `closeChatDetach()` 同步置 `hidden`（L2454–2464），无同屏瞬间；原型 CSS 无 `order`、无 rail/detach 兄弟选择器；A17 只约束对话框体内左→右；`_smoke.mjs` 无 rail-vs-detach 顺序断言。相对顺序在布局/Tab/读屏上不可观察，以可执行原型为准。
+- **落地**：M1 `b2b60f3` 已按此顺序，`chat-page.test.ts:137` 断言有效，**零返工**；M2 像素轮不翻改（有稿设计已确认）。澄清按冻结规格追加惯例落 [`UI-SPEC-chat-detach-v3`](../ui/UI-SPEC-chat-detach-v3.md) §17（架构澄清，非用户裁决，不改写既有结论）。
+
+## M2 范围调整（有稿设计结论，Chief 指派，Rev 3 记录）
+
+1. **ExpectRow 删除**：原型右栏结构=状态条→标题行→搜索→会话列表，四档基线实证无期望行；期望读取已由概览筛选面板「读取期望职位」承载。ChatPage 的 ExpectRow 引用与 `loadExpectations` 消费点退役（api 封装保留，契约面不动）；`chat-expect-*` testid 退役，列入 QA 重锚清单。
+2. **chat-note / auto-note 保留为瞬态提示**：`v-if` 非空才渲染，默认态与原型像素一致；错误反馈依赖它（K9 错误必须可读），不删除；位置维持右栏末尾、小字样式，M2 收像素。
+3. **顶栏三段像素归 M2**：按冻结 §11.3 + 原型 L505–513（单行 46px、顺序、三处折叠、`.tb-tail{margin-left:auto}`）。
 
 ## QA 重锚清单（点名，M4 执行；以各里程碑提交信息增删清单汇总为准）
 
@@ -89,6 +102,7 @@
 | 结构性断言 | `tests/chat-page.test.ts`、`tests/dashboard-page.test.ts` | 按新编排改写；独立 mount 口径延续 |
 | E2E 导航路径 | QA 零 Mock 脚本 | 页签切页作废 → 右栏点 `friend-<uid>` / 顶栏 `shell-config-btn` / 日志卡头部决策记录入口 |
 | 四个废止 testid | 全站 | 保持 0；新增 4 个按冻结 §4.1 |
+| `chat-expect-*`（ExpectRow） | ChatPage / ExpectRow.vue | **M2 退役**（有稿设计结论①：期望读取由概览筛选面板承载）；api 封装保留，命中 0 |
 
 聚合规则：M1–M3 每个里程碑提交信息逐条列明锚点增删，QA 按汇总清单重锚并零 Mock 验收。
 
@@ -157,4 +171,5 @@ M1 期间 `frontend-vue/` 单写者；M2/M3 同样单写者串行，严禁 UI �
 - 原型真值坐标（已核）：裁决 5 原文 L1413–1415；顶栏三段 L505–513；`.app-body` flex + dashboard `transition: flex-basis 240ms` L555–569；概览容器 `shell-dashboard` L1418。右栏/对话框真值 L1039–1136（有稿设计已提供前端编码）。
 - 四个废止 testid 在 `src/` 命中 0（已核，保持）；`autoBarLocation` 二选一搬移机制已在 ChatPage 落地，提升后保留。
 - 本 SPEC 与 ADR-004 同日冻结；实施细化不得突破契约面与 AC，突破即熔断回存量架构设计修订。
-- 架构侧门禁快照（Rev 1 冻结时 HEAD）：typecheck 0 错、`python -m compileall -q scraper` 通过；vitest 在架构沙箱受 `spawn EPERM` 边界限制未实跑，由前端编码 lane 门禁实跑覆盖（不拿静态计数冒充通过数）。
+- 架构侧门禁快照（Rev 3，HEAD `b2b60f3`，架构 lane 实跑）：cargo test 392 过 0 败（1 ignored=已知 sidecar_smoke）、typecheck 0 错、vitest 34 文件 568 用例全绿、compileall 通过。Rev 1 时 vitest 受架构沙箱 `spawn EPERM` 边界限制未实跑，会话改完全权限后已补实跑（不拿静态计数冒充通过数）。
+- **AC5 缺口跟踪**：敏感库面板不回应 Esc（冻结 §6.1 Esc 分层含敏感库）——Chief 已派 M4 QA 重锚轮一并处理；AC5 不降标，M4 闭合前该子项记未过。

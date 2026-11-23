@@ -612,3 +612,15 @@ var w = Math.round(Math.min(Math.max(innerWidth * 0.5, 600), innerWidth * 0.8));
 ### 16.10 像素来源口径
 
 长期唯一可对照的像素参照是 `docs/ui/reference/` 下的 11 张裁切图（legacy-00 … legacy-10）。原图所在的临时解包目录已删除，本规格与 `states.md` 不再引用任何已删除路径。
+
+---
+
+## 17. 追加澄清：右栏与对话框的 DOM 顺序定谳（2026-11-23，存量架构设计裁决 · Chief 指派）
+
+> 性质：架构澄清，**非用户裁决**；不改写任何既有结论与 R/A 条款，只定谳 §2.1/§2.4 的读法，消除「同一顺序两份标准」。
+
+**唯一标准：`.app-body` 子项 DOM 顺序 = `section.dashboard` → `aside.chat-rail` → `div.chat-detach`，照原型 HTML（L1731 / L1734 / L1773）。**
+
+1. §2.1 结构树是**逻辑示意**（按角色列：被压缩方 → 展开体 → 常驻右栏），不是字面 DOM 序列。§2.4「DOM 顺序 = 阅读顺序 = Tab 顺序」对**可见子集**成立：收起态 = 主列 → 右栏；展开态 = 主列 → 对话框（体内左段 → 右段）。§2.4 所述「主列 → 对话框 → 右栏」的全可见 Tab 序在 R1/R2 下永不出现。
+2. 证据（已核）：右栏与对话框**互斥可见**——展开时 `.is-chat-open .chat-rail { display:none }` 立即生效（L1132）；收起时 `closeChatDetach()` 同步置 `el.hidden = true`（L2454–2464），不存在两者同屏的瞬间。原型 CSS 无 `order` 属性、无 rail/detach 兄弟选择器依赖；A17 只约束**对话框体内**左段先于右段，两种排法均满足；`_smoke.mjs` 无 rail-vs-detach 顺序断言。因此相对 DOM 顺序在布局 / Tab / 读屏上**不可观察**，以可执行原型为准。
+3. 下游：`frontend-vue` 照此顺序落地（M1 提交 `b2b60f3` 已按原型顺序，`chat-page.test.ts` 顺序断言有效，**无需返工**）；后续像素轮不得以 §2.1 树序为由翻转 DOM。[`SPEC-001-legacy-chat-merge`](../specs/SPEC-001-legacy-chat-merge.md) Rev 3 同步记录。
