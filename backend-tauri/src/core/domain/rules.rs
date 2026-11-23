@@ -50,7 +50,8 @@ pub struct ExcludeRules {
     pub exclude_resume_max_years: Option<u32>,
     /// HR 超过这么天内没活跃（或无法判断）就排除
     pub exclude_hr_active_days: Option<u32>,
-    /// `Some("double")` = 必须双休；`None` = 不限制
+    /// 休息制度档位字面量（`any`/`double`/`no_bigweek`/`single`，SPEC-004）；
+    /// `None`/`"any"`/未知字面量 = 不限制
     pub weekend: Option<String>,
 }
 
@@ -69,10 +70,54 @@ impl Default for ExcludeRules {
     }
 }
 
+/// 休息制度要求档位（SPEC-004：double ⊂ no_bigweek ⊂ single）。
+///
+/// 字面量集与前端 `WEEKEND_OPTIONS` 逐字同源（any/double/no_bigweek/single）；
+/// `work_weekend` 是 JSON 透传、无编译期枚举校验，错一个字母就静默丢筛选。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WeekendTier {
+    /// 只投双休
+    Double,
+    /// 大小周 + 双休
+    NoBigweek,
+    /// 单休 + 大小周 + 双休（只排除无休）
+    Single,
+}
+
+impl WeekendTier {
+    /// 该档位是否排除给定休息制度族。
+    fn excludes(self, family: RestFamily) -> bool {
+        match self {
+            Self::Double => true,
+            Self::NoBigweek => family >= RestFamily::Single,
+            Self::Single => family >= RestFamily::NoRest,
+        }
+    }
+}
+
+/// JD 命中词归入的休息制度族（SPEC-004 §四 归类表，Chief 已逐条确认）。
+///
+/// 声明序即轻→重，多重命中取最重族。歧义命中（995/周六加班/月休 1–2 天/
+/// 排班轮休等）按较重档保守归入单休族，维持既有排除现状。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RestFamily {
+    /// 大小周
+    Bigweek,
+    /// 单休
+    Single,
+    /// 无休
+    NoRest,
+}
+
 impl ExcludeRules {
-    /// 是否要求双休。
-    pub fn require_double_weekend(&self) -> bool {
-        self.weekend.as_deref() == Some("double")
+    /// 休息制度档位（SPEC-004）。`None`/`"any"`/未知字面量 = 不限制。
+    pub fn weekend_tier(&self) -> Option<WeekendTier> {
+        match self.weekend.as_deref() {
+            Some("double") => Some(WeekendTier::Double),
+            Some("no_bigweek") => Some(WeekendTier::NoBigweek),
+            Some("single") => Some(WeekendTier::Single),
+            _ => None,
+        }
     }
 
     /// 用用户排除词构造名称否决规则（逗号/顿号/分号/斜杠/空白分隔）。
@@ -118,7 +163,7 @@ fn weekend_bad_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"(单休|大小周|大周|小周|六天工作制|六天制|每周\s*6\s*天|月休\s*[1-7]\s*天|周六(?:上班|加班|需上班|要上班)|周日(?:上班|加班)|做六休一|995|996|997|上班时间[:：]?\s*单休|排班|轮休|调休制度|不固定休息|休息不固定)",
+            r"(单休|大小周|大周|小周|六天工作制|六天制|每周\s*6\s*天|月休\s*[1-7]\s*天|周六(?:上班|加班|需上班|要上班)|周日(?:上班|加班)|做六休一|995|996|997|无休|上班时间[:：]?\s*单休|排班|轮休|调休制度|不固定休息|休息不固定)",
         )
         .unwrap()
     })
@@ -153,26 +198,47 @@ fn weekend_neg_re() -> &'static Regex {
         // 必须先整体匹配再替换，否则「非单休」会被拆成「非」+「单休」，
         // 残留的「非」不影响结果，但「单休」仍会被 WEEKEND_BAD_RE 抓到。
         Regex::new(
-            r"(?:不是|非|无|没有|拒绝|不做|不接|不支持)\s*(?:单休|大小周|大周|小周|996|997|995|加班|六天工作制|六天制)",
+            r"(?:不是|非|无|没有|拒绝|不做|不接|不支持)\s*(?:单休|大小周|大周|小周|996|997|995|加班|六天工作制|六天制|无休)",
         )
         .unwrap()
     })
 }
 
-/// 要求双休时，返回命中的"非双休"说法。
+/// 把 JD/岗位名里的休息制度说法归类（SPEC-004 §四）。
 ///
-/// 先剔除否定语境：「非单休」「无大小周」都不算问题。
+/// 先剔除否定语境：「非单休」「无大小周」「非无休」都不算命中。
+/// 多重命中取最重族（无休＞单休＞大小周），返回该族的首个命中词。
+/// 无命中 = 未标注，调用方归一化为双休（三档均含）。
 ///
 /// **相对 Python 的行为修正**：原实现只 `replace("非双休", ...)`，
 /// 导致「非单休，双休」这类表述被判成非双休（用户 m00692 决定修掉）。
-pub fn weekend_bad(text: &str) -> Option<String> {
+pub fn weekend_classify(text: &str) -> Option<(RestFamily, String)> {
     if text.is_empty() {
         return None;
     }
     let cleaned = weekend_neg_re().replace_all(text, "__NEG__").to_string();
-    weekend_bad_re()
-        .captures(&cleaned)
-        .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+    let mut worst: Option<(RestFamily, String)> = None;
+    for cap in weekend_bad_re().captures_iter(&cleaned) {
+        if let Some(m) = cap.get(1) {
+            let hit = m.as_str();
+            let family = rest_family(hit);
+            if worst.as_ref().map_or(true, |(f, _)| family > *f) {
+                worst = Some((family, hit.to_string()));
+            }
+        }
+    }
+    worst
+}
+
+/// 命中词 → 休息制度族（Chief 确认的归类表；表外说法保守归单休族）。
+fn rest_family(hit: &str) -> RestFamily {
+    if hit == "997" || hit == "无休" || hit.starts_with("周日") {
+        RestFamily::NoRest
+    } else if matches!(hit, "大小周" | "大周" | "小周") {
+        RestFamily::Bigweek
+    } else {
+        RestFamily::Single
+    }
 }
 
 /// 岗位是否属于短期/项目制。
@@ -212,14 +278,18 @@ pub fn reject(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<String> {
 ///
 /// 规则名是稳定的英文标识（`weekend` / `name_word` / …），原因文本给人看。
 pub fn reject_labeled(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<(&'static str, String)> {
-    // 1. 双休规则
-    if rules.require_double_weekend() {
+    // 1. 休息制度规则（SPEC-004 三档；未标注归一化为双休，三档均含）
+    if let Some(tier) = rules.weekend_tier() {
         let probe = format!("{} {}", job.title.unwrap_or(""), job.jd.unwrap_or(""));
-        if let Some(bad) = weekend_bad(&probe) {
-            return Some((
-                "weekend",
-                format!("非双休（JD/岗位名出现「{bad}」）"),
-            ));
+        if let Some((family, bad)) = weekend_classify(&probe) {
+            if tier.excludes(family) {
+                let label = match tier {
+                    WeekendTier::Double => "非双休",
+                    WeekendTier::NoBigweek => "非大小周/双休",
+                    WeekendTier::Single => "无休",
+                };
+                return Some(("weekend", format!("{label}（JD/岗位名出现「{bad}」）")));
+            }
         }
     }
 
@@ -565,6 +635,136 @@ mod tests {
         let j = job("某科技", "Java 工程师", "非单休，但实行大小周");
         let reason = reject(&j, &r).expect("大小周仍应命中");
         assert!(reason.contains("大小周"), "实际：{reason}");
+    }
+
+    /// SPEC-004 §二 三档判定矩阵（用户裁决冻结）：double ⊂ no_bigweek ⊂ single，
+    /// 未标注归一化为双休（三档均含），any/未设置全过。
+    /// 行＝JD 启发式证据（归类表 Chief 已确认），列＝用户档位。
+    #[test]
+    fn weekend_three_tier_matrix() {
+        // (jd, double 过, no_bigweek 过, single 过)
+        let rows = [
+            ("双休", true, true, true),
+            ("大小周", false, true, true),
+            ("单休", false, false, true),
+            ("997", false, false, false),
+            ("周日上班", false, false, false),
+            ("无休", false, false, false),
+            // 多重命中取最重族（无休＞单休＞大小周）：single 档也必须排除
+            ("大小周，项目忙时997", false, false, false),
+            // 未标注 → 归一化双休
+            ("负责服务端开发，五险一金", true, true, true),
+        ];
+        for (jd, double_ok, no_bigweek_ok, single_ok) in rows {
+            let j = job("某科技", "Java 工程师", jd);
+            for (literal, expected) in [
+                ("double", double_ok),
+                ("no_bigweek", no_bigweek_ok),
+                ("single", single_ok),
+            ] {
+                let r = ExcludeRules {
+                    weekend: Some(literal.into()),
+                    ..Default::default()
+                };
+                let got = reject_labeled(&j, &r);
+                assert_eq!(got.is_none(), expected, "tier={literal} jd={jd} got={got:?}");
+                if let Some((rule, _)) = &got {
+                    assert_eq!(*rule, "weekend", "规则名必须稳定（决策日志契约）");
+                }
+            }
+            // any 与未设置：不限制
+            for literal in [Some("any".to_string()), None] {
+                let r = ExcludeRules {
+                    weekend: literal,
+                    ..Default::default()
+                };
+                assert_eq!(reject(&j, &r), None, "any/未设置不应限制 jd={jd}");
+            }
+        }
+    }
+
+    /// 对含 `jd` 文本的岗位断言三档行为（true = 通过）。
+    fn assert_weekend_tiers(jd: &str, double_ok: bool, no_bigweek_ok: bool, single_ok: bool) {
+        let j = job("某科技", "Java 工程师", jd);
+        for (literal, expected) in [
+            ("double", double_ok),
+            ("no_bigweek", no_bigweek_ok),
+            ("single", single_ok),
+        ] {
+            let r = ExcludeRules {
+                weekend: Some(literal.into()),
+                ..Default::default()
+            };
+            assert_eq!(reject(&j, &r).is_none(), expected, "tier={literal} jd={jd}");
+        }
+    }
+
+    /// SPEC-004 §四 归类表（Chief 逐条确认）：每个命中词的族归属与三档行为。
+    /// 歧义命中按较重档保守归单休族（995/周六加班/月休 1–2 天/排班轮休等），维持现状。
+    #[test]
+    fn weekend_family_table_chief_confirmed() {
+        // 大小周族：double 排除，no_bigweek/single 通过
+        for word in ["大小周", "大周", "小周"] {
+            assert_weekend_tiers(word, false, true, true);
+        }
+        // 单休族：double/no_bigweek 排除，single 通过
+        for word in [
+            "单休",
+            "做六休一",
+            "996",
+            "995",
+            "六天工作制",
+            "六天制",
+            "每周 6 天",
+            "月休 4 天",
+            "月休 1 天",
+            "周六上班",
+            "周六加班",
+            "周六需上班",
+            "排班",
+            "轮休",
+            "调休制度",
+            "不固定休息",
+            "休息不固定",
+            "上班时间：单休",
+        ] {
+            assert_weekend_tiers(word, false, false, true);
+        }
+        // 无休族：三档全排除
+        for word in ["997", "周日上班", "周日加班", "无休"] {
+            assert_weekend_tiers(word, false, false, false);
+        }
+    }
+
+    /// SPEC-004 §一 字面量集冻结：any/double/no_bigweek/single 两端逐字同源；
+    /// 未知字面量（含大小写变体/中文）现状不限，本批不做旧值兼容。
+    #[test]
+    fn weekend_literal_set_frozen() {
+        // 四字面量的行为差异：单休 JD 区分 double/no_bigweek 与 single
+        assert_weekend_tiers("单休", false, false, true);
+        // any 全过（连无休也过）
+        let j = job("某科技", "Java 工程师", "997 无休");
+        let r = ExcludeRules {
+            weekend: Some("any".into()),
+            ..Default::default()
+        };
+        assert_eq!(reject(&j, &r), None);
+        // 未知字面量 → 不限（发现真实中文值须报 Chief，不私自兼容）
+        for unknown in ["Double", "双休", "single_rest", ""] {
+            let r = ExcludeRules {
+                weekend: Some(unknown.into()),
+                ..Default::default()
+            };
+            assert_eq!(reject(&j, &r), None, "未知字面量 {unknown:?} 应不限");
+        }
+    }
+
+    /// 否定语境剔除对三档通用（SPEC-004：否定语义与档位无关）。
+    #[test]
+    fn weekend_negation_applies_to_all_tiers() {
+        for jd in ["非单休，双休", "非无休，双休", "无大小周，双休"] {
+            assert_weekend_tiers(jd, true, true, true);
+        }
     }
 
     #[test]

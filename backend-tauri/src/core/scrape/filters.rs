@@ -103,7 +103,8 @@ pub fn filters_from_defaults(d: &serde_json::Value) -> ScrapeFilters {
 /// - `hr_active`：`"1"/"3"/"7"` → 超过 N 天未活跃（或未知）即排除；
 ///   `"any"`/空/脏值 → 不排除。**注意**：勾了这项而 sidecar 取不到活跃度
 ///   时会全量否决（`rules.rs` 既有语义，scraper/AGENTS.md 已警示）。
-/// - `work_weekend`：原样透传（`"double"` 生效；`"any"` → 不限）。
+/// - `work_weekend`：原样透传（三档 `double`/`no_bigweek`/`single` 生效，
+///   SPEC-004；`"any"` → 不限）。
 /// - `jd_degree`：JD 硬卡这些学历即排除。
 /// - `min_years`：公司成立年限低于此值即排除。
 pub fn exclude_rules_from_defaults(d: &serde_json::Value) -> ExcludeRules {
@@ -249,5 +250,17 @@ mod tests {
     fn blank_exclude_words_fall_back_to_builtin_veto() {
         let r = exclude_rules_from_defaults(&serde_json::json!({"exclude_keywords": "  ,、 "}));
         assert_eq!(r, ExcludeRules::default(), "空白词表回退内置否决词");
+    }
+
+    /// SPEC-004：三档字面量原样透传到 `ExcludeRules.weekend`（字面量集断言的
+    /// 后端透传端）。透传是档位生效的唯一入口，这里丢值就静默不限。
+    #[test]
+    fn weekend_tier_literals_pass_through_verbatim() {
+        for literal in ["double", "no_bigweek", "single"] {
+            let r = exclude_rules_from_defaults(&serde_json::json!({"work_weekend": literal}));
+            assert_eq!(r.weekend.as_deref(), Some(literal), "档位字面量必须原样透传");
+        }
+        let any = exclude_rules_from_defaults(&serde_json::json!({"work_weekend": "any"}));
+        assert_eq!(any.weekend, None, "any → 不限");
     }
 }
