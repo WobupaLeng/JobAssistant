@@ -310,6 +310,14 @@ describe('CSS 契约（C6 同族）', () => {
   it('展开态右栏让位（.is-chat-open 下 chat-rail 不显示）', () => {
     expect(css).toMatch(/\.app-shell\.is-chat-open \.chat-rail\s*\{\s*display:\s*none/);
   });
+
+  it('M3 入场动效：rail-error 带 rail-in、对话框气泡带 bubble-in（原型 L1179/L1196）', () => {
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(rules).toMatch(/\.rail-error\s*\{[^}]*animation:\s*rail-in\s+var\(--dur\)\s+var\(--ease-out\)/);
+    expect(rules).toMatch(/\.chat-detach-chat \.bubble\s*\{[^}]*animation:\s*bubble-in\s+var\(--dur\)\s+var\(--ease-out\)/);
+    expect(rules).toContain('@keyframes rail-in');
+    expect(rules).toContain('@keyframes bubble-in');
+  });
 });
 
 describe('样式表已挂进 index.css（只读检查）', () => {

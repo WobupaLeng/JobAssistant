@@ -287,6 +287,8 @@
   min-width: 0;
   box-sizing: border-box;
   overflow-wrap: anywhere;
+  /* 原型 L1179：错误卡入场 rail-in，与 bubble-in 同族（淡入 + 轻微位移）。 */
+  animation: rail-in var(--dur) var(--ease-out);
 }
 
 .rail-error-head {
@@ -304,6 +306,13 @@
   color: var(--text-2);
   word-break: break-all;
   white-space: normal;
+}
+
+/* 原型 L1187 逐字。只动 opacity/transform，走合成层，不触发 backdrop-filter
+ * 每帧重算；减少动态效果由 controls.css 的全局媒体查询统一封顶，这里不重复。 */
+@keyframes rail-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.99); }
+  to { opacity: 1; transform: none; }
 }
 
 .skel-line {
@@ -440,6 +449,15 @@
   max-width: 80%;
   overflow-wrap: break-word;
   word-break: normal;
+  /* 原型 L1196：气泡入场 bubble-in。新节点创建时播一次，既有气泡由 keyed
+   * v-for 保住节点不重播；零 JS 接线、零逻辑改动。 */
+  animation: bubble-in var(--dur) var(--ease-out);
+}
+
+/* 原型 L1201 逐字（淡入 + 下方 4px 起步 + 轻微缩放），与 rail-in 同族。 */
+@keyframes bubble-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.985); }
+  to { opacity: 1; transform: none; }
 }
 
 /* ============================================================ *

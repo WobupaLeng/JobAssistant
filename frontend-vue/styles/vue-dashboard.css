@@ -758,6 +758,16 @@
   min-width: 1200px;
 }
 
+/* <1200 不降级、横向出口（基线 §2.3「最小宽度是契约」、原型 L197 意图、
+ * SPEC-001 Rev6 已知偏差③）：契约宿主 tokens.css 的 body overflow:hidden
+ * 会把 1200 外壳裁掉，窄窗既看不到滚动条也看不到右缘。这里放开横向滚动，
+ * 纵向仍锁死（各列自己滚）。tokens.css 不动，此为 Vue 侧覆盖；
+ * index.html 的防首帧闪白内联规则只匹配挂载前，不受影响。 */
+body {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 /* 顶栏尾段：margin-left: auto 把整组顶到右端（原型 L512，断言 A33），
  * 所以它与前面的分段控件之间不需要占位 spacer。 */
 .tb-tail {

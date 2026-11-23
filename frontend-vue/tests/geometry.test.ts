@@ -219,6 +219,17 @@ describe('三窗固定高 / 敏感库 720 / A54 方块', () => {
     // 兜底与原型 :root 一致为 0px（规格 A36）：聊天默认收起，expand 时由 canvas.ts 写行内值。
     expect(css).toContain('--detach-w: 0px');
   });
+
+  it('<1200 横向滚动不裁剪：body 横向出口开在 vue-dashboard.css（基线 §2.3，Rev6 偏差③）', () => {
+    const dash = stripComments(read('styles/vue-dashboard.css'));
+    const body = dash.match(/(?:^|\n)body\s*\{([^}]*)\}/);
+    expect(body).not.toBeNull();
+    expect(body![1]).toContain('overflow-x: auto');
+    expect(body![1]).toContain('overflow-y: hidden');
+    // 1200 基线宿主仍是 .app-shell；契约宿主 tokens.css 的 body overflow:hidden 不改。
+    expect(dash).toContain('min-width: 1200px');
+    expect(read('styles/tokens.css')).toMatch(/body\s*\{[^}]*overflow:\s*hidden/);
+  });
 });
 
 describe('产物 CSS（dist/）包含几何契约', () => {

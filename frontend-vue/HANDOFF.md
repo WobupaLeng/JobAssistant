@@ -58,7 +58,15 @@
 - 新增：`chat-rail-empty-title` / `chat-rail-empty-refresh-btn`（及 `chat-detach-rail-*` 对应派生，`chat-contract` REQUIRED 已收）、`token-total-chip`（折叠 chip）。
 - 变更：`token-total` 从外层 span 移到读数 `<b>`（锚点名不变、落点变）；`job-empty-title`「暂无岗位」/`job-empty-sub`/`job-state-announce`/`FriendList` 空态「没有会话」/rail 错误 head「读取消息失败：<code>」/llm seg title/`LogCard` 标题 均逐字对齐原型。
 - 不变：四个废止 testid 仍 0；`nav-*`/`page-*` 仍 0；`theme-toggle`/`chat-rail`/`auto-apply-bar` 各恰一处；`shell-config-btn`/`shell-dashboard`/`topbar-tail-mount` 沿用 M1。
-- **已知偏差（报告项，不在 M2 修）**：`ChatThread` `.chat-head` 三按钮（生成打招呼/选简历/撤回）原型无＝功能 additions；顶栏「模型打分/打招呼」分项 stats 未接线——**更正（M2 后核查）**：config DTO 其实已下发 `tokens_greet`/`tokens_score`（`commands_config.rs` L58-60，`api/types.ts` L290-292 已有类型），但 Rust 核心**无累计写入路径**（三键在 `CONFIG_READ_ONLY_KEYS`、greet/score 逐次 `tokens` 只回传不持久化、jobs 表 `token_used` 列仅声明无写入），读数仅反映旧 Python 库遗留值；分项展示接线＝纯前端活，但是否派后端补累计由 Chief 定，前端不造数；`<1200` body overflow 裁剪 vs 原型横向滚动条。
+- **已知偏差（报告项，不在 M2 修）**：`ChatThread` `.chat-head` 三按钮（生成打招呼/选简历/撤回）原型无＝功能 additions；顶栏「模型打分/打招呼」分项 stats 未接线——**更正（M2 后核查）**：config DTO 其实已下发 `tokens_greet`/`tokens_score`（`commands_config.rs` L58-60，`api/types.ts` L290-292 已有类型），但 Rust 核心**无累计写入路径**（三键在 `CONFIG_READ_ONLY_KEYS`、greet/score 逐次 `tokens` 只回传不持久化、jobs 表 `token_used` 列仅声明无写入），读数仅反映旧 Python 库遗留值；分项展示接线＝纯前端活，但是否派后端补累计由 Chief 定，前端不造数；`<1200` body overflow 裁剪 vs 原型横向滚动条（**M3 已修**，见下）。
+
+**M3 视觉收尾完成**（SPEC-001 Rev6 路由①③ + §3.3 #7 动效候选；纯 CSS + 测试守卫，零逻辑改动、零锚点增删）：
+- **<1200 横向滚动不裁剪**（Rev6 偏差③，基线 §2.3「最小宽度是契约」）：`vue-dashboard.css` 在 `.app-shell{min-width:1200px}` 旁新增 `body{overflow-x:auto;overflow-y:hidden}`——契约宿主 tokens.css 的 `overflow:hidden` 会把 1200 外壳裁掉，横向出口为 Vue 侧覆盖，纵向仍锁死（各列自己滚），防首帧闪白内联规则只匹配挂载前不受影响。实测（Edge headless + vite preview 8091）：1150×800 scrollWidth 1200 / clientWidth 1150，滚到右缘 `shell-config-btn` right=1058 可达；1200/1440 scrollWidth==clientWidth 无溢出；scrollHeight==clientHeight 无纵向滚动条。
+- **入场动效补齐**（原型真值、Vue 此前缺失）：`.rail-error` 补 `animation: rail-in var(--dur) var(--ease-out)`（原型 L1179/L1187 逐字）、`.chat-detach-chat .bubble` 补 `bubble-in`（L1196/L1201 逐字），两组 keyframes 住 `vue-chat.css`；只动 opacity/transform（合成层，不触发 backdrop-filter 每帧重算）；新节点创建即播一次，keyed v-for 保住既有气泡不重播，零 JS 接线。实测真实 rail-error 节点 animationName=rail-in / 0.32s；reduced-motion 由 controls.css 全局封顶生效（0.01ms）。
+- **chat-head 三按钮裁量＝零改动**（Rev6 偏差①）：已走标准 `btn btn-sm btn-ghost`（controls.css hover 抬 1px / press scale 0.985 / disabled 0.4 齐备），不新造样式。
+- **不接线、待裁决**：C17 其余三类 `list-fade`/`row-in`/`token-bump` 常量保住（契约满足）但原型零命中，接线会发明超出冻结设计的动效，待设计/架构裁决；`.job-card.is-leaving` 同样无原型真值。`transitionend`/`animationend` 无消费方需要（CSS 入场动画节点创建即播，无需事件清理）。
+- **门禁**：typecheck 0 错；vitest 34 文件 572 全绿（新增 2 守卫：chat-contract 入场动效 + geometry body 横向出口）；build 产物 76.04 kB，`{` 计数 738 = M2 731 + 新增 7 块，新规则逐条可达；槽位 A cargo 独占 `%TEMP%\jt-m3-polish` exit 0 + compileall 0。证据 `%TEMP%\jt-m3-polish\m3-{1150-right-edge,1440}.png`。
+- **顺手发现（未动，仅报告）**：layout.css `@media(max-width:1100px)` 的 `.dashboard.is-fill-page` 降级块是死代码（Vue src 对 `.dashboard`/`is-fill-page` 零命中）；`@media(max-width:1180px)` 收紧内边距块在窄视口仍会触发（媒体查询看视口不看布局宽），是否属「<1200 不降级」口径待架构裁决。
 
 ---
 
@@ -108,7 +116,7 @@
 2. **几何契约补齐**：✅ 已完成（用户裁决「补齐实现」，见 §1）——`--ui-scale` + 5 档 `--fs-*` 落地，174 处 font-size 全 var()、产物裸 px 归零，三窗 scale + 敏感库 720 居中窗 + A54，`--detach-w` 单一来源。残留：契约 CSS 160 处颜色字面量全量收口（非阻塞，另轮）。
 3. **槽位 C 产物冒烟**（根 AGENTS §5.3 / ARCH-003 §6 R5，用户已授权 release lane）：先删 CSP `'wasm-unsafe-eval'`（ARCH-003:248 阶段 4 遗漏，WASM 已不存在），再 `cd backend-tauri && npx tauri build --no-bundle`（独占 `CARGO_TARGET_DIR=%TEMP%\jt-release`），产物拷到**工作区外**启动，确认 Vue 真渲染（CSP 白屏唯一实测点）。
 4. **登出入口接线**：✅ 已完成（`login-state` emit + 前端订阅 + 保存/退出按钮，见 §1）。
-5. **M1 同屏编排合并**：✅ 已完成（ADR-004 / SPEC-001，见 §1 的锚点增删清单）。下一手按 Chief 的顺序硬约束：**有稿设计**修 A–H 剩余像素（F 顶栏单行已由 M1 做掉）→ **前端打磨**收视觉与动效 → **QA** 按上面清单重锚 + 零 Mock 验收。
+5. **M1 同屏编排合并**：✅ 已完成（ADR-004 / SPEC-001，见 §1 的锚点增删清单）。**M2 像素对齐** ✅（`9a60d3f`）、**M3 视觉收尾** ✅（见 §1）。下一手：**QA** 按清单重锚 + 零 Mock 验收；分项 token 展示接线＝M3 后续批（Chief 已派前端打磨，DTO 现成、不等后端）；后端补累计写入排 M4 之后（Chief 顺序）。
 6. **Liquid Glass L2/L3**（根 §7.2 #3，待用户裁决是否开工）：规格 `git show d39bae4:docs/ui/UI-SPEC-liquid-glass-l2-l3.md`。
 7. 后端未决项（根 §7.2 #1/#4/#5）与 QA 低#1-3 alias 缺口，单独路由 legacy/backend lane。
 
@@ -130,7 +138,7 @@
 4. **`tests/test_gui_e2e.py:45` 必 `ImportError`**：按路径加载已删除的 `tools/gui_e2e.py`。要么删掉这个测试，要么重写。
 5. **两处同层横向依赖**（见 `AGENTS.md` 2.1）：`features/jobs/cards.rs:17`、`features/scrape/panel.rs:23`。
 6. **登出入口未接线**：`login_status` / `login_save` / `logout` 调用点为 0。事件链断了——`sidecar.py:263/272/297/303` emit `login.state` → `codec.rs:89` 解析 → **主进程未 emit 给 WebView**。这是后端 + 前端两边的活。
-7. **动效未接线**：`transitionend` / `animationend` / `IntersectionObserver` 全 0 命中；`.job-card.is-leaving` 计划过但从未实现（CSS 与 Rust 都 0 命中）。
+7. **动效接线现状**（M3 更新）：`drawer-in-play` 已接（JobDetailDrawer）；`rail-in` / `bubble-in` M3 已接（CSS 驱动、节点创建即播，无需 `transitionend`/`animationend` 消费方）；C17 其余三类 `list-fade`/`row-in`/`token-bump` 常量保住、原型零真值，接线待裁决；`.job-card.is-leaving` 仍未实现（无原型真值）。
 
 ### 3.4 代码注释里的失效引用
 
