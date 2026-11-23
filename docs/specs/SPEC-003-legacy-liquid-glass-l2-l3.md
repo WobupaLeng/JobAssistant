@@ -110,3 +110,24 @@ flowchart BT
 ## 八、取证记录
 - 规格恢复：`git restore --source=d39bae4 --worktree -- docs/ui/UI-SPEC-liquid-glass-l2-l3.md`；`git hash-object` 工作树 = `c3fd9cf710a9ab15c2353deaf39c2561817b76a2` = 源 blob，字节级一致；全文 621 行（前端编码此前只读取回 470 行系截断，复核以落盘文件为准）。
 - 现状锚点（本 SPEC 裁定依据，均已只读核验）：index.html L1–59（无 CSS link、3 内联 style、首帧主题脚本）；index.css L8（追加约定）/L25–26（总控预挂旧约定）；tokens.css L79–80/L215–216；tauri.conf.json L30（CSP）；drawer.css L16/L40；sensitive.css L22/L38/L43；vue-pages.css L46/L136；geometry.test.ts L37/L136–137；geometry-collect.test.ts L72；chat-contract.test.ts L324；AppShell.vue L55–72；liquid-glass 技能三件在位。
+
+## 九、L2-2 克隆层绘制源定谳（2026-11-23，前端编码提请实现分叉，架构裁定）
+
+**触发**：规格 §2.4 把克隆层真实背景留给运行时（`background:inherit` 注「Rust 侧写真实背景层」），但 Vue 版透明底现实使 P1 绘制源不显然。现场已核：`layout.css` L11「整页不设不透明底色：窗口的亚克力透上来才是 Liquid Glass 的底」＋C5；原型 `.stage::before` blobs＋22px 斜纹（prototypes/ui-v1/index.html L229–239，`--stage-blob-*`/`--stage-line`）是 **prototype-only 亚克力模拟**，Vue 无 `.stage` 层（grep 0 命中）。故 P0 面板背后有窗内内容（概览网格）可克隆；P1 卡片背后只有透明 dashboard→亚克力，无窗内可克隆背景。§2.3 诚实天花板：桌面克隆不到。
+
+### 裁定 6 · P0（抽屉/敏感库）绘制源：确认前端方案 1＋硬约束
+- 克隆源＝**面板背后窗内内容的非交互视觉副本**，反平移（`--glass-x/y` = rect＋scroll）＋**按面板 rect 预裁剪＋20px 折射出血边距**（REFERENCE.md Trap 5 L125–128「全屏克隆陷阱」，禁整窗 4K 副本进滤镜）。
+- 轻量策略确认：开面板克隆一次，内容变更/resize 重克隆；**滚动优先用反平移更新对齐（`--glass-y` 随 scroll），非逐帧重克隆 DOM**；若用重克隆须节流且过 A3（滚 200px 无相对滑动）。
+- **硬约束（契约防线，不可省）**：副本剥离全部 `id`/`data-testid`（C8/qa-testids 锚点唯一性，重复锚点＝QA 红）；剥离既有 `.glass-clone-wrap`（防递归克隆/嵌套滤镜）；排除面板自身与其上层叠层；`aria-hidden`＋`pointer-events:none`＋`inert`（副本不可交互、读屏不念）。
+- 面板背后某区域若无窗内内容（纯亚克力），该区域退化按裁定 7 材质模式，不强行克隆桌面。
+
+### 裁定 7 · P1（卡片）绘制源：批准方案 (b)，记为映射偏差
+- **批准 (b)**：P1 克隆源＝**卡片自身玻璃 tint**（宿主计算背景层副本），作卡内连续材质 ambient，湍流位移给微妙材质感。这是规格 P1「材质统一感来源」意图（§2.2-Q1）在透明底现实下的最近 faithful 实现——**保留规格已定的 P1 湍流材质效果（Q3-D 链 1），仅把克隆源从「背后背景」改为「自身材质」**，因背后背景不可克隆（§2.3 天花板）。
+- **机制区别于 P0**：P1 **card-local，不反平移**（材质随卡移动，无背景对齐问题）；A3（滚动无滑动）只约束 P0 背景副本，P1 材质天然满足。
+- 合规：不违 C5（clone 在卡内，body/页面背景仍透明）；不违三铁律（普通 `filter`、克隆自绘背景、`overflow:hidden`＋圆角内）。滤镜照 Q3-D 链 1（深 0.008/3/scale10、浅 0.006/2/scale5、seed 11）。
+- §6.1-④ 警示（纯渐变被位移成波浪条带）→ 验收按 5.2-⑤/⑥（边缘折弯、浅色不脏）；若有稿设计视觉复审判「脏/水波纹」，按规格 5.2-⑥ 既有补救（scale 降档复测）或 `data-l2` 关闭，**不另发明视觉**。
+- **记为映射偏差**（P1 克隆源 deviation），有稿设计 L2 收口做视觉复核（其既有职责）；不改上游冻结 UI-SPEC 原文。
+- **否决 (a) no-op**：删掉规格明定的 P1 效果，违「材质统一感」意图。**否决移植原型 blobs**：prototype-only 亚克力模拟，移植＝新增窗内背景层＝超 L2 范围的设计改动，须用户/设计另裁，本批不做。
+
+### 取证锚点（裁定 6/7，均已只读核验）
+layout.css L10–13（整页透明底注释）/L78（.dashboard）；prototypes/ui-v1/index.html L227–239（.stage::before prototype-only blobs）；REFERENCE.md L125–128（Trap 5 预裁剪＋20px 边距）；UI-SPEC §2.2-Q1（P1 材质统一感）/§2.3（诚实天花板）/§2.4（background:inherit 运行时注）/§6.1-④（纯渐变波浪条带）/Q3-D 链 1。
