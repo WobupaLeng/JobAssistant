@@ -35,12 +35,30 @@
 ③ **greet 就地链**——`DashboardPage.onGreet` 不再 `emit('navigate','chat')`，改 `emit('greet')` → `App.vue` 调聊天层的 `consumeGreetDraft()`：匹配好友 ⇒ 选中 ⇒ 预填 ⇒ `focus()`，不发送不换页（AC7）。
 ④ **顶栏单行 + 撤导航**——`AppShell` 删页签行与自带 `theme-toggle`，改提供一个 `display: contents` 的 `.tb-embed` 落位盒；平台卡与尾段仍由概览持有数据、经 `<Teleport :disabled="!tailInTopbar" defer>` 搬进那一行（独立 mount 时落位盒不存在 ⇒ 就地渲染，用例口径不变）。`.tb-tail { margin-left: auto }`（A33），配置按钮锚点改 `shell-config-btn`，满分 chip 出顶栏（`score-spec` 唯一落点回到日志卡头部）。
 ⑤ **Esc 分层**——新单源表 `lib_ui/overlay-stack.ts`（决策记录 → 配置 → 抽屉/敏感库 → 对话框），四个消费方共用；配置与决策记录补上了原先缺失的 Esc 关闭。**敏感库面板自己仍不回应 Esc**（只有 backdrop 与关闭按钮），留给下一轮。
-⑥ **几何兜底换宿主**——`--rail-w` / `--detach-w` 的静态兜底从 `.page-chat` 移到 `.app-body`（SPEC §2.1 口径），运行期真实值仍只由 `canvas.ts:syncCanvas()` 写。
+⑥ **几何兜底换宿主**——`--rail-w` / `--detach-w` 的静态兜底最终落在 **`:root`**（与原型 L135/L1085 逐字同宿主）。M1 曾先挪到 `.app-body`，槽位 C 产物冒烟实测发现：自定义属性是继承的，更近祖先的声明会把 `syncCanvas()` 写在 `<html>` 行内的真实值整棵遮掉，展开态对话框只剩 1px 描边——修正提交 `c4913a2` 把兜底改回 `:root`，`tests/geometry.test.ts` 加守卫（兜底必须在 `:root`、`.app-body` 内不得声明 `--detach-w`）。运行期真实值仍只由 `canvas.ts:syncCanvas()` 写。
+
+**M1 槽位 C 产物冒烟通过**（`c4913a2`，独占 `%TEMP%\jt-frontend-m1`）：`tauri build --no-bundle` 产物拷 `%TEMP%\jt-m1-smoke` 工作区外启动，`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333` + Node 原生 WebSocket 连 CDP 取证。修 `:root` 兜底后实测：点岗位卡「打招呼」⇒ 壳 `is-chat-open`、右栏 `display:none`、对话框 **720px**（=0.5×1440）、主列 680、网格 2→1 列（裁决 X 生效）、`position:static`；Esc 分层「上层在场仍展开 / 撤上层后收起」均 true。证据 `%TEMP%\jt-m1-smoke\0{1,2,3}-*.png`。**披露**：本机会话列表恒 error 态（`chat_friends` ⇒ sidecar stdin 已关闭，根 §7.2 Chrome 阻塞），真实 `friend-<uid>` 点击路径取不了证，仅打招呼链走通；占位会话 `待打招呼 · 公司` 被 `isSendableFriend` 判不可发送 ⇒ compose 不渲染，按用户裁决①走「生成打招呼」面板、不预填不 focus（SPEC Rev5 AC7，代码零改动）。
 
 **M1 锚点增删清单（QA 重锚用，SPEC-001 §QA 重锚清单的实测结果）**：
 - 退役（全站命中 0，`tests/qa-testids.test.ts` 新增 describe 守）：`nav-dashboard` / `nav-chat` / `nav-config` / `nav-logs`、`page-dashboard` / `page-chat` / `page-config` / `page-logs`、`navTestId` / `pageTestId` 两个助手、`.nav-tabs` 页签 class 与 `controls.css` 的两条 `.nav*` 规则。
 - 新增：`shell-dashboard`（概览容器，原型 L1418）、`shell-config-btn`（顶栏配置入口）、`topbar-tail-mount`（`.tb-embed` 落位盒）。
 - 不变：四个废止 testid 仍 0；`chat-rail` 全站恰好一处且仍在 `src/pages/ChatPage.vue`（`qa-testids.test.ts:84` 的路径断言未改）；`theme-toggle` 全站恰好一处（现在只有 `TopbarTail` 挂）。
+
+**M2 像素对齐完成**（SPEC-001 Rev5，按有稿设计逐条状态表落地；设计只出清单、编码落地，Chief 角色裁决）。含其交接的 A/C/G 行原子编辑 + 本 lane 续接的 B/D/E/F/H 与 ExpectRow 退役，零后端改动：
+- **B 四态**：`JobListView` announce 逐字「列表状态 {mode} · 共 N 条 · 已选 N 条」（原型 L2193）；`ChatThread` 空态 glyph 改 40×40 圆盒 + 气泡 SVG（L2422，`.state-glyph.is-round`）；空态标题回归单一真源 `CHAT_EMPTY_TITLE='没有会话'`（L2342，`FriendList` 消费常量不再另写字面量）。
+- **D 对话框**：`.chat-detach-chat .bubble` 80% 收口 + `.chat-feed` 12px14px + compose `.textarea` pre-wrap / `.btn` nowrap（L1113/1116/1117/1123，契约宿主 `pages.css` 不动，作用域覆盖）。
+- **E 状态条**：`auto-bar` nowrap + flex0 0 auto、label fs-xs/560、running 文字 `--text-1`（状态只由点色表达）、paused 去光晕、acts/counts flex0 0 auto、计数 b 600 + margin-left2px（L521-546）；`.btn-pause` 改吃新令牌 `--btn-pause-*`（原型 L326-328 字面值，深浅两套，悬停改描边非提亮）。
+- **F 顶栏**：llm seg title 逐字「大模型打分暂未开放，当前只支持规则打分」；token 读数两份 DOM（`token-total` 落 `<b>`、`token-total-chip` 折叠 chip，文案「累计 N token」，L1400-1406/A32），`.tb-token-chip` 死规则接上；**theme 锚点保持 `theme-toggle`**（SPEC-001 AC10 + 基线 L157 明文，原型 `shell-theme-toggle` 为异名，不改）。
+- **H 日志卡/降级**：`log-card` 定高 220/min160 + `.log-card>.card-body` flex column 滚动、`log-rows` 去 180px 二次限高（L943/L1024）；删 `vue-dashboard` 两处 + `vue-chat` 一处 `@media(max-width:900px)` 降级（原型 L1339-1341 硬约束：最小宽 1200，不做落底/单列降级）；`LogCard` 标题「决策日志 / 运行日志」（基线 K9/文案表，斜杠两侧各一空格）。
+- **ExpectRow 退役**（Rev3/Rev5）：删 `ExpectRow.vue` + `ChatPage` 引用/`loadExpectations`/`expectations` 状态 + `.expect-row` CSS + `chat-contract` SOURCES 行；`chat-expect-*` 锚点全站 0（`qa-testids` 新增断言守）。期望数据仍由概览筛选面板「读取期望职位」承载，`api/commands/chat.ts` 的 `list_expectations` 封装与契约面不动。
+- **红线 8 令牌化**：原型字面色值一律新增语义令牌——`--spec-avatar-top`（头像高光 .5，比 `--spec-top` 亮一档）、`--btn-pause-border/-hover/-bg/-fg`（深浅两套）；`.chat-rail::before` 玻璃描边随族住 `layout.css`（`#000` 遮罩 alpha，vue 系禁字面量）。
+
+**M2 锚点增删清单（QA 重锚用）**：
+- 退役：`chat-expect-row` / `chat-expect-loading` / `chat-expect-error` / `chat-expect-empty` / `chat-expect-<code>`（ExpectRow 整组）、`.expect-row` class。
+- 新增：`chat-rail-empty-title` / `chat-rail-empty-refresh-btn`（及 `chat-detach-rail-*` 对应派生，`chat-contract` REQUIRED 已收）、`token-total-chip`（折叠 chip）。
+- 变更：`token-total` 从外层 span 移到读数 `<b>`（锚点名不变、落点变）；`job-empty-title`「暂无岗位」/`job-empty-sub`/`job-state-announce`/`FriendList` 空态「没有会话」/rail 错误 head「读取消息失败：<code>」/llm seg title/`LogCard` 标题 均逐字对齐原型。
+- 不变：四个废止 testid 仍 0；`nav-*`/`page-*` 仍 0；`theme-toggle`/`chat-rail`/`auto-apply-bar` 各恰一处；`shell-config-btn`/`shell-dashboard`/`topbar-tail-mount` 沿用 M1。
+- **已知偏差（报告项，不在 M2 修）**：`ChatThread` `.chat-head` 三按钮（生成打招呼/选简历/撤回）原型无＝功能 additions；顶栏「模型打分/打招呼」分项 stats 未接线（config 仅 `tokens_total`）；`<1200` body overflow 裁剪 vs 原型横向滚动条。
 
 ---
 

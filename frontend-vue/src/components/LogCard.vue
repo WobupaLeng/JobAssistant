@@ -1,6 +1,8 @@
 <script setup lang="ts">
 /**
- * 概览页底部的"最近事件"卡：进度统计 + 实时日志行。
+ * 概览页底部的日志卡：进度统计 + 实时日志行。标题逐字照冻结基线
+ * （legacy-baseline §K9 / 文案表：「决策日志 / 运行日志」，斜杠两侧各一空格，
+ * 是并列不是页签；原型 L1722 同文）。
  *
  * 进度口径（C9）：可见 Stat 五段 + sr-only 五段摘要，两者都渲染，
  * 前者给眼睛、后者给读屏与 E2E。
@@ -54,7 +56,7 @@ const spec = computed(() =>
 <template>
   <div class="card card-standalone log-card" data-testid="log-card">
     <div class="card-head">
-      <span class="card-title">最近事件</span>
+      <span class="card-title">决策日志 / 运行日志</span>
       <span class="log-live" :class="{ 'is-on': live }" data-testid="log-live">
         {{ live ? '实时' : '已暂停' }}
       </span>

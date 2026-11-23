@@ -15,6 +15,10 @@
  *   它挂在 `.card.log-standalone` 卡头（`LogCard`），锚点 `score-spec` 全站恰好一处；
  * - **配置按钮是 `shell-config-btn`**（原型 L1407 / SPEC §11.3 / 断言 A31），
  *   二级导航时代那个 `nav-config` 已随页签退役。
+ * - **token 读数两份 DOM**（原型 L1400-1406，断言 A32）：≥1360 走 `.tb-tokens`
+ *   （锚点 `token-total`），<1360 折叠成一枚 chip（锚点 `token-total-chip`，类名
+ *   `.tb-token-chip`——本仓库 `.tb-stats` 已被日志卡的 C9 进度块占用）。两者各唯一一份，
+ *   读数文案都是「累计 N token」，折叠 chip 的 title 给全量读数。
  */
 import { tokenText, type ScoreModeSeg } from '../lib_ui/scrape-panel-model';
 
@@ -49,7 +53,7 @@ const emit = defineEmits<{
         :aria-checked="s.active"
         :disabled="s.disabled"
         :aria-disabled="s.disabled"
-        :title="s.disabled ? 'LLM 打分需先在配置里填好 API Key，本轮不可选' : s.label"
+        :title="s.disabled ? '大模型打分暂未开放，当前只支持规则打分' : undefined"
         :data-testid="s.testId"
         @click="!s.disabled && emit('pick-mode', s.key)"
       >
@@ -65,9 +69,16 @@ const emit = defineEmits<{
     >
       敏感库
     </button>
-    <span class="tb-tokens" data-testid="token-total" :title="`累计 token：${tokensTotal}`">
-      {{ tokenText(tokensTotal) }} tokens
-    </span>
+    <!-- 原型 L1400-1406：同一枚读数两种 DOM，CSS 在 1360 断点处互换显隐（A32 各唯一 1 份）。
+         模型打分 / 打招呼的分项读数后端未下发（config 只有 tokens_total），所以 title 只给累计值。 -->
+    <span class="tb-tokens" :title="`累计 ${tokenText(tokensTotal)} token`">累计
+      <b class="token-total" data-testid="token-total">{{ tokenText(tokensTotal) }}</b> token</span>
+    <span
+      class="chip tb-token-chip"
+      tabindex="0"
+      data-testid="token-total-chip"
+      :title="`累计 ${tokenText(tokensTotal)} token`"
+    >累计 <b>{{ tokenText(tokensTotal) }}</b> token</span>
     <button class="btn btn-sm btn-ghost" type="button" data-testid="shell-config-btn" @click="emit('open-config')">
       配置
     </button>

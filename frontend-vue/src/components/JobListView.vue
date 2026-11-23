@@ -70,6 +70,20 @@ const allHere = computed(() => allVisibleChecked(selectedHere.value, visibleIds.
 const total = computed(() => headCount(props.counts, props.tab, props.showAll));
 const batchVisible = computed(() => showBatchActions(selectedCount.value));
 
+/* 列表状态播报（原型 L2193 逐字「列表状态 {mode} · 共 {total} 条 · 已选 {n} 条」）。
+ * mode 用四态词 loading / error / empty / default，与右栏 rail-state 同一套口径；
+ * sr-only，不参与视觉。原先这里写的是「正在加载岗位 / 已显示 N 条」，与真值不符。 */
+const announceText = computed(() => {
+  const mode = props.loading
+    ? 'loading'
+    : props.error !== ''
+      ? 'error'
+      : visible.value.length === 0
+        ? 'empty'
+        : 'default';
+  return `列表状态 ${mode} · 共 ${total.value} 条 · 已选 ${selectedCount.value} 条`;
+});
+
 function onTab(tab: ListTab): void {
   if (tab === props.tab && !props.showAll) return;
   emit('update:showAll', false);
@@ -120,9 +134,9 @@ function onSort(field: SortField): void {
           全部
         </button>
         <span class="card-sub" data-testid="job-total">共 {{ total }} 条</span>
-        <span class="sr-only" data-testid="job-state-announce" aria-live="polite">{{
-          loading ? '正在加载岗位' : `已显示 ${visible.length} 条`
-        }}</span>
+        <!-- 原型 L2193 逐字：「列表状态 {mode} · 共 {total} 条 · 已选 {n} 条」。
+             mode 用四态词（loading/error/empty/default），与右栏 rail-state 同源口径。 -->
+        <span class="sr-only" data-testid="job-state-announce" aria-live="polite">{{ announceText }}</span>
         <span class="spacer"></span>
         <button class="btn btn-sm btn-ghost" type="button" data-testid="job-refresh-btn" @click="emit('refresh')">
           刷新
@@ -183,9 +197,10 @@ function onSort(field: SortField): void {
         </div>
       </template>
       <div v-else-if="error" class="job-state" data-testid="job-state-error">
-        <span class="state-glyph is-bad">!</span>
+        <span class="state-glyph is-bad" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.6" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.8v3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11" r="0.9" fill="currentColor"/></svg></span>
         <span class="state-title" data-testid="job-state-error-title">岗位列表加载失败</span>
-        <span class="state-sub">{{ error }}</span>
+        <span class="state-sub">这次没有取到数据，可以重试一次。</span>
+        <span class="state-error-detail" :title="error">{{ error }}</span>
         <!-- 原型 :2171 的错误态带一个重试按钮，接线到页面现有的刷新逻辑。 -->
         <span class="state-actions">
           <button
@@ -199,9 +214,9 @@ function onSort(field: SortField): void {
         </span>
       </div>
       <div v-else-if="visible.length === 0" class="job-state" data-testid="job-state-empty">
-        <span class="state-glyph">∅</span>
-        <span class="state-title" data-testid="job-empty-title">这个页签下还没有岗位</span>
-        <span class="state-sub" data-testid="job-empty-sub">先在上方展开筛选条件并点击开始抓取</span>
+        <span class="state-glyph" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><rect x="2.6" y="3.4" width="10.8" height="9.2" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M5.4 6.6h5.2M5.4 9.2h3.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></span>
+        <span class="state-title" data-testid="job-empty-title">暂无岗位</span>
+        <span class="state-sub" data-testid="job-empty-sub">先展开筛选条件并点击开始抓取</span>
         <span class="state-actions">
           <button class="btn btn-sm" type="button" data-testid="job-empty-filter-btn" @click="emit('empty-filter')">
             展开筛选条件

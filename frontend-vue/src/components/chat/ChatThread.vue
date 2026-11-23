@@ -93,7 +93,8 @@ function confirmRecall(): void {
   <div class="chat-detach-chat">
     <div v-if="props.friend === null" class="rail-body-slot" data-testid="chat-detach-slot">
       <div class="rail-state" data-testid="chat-detach-empty">
-        <span class="state-glyph">💬</span>
+        <!-- 原型 L2422：40×40 圆形玻璃盒 + 同一枚气泡 SVG（不是 emoji）。 -->
+        <span class="state-glyph is-round" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M2.6 4.2h10.8v6.4H7.4L4.2 13v-2.4H2.6z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span>
         <span class="state-title" data-testid="chat-detach-empty-title">{{ CHAT_DETACH_EMPTY_TITLE }}</span>
         <span class="state-sub">{{ CHAT_DETACH_EMPTY_SUB }}</span>
       </div>

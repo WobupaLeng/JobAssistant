@@ -158,6 +158,19 @@
   --inner-light: inset 0 1px 0 0 var(--spec-top),
     inset 0 -1px 0 0 var(--spec-bottom);
   --inner-scatter: inset 0 24px 48px -32px rgba(255, 255, 255, 0.10);
+  /* ---------- 暂停主按钮（原型 L326-328 `.btn-pause`，用户裁决 D）----------
+   * 原型这组值是琥珀系里另一档（描边 rgba(240,198,100,.46) / 悬停 .62 / 字色 #f0c674），
+   * 与 --warn-border / --warn-text 都不同档，不能复用；vue 系样式表禁写颜色字面量
+   * （frontend-vue/AGENTS.md 红线 8），所以按 Chief 裁决新增语义令牌，浅色覆盖在 light 块。 */
+  --btn-pause-border: rgba(240, 198, 100, 0.46);
+  --btn-pause-border-hover: rgba(240, 198, 100, 0.62);
+  --btn-pause-bg: rgba(240, 198, 100, 0.16);
+  --btn-pause-fg: #f0c674;
+
+  /* 头像方块顶边的高光（原型 `.avatar` 的 `inset 0 1px 0 rgba(255,255,255,.5)`）。
+   * 值是 0.5，比 --spec-top 的 0.22 亮得多，不能复用；浅色主题原型没有覆盖值，
+   * 所以这条只在 :root 定义，两套主题共用（同 --ui-scale 的例外口径）。 */
+  --spec-avatar-top: rgba(255, 255, 255, 0.5);
 
   /* ---------- 动效 ----------
    * Liquid Glass 的动画要「慢且带惯性」：苹果那套普遍 320-420ms、非线性。
@@ -228,6 +241,12 @@
   --on-primary-deep: #04120c;
   --primary-text: #047857;
   --primary-border: rgba(16, 185, 129, 0.4);
+  /* 暂停主按钮浅色覆盖（原型 L328）。悬停描边原型没给浅色值，
+   * 按红线 8 的共用口径沿用 :root 的 --btn-pause-border-hover。 */
+  --btn-pause-border: rgba(146, 101, 10, 0.4);
+  --btn-pause-bg: rgba(176, 124, 0, 0.12);
+  --btn-pause-fg: #92650a;
+
   --warn-text: #92650a;
   --warn-bg: rgba(245, 158, 11, 0.16);
   --warn-bg-strong: rgba(245, 158, 11, 0.24);

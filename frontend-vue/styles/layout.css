@@ -169,6 +169,29 @@
   pointer-events: none;
 }
 
+/* 右栏的渐变高光边（M2 玻璃质感，原型 L1052-1060 逐字照抄三档 stop）。
+ * 与上面的 .card::before 同一族手法，也必须留在本文件：这里的 #000 只是遮罩的
+ * alpha 通道、不是配色；而 vue 系三份样式表按 tests/geometry.test.ts 明令不得出现
+ * hex / rgb 字面色值，宿主随族放在契约层。 */
+.chat-rail::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(180deg, var(--spec-top) 0%, var(--spec-side) 50%, var(--spec-bottom) 100%);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: var(--spec-strength);
+  pointer-events: none;
+}
+
 .card-head {
   display: flex;
   align-items: center;

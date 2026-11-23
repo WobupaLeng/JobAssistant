@@ -133,12 +133,15 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 14px 8px;
+  padding: 5px 10px;
   min-height: 30px;
-  padding: 5px 14px;
+  border-radius: var(--radius-sm);
   background: var(--glass-0);
-  border-top: 1px solid var(--hairline);
-  border-bottom: 1px solid var(--hairline);
-  font-size: var(--fs-2xs);
+  border: 1px solid var(--hairline);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
 }
 
 .batch-check {
@@ -174,7 +177,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 10px 14px 14px;
+  padding: 2px 14px 14px;
 }
 
 @media (max-width: 1599px) {
@@ -222,11 +225,13 @@
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+  transition: border-color var(--dur) var(--ease-glass), background var(--dur) var(--ease-glass),
+    transform var(--dur-fast) var(--ease-glass);
 }
 
 .job-card:hover {
   border-color: var(--hairline-strong);
+  background: var(--glass-input);
 }
 
 .job-card.is-checked {
@@ -260,15 +265,11 @@
 }
 
 .job-title {
-  flex: 1 1 auto;
   min-width: 0;
   font-size: var(--fs-sm);
   font-weight: 620;
   color: var(--text-1);
   line-height: 1.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .job-salary {
@@ -311,7 +312,7 @@
 
 .job-addr {
   min-width: 0;
-  font-size: var(--fs-2xs);
+  font-size: var(--fs-xs);
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -365,19 +366,25 @@
   height: calc(var(--fs-sm) * 1.55 * 2 + 12px);
   min-width: calc(var(--fs-sm) * 4.6);
   aspect-ratio: 1 / 1;
-  padding: 0 6px;
+  padding: 0 8px;
   border: 0;
   border-radius: var(--radius-sm);
   background: var(--primary);
   color: var(--on-primary);
   font-size: var(--fs-sm);
   font-weight: 620;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
   line-height: 1.55;
   cursor: pointer;
 }
 
 .job-greet:hover {
   filter: brightness(1.08);
+}
+
+.job-greet:active {
+  filter: none;
 }
 
 .job-greet:focus-visible {
@@ -418,29 +425,69 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 36px 12px;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 16px;
   text-align: center;
+  min-height: 220px;
 }
 
+/* 原型 L901-909：44×44 玻璃盒 + 内嵌 SVG，不是文本字符。 */
 .state-glyph {
-  font-size: var(--fs-2xs);
-  color: var(--text-3);
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--hairline-strong);
+  background: var(--glass-1);
+  backdrop-filter: blur(var(--blur-3)) saturate(var(--saturate-2));
+  -webkit-backdrop-filter: blur(var(--blur-3)) saturate(var(--saturate-2));
+  box-shadow: var(--inner-light), var(--shadow-near);
+  color: var(--text-2);
 }
 
 .state-glyph.is-bad {
-  color: var(--bad-text);
+  color: var(--bad);
+  border-color: var(--bad-border);
+  background: var(--bad-soft);
 }
 
 .state-title {
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--text-1);
+  font-size: var(--fs-md);
+  line-height: 1.3;
+  font-weight: 520;
+  color: var(--text-3);
 }
 
 .state-sub {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   color: var(--text-3);
+  max-width: 380px;
+}
+
+.state-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.state-error-detail {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: var(--glass-input);
+  border: 1px solid var(--hairline);
+  width: max-content;
+  max-width: min(100%, 560px);
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---------- 抓取条 ---------- */
@@ -453,18 +500,10 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 10px 14px;
+  padding: 9px 12px;
 }
 
-.btn-pause {
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-border);
-  color: var(--warn-text);
-}
-
-.btn-pause:hover:not(:disabled) {
-  background: var(--warn-bg-strong);
-}
+/* .btn-pause 的原型真值（L326-328）统一住 vue-chat.css（后加载），此处不再重复定义。 */
 
 .scrape-limit {
   display: inline-flex;
@@ -708,6 +747,17 @@
   display: contents;
 }
 
+/* 顶栏单行 46px（SPEC-001 AC10 / states.md §7 实测口径）；根容器锁 1200px
+ * （原型 L206/L228：<1200 不降级，保持 1200 基线）。 */
+.topbar {
+  height: 46px;
+  padding: 0 14px;
+}
+
+.app-shell {
+  min-width: 1200px;
+}
+
 /* 顶栏尾段：margin-left: auto 把整组顶到右端（原型 L512，断言 A33），
  * 所以它与前面的分段控件之间不需要占位 spacer。 */
 .tb-tail {
@@ -746,6 +796,18 @@
 .seg[aria-disabled='true'] {
   opacity: 0.45;
   cursor: not-allowed;
+  background: transparent;
+  border-color: var(--hairline);
+  color: var(--text-3);
+}
+
+/* 裁决 O（SPEC §14.3）：禁用态与选中态组合时必须透明兜底，绿色高亮绝不能出现。 */
+.seg.is-active:disabled,
+.seg.is-active[aria-disabled='true'],
+.seg[aria-checked='true']:disabled,
+.seg[aria-checked='true'][aria-disabled='true'] {
+  background: transparent;
+  color: var(--text-3);
 }
 
 .tb-tokens {
@@ -754,10 +816,48 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------- 最近事件卡 ---------- */
+/* token 折叠 chip（原型 L493/L501-502/L1406）：<1360 折叠成一枚 chip，≥1360 展开。
+ * 类名避开 .tb-stats——那个名字在本仓库被日志卡的 C9 进度块占用。
+ * chip 里的数字原型带 color:var(--text-1)（L1406 行内），这里用选择器等价承接。 */
+.tb-token-chip b {
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.tb-token-chip {
+  display: none;
+}
+
+@media (max-width: 1359px) {
+  .tb-tokens {
+    display: none;
+  }
+
+  .tb-token-chip {
+    display: inline-flex;
+    cursor: pointer;
+  }
+}
+
+/* ---------- 最近事件卡 ----------
+ * 原型 L943：`flex: 0 0 auto; height: 220px; min-height: 160px; position: relative`
+ * ——日志卡是定高块，行数增减不改变外框高度，滚动只发生在卡体内。 */
 .log-card {
   flex: 0 0 auto;
+  height: 220px;
+  min-height: 160px;
+  position: relative;
   margin-top: 2px;
+}
+
+/* 卡体是卡内唯一的弹性列：C9 进度块贴顶、日志行区吃剩余高度并自己滚。
+ * 原型 L1720-1729 的日志卡没有 .card-body 这一层（进度块是本仓库 C9 的既有结构），
+ * 所以这里显式把卡体做成 flex column + min-height:0，否则定高之后滚动会跑到外层页面上。 */
+.log-card > .card-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .log-live {
@@ -785,11 +885,15 @@
   padding-bottom: 8px;
 }
 
+/* 原型 L1024：日志行区是卡体内的 flex 子项，靠 min-height:0 在自己内部滚，
+ * 不另外设 max-height——日志卡已经定高 220px（原型 L943），再叠一层 180px 就是二次限高，
+ * 卡体上下会空出一截而列表先滚起来。 */
 .log-rows {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 180px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1007,25 +1111,8 @@
   color: var(--text-3);
 }
 
-@media (max-width: 900px) {
-  .platform-card {
-    height: 26px;
-    padding: 0 8px;
-  }
-
-  .app-error-rest {
-    display: none;
-  }
-}
-
-/* ---------- 窄屏兜底 ---------- */
-@media (max-width: 900px) {
-  .f-tri,
-  .f-grid2 {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .job-tabs-row {
-    gap: 6px;
-  }
-}
+/* 两处 @media (max-width: 900px) 降级块已删（交接表 H 行 / states.md §7）：
+ * 原型 L1339-1341 是用户硬约束「页面最小宽度 1200px；小于 1200 保持 1200 布局并出现
+ * 横向滚动条——不做任何落底/单列降级。原先那三条（platform-card 压到 26px、
+ * app-error-rest 隐藏、f-tri 与 f-grid2 退单列）都与之相反；app-shell 已有的
+ * min-width 1200px 承接这条口径。 */

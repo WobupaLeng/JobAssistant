@@ -103,7 +103,6 @@ const SOURCES = [
   'src/components/chat/ChatThread.vue',
   'src/components/chat/FriendList.vue',
   'src/components/chat/AutoApplyBar.vue',
-  'src/components/chat/ExpectRow.vue',
 ];
 
 function read(rel: string): string {
@@ -140,6 +139,10 @@ describe('testid 契约（SPEC §4.1 / §4.2 / §4.3）', () => {
     'chat-rail-refresh-btn',
     'chat-rail-search-input',
     'chat-rail-body-slot',
+    // 空态三件（原型 L2340-2344：empty / empty-title / empty-refresh-btn）
+    'chat-rail-empty',
+    'chat-rail-empty-title',
+    'chat-rail-empty-refresh-btn',
     // 对话框
     'chat-detach',
     'chat-detach-title',

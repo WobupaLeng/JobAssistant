@@ -144,7 +144,9 @@ export function unreadText(n: number): string {
 /** 右栏头部的搜索占位（§5 逐字）。两段列表共用。 */
 export const CHAT_SEARCH_PLACEHOLDER = '搜索 HR / 公司 / 消息';
 /** 空态逐字（SPEC §5）。 */
-export const CHAT_EMPTY_TITLE = '还没有会话';
+/* 原型 L2342 逐字「没有会话」（不是「还没有会话」）。 FriendList 必须消费这个常量，
+ * 不在组件里另写一份字面量（模块 §2 单源）。 */
+export const CHAT_EMPTY_TITLE = '没有会话';
 export const CHAT_DETACH_EMPTY_TITLE = '在左侧 Boss 列表点一位，开始聊天';
 export const CHAT_DETACH_EMPTY_SUB = '点左侧 Boss 列表里的任意一位即可查看聊天';
 /** 收起按钮逐字（§5）。 */

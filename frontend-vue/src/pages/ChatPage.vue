@@ -21,7 +21,8 @@
  * 本组件是**多根 fragment**：`aside.chat-rail` 与 `.chat-detach` 直接成为外壳
  * `.app-body` 的 flex 子项，中间不再套 `<section class="page-chat">`。套一层就多出一个布局盒，
  * 对话框便不是「flex 压缩主列」而是被套住 —— A15 的 `position: static` 与主列宽度联动
- * 判据都要求它按 `.app-body` 的子项参与布局。求职期望行与两条提示行归右栏末尾。
+ * 判据都要求它按 `.app-body` 的子项参与布局。两条瞬态提示行归右栏末尾；
+ * 求职期望行已按 SPEC-001 Rev3/Rev5 退役（原型 L926-927：期望并入筛选条件面板，右栏没有那行）。
  *
  * ## 数据
  * 好友列表 / 消息 / 简历 / 期望职位都走 `src/api/commands/*`，本层不假设任何后端形状。
@@ -45,12 +46,11 @@ import {
 } from '../api/commands/chat';
 import { greetDraft, greetOne } from '../api/commands/greet';
 import { sessionOpen } from '../api/commands/scrape';
-import type { ChatMessage, Expectation, Friend, GreetReply, ResumeItem } from '../api/types';
+import type { ChatMessage, Friend, GreetReply, ResumeItem } from '../api/types';
 import AutoApplyBar from '../components/chat/AutoApplyBar.vue';
 import ChatCompose from '../components/chat/ChatCompose.vue';
 import ChatDetach from '../components/chat/ChatDetach.vue';
 import ChatThread from '../components/chat/ChatThread.vue';
-import ExpectRow from '../components/chat/ExpectRow.vue';
 import FriendList from '../components/chat/FriendList.vue';
 import {
   emptyStatus,
@@ -126,12 +126,6 @@ const sendingGreet = ref(false);
 const recalling = ref(false);
 const sending = ref(false);
 const draft = ref('');
-
-/* --------------------------------- 求职期望 ---------------------------------- */
-
-const expectations = ref<Expectation[]>([]);
-const expectLoading = ref(false);
-const expectError = ref('');
 
 /* -------------------------------- 自动投递 ----------------------------------- */
 
@@ -221,19 +215,6 @@ async function loadResumes(force = false): Promise<void> {
     resumes.value = [];
     resumesLoaded.value = true;
     note.value = `读取简历失败：${errText(e)}`;
-  }
-}
-
-async function loadExpectations(): Promise<void> {
-  expectLoading.value = true;
-  expectError.value = '';
-  try {
-    const { listExpectations } = await import('../api/commands/chat');
-    expectations.value = await listExpectations();
-  } catch (e) {
-    expectError.value = `读取期望职位失败：${errText(e)}`;
-  } finally {
-    expectLoading.value = false;
   }
 }
 
@@ -484,7 +465,6 @@ onMounted(() => {
     consumeGreetDraft();
     if (pendingDraft !== null && draft.value === '') draft.value = pendingDraft.text;
   })();
-  void loadExpectations();
   startQueue();
 });
 
@@ -565,9 +545,10 @@ defineExpose({
       CHAT_STATE_ANNOUNCE_TEXT
     }}</span>
 
-    <!-- 求职期望 + 两条提示行：整页化退役后归右栏末尾（原型里没有这三行，
-         属 Vue 侧既有功能；位置与像素由有稿设计在 A–H 轮定）。 -->
-    <ExpectRow :items="expectations" :loading="expectLoading" :error="expectError" />
+    <!-- 两条瞬态提示行（结论②保留：发送失败/会话启动的反馈依赖它，K9「错误必须可读」）。
+         求职期望行已按 SPEC-001 Rev3/Rev5 退役：原型 L926-927 明写「求职期望已并入筛选
+         条件面板；打分试算已移除」，四档基线图右栏也没有这一行；期望数据仍由概览筛选面板
+         的「读取期望职位」承载（DashboardPage.loadExpects 不动，api 封装与契约面都不动）。 -->
     <div v-if="note !== ''" class="cfg-hint chat-note" data-testid="chat-note">{{ note }}</div>
     <div v-if="autoNote !== ''" class="cfg-hint chat-note" data-testid="auto-note">{{ autoNote }}</div>
   </aside>

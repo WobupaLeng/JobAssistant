@@ -10,6 +10,7 @@ import { computed, ref } from 'vue';
 
 import type { Friend } from '../../api/types';
 import {
+  CHAT_EMPTY_TITLE,
   CHAT_SEARCH_PLACEHOLDER,
   friendLine,
   friendName,
@@ -63,6 +64,8 @@ const ids = computed(() => ({
   body: `${props.prefix}-body`,
   list: `${props.prefix}-list`,
   empty: `${props.prefix}-empty`,
+  emptyTitle: `${props.prefix}-empty-title`,
+  emptyRefresh: `${props.prefix}-empty-refresh-btn`,
   error: `${props.prefix}-error`,
   retry: `${props.prefix}-retry-btn`,
   guide: `${props.prefix}-guide`,
@@ -70,8 +73,9 @@ const ids = computed(() => ({
   unread: (uid: string) => `${unreadPrefix(props.prefix)}-${uid}`,
 }));
 
+/* 空态标题走常量（CHAT_EMPTY_TITLE，原型 L2342 逐字），带搜索词时才换成匹配失败口径。 */
 const emptyText = computed(() =>
-  props.search.trim() === '' ? '还没有会话' : '没有匹配的会话',
+  props.search.trim() === '' ? CHAT_EMPTY_TITLE : '没有匹配的会话',
 );
 
 function onSearch(ev: Event): void {
@@ -130,9 +134,9 @@ defineExpose({ listEl });
         :data-testid="ids.error"
         role="alert"
       >
-        <span class="rail-error-head">读取会话失败</span>
-        <span class="rail-err-msg">{{ props.error }}</span>
-        <button class="btn btn-sm btn-ghost" type="button" :data-testid="ids.retry" @click="emit('retry')">
+        <span class="rail-error-head">读取消息失败：<code class="rail-err-msg">{{ props.error }}</code></span>
+        <span class="rail-guide" :data-testid="ids.guide">确认左上角已登录 Boss 直聘</span>
+        <button class="btn btn-sm" type="button" :data-testid="ids.retry" @click="emit('retry')">
           重试
         </button>
       </div>
@@ -144,10 +148,13 @@ defineExpose({ listEl });
       </div>
 
       <div v-else-if="props.friends.length === 0" class="rail-state" :data-testid="ids.empty">
-        <span class="state-glyph">💬</span>
-        <span class="state-title">{{ emptyText }}</span>
-        <span v-if="props.search.trim() === ''" class="rail-guide" :data-testid="ids.guide">
-          确认已登录 Boss；未登录可到「概览」页点「扫码登录」。
+        <span class="state-glyph" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M2.6 4.2h10.8v6.4H7.4L4.2 13v-2.4H2.6z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span>
+        <span class="state-title" :data-testid="ids.emptyTitle">{{ emptyText }}</span>
+        <span class="state-sub">点「刷新」或在 Boss 直聘回一条消息</span>
+        <span class="state-actions">
+          <button class="btn btn-sm" type="button" :data-testid="ids.emptyRefresh" @click="emit('refresh')">
+            刷新
+          </button>
         </span>
       </div>
 

@@ -9,7 +9,7 @@
  *
  * 真源是 `prototypes/ui-v1/index.html`（UI_READY 冻结版）。
  */
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -123,6 +123,26 @@ describe('撤导航后的锚点净口径（用户裁决 5 / SPEC-001 AC9）', ()
 
   it('概览容器锚点照原型是 shell-dashboard（page-dashboard 已退役）', () => {
     expect(src).toContain('data-testid="shell-dashboard"');
+  });
+
+  it('求职期望行退役：chat-expect-* 与 .expect-row 命中 0（SPEC-001 Rev3/Rev4）', () => {
+    expect(src).not.toContain('chat-expect');
+    expect(src).not.toContain('ExpectRow');
+    expect(existsSync(join(ROOT, 'frontend-vue', 'src', 'components', 'chat', 'ExpectRow.vue'))).toBe(false);
+    // 契约面不动：api 封装与后端命令仍在（期望改由筛选面板「读取期望职位」承载）。
+    expect(read('frontend-vue/src/api/commands/chat.ts')).toContain('list_expectations');
+    expect(src).toContain('scrape-filter-expect-btn');
+    const css = readFileSync(join(ROOT, 'frontend-vue', 'styles', 'vue-chat.css'), 'utf8');
+    expect(css).not.toMatch(/\.expect-row\s*\{/);
+  });
+
+  it('token 读数两份 DOM 各唯一一份，文案是「累计 N token」（原型 L1400-1406 / A32）', () => {
+    const tail = read('frontend-vue/src/components/TopbarTail.vue');
+    expect(tail).toContain('data-testid="token-total"');
+    expect(tail).toContain('data-testid="token-total-chip"');
+    expect(tail).toContain('累计 <b');
+    // 旧的「N tokens」口径（读数在后面加复数 s）不得残留；类名 tb-tokens 不算。
+    expect(tail).not.toMatch(/\}\}\s*tokens/);
   });
 
   it('主题开关全站恰好一处（顶栏合并后壳不再自带）', () => {
