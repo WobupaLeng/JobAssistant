@@ -64,6 +64,8 @@ pages → features → components → lib_ui
    **同族变体：注释正文里也不许出现 `` `*/` ``**——真正的坑不是 `//!` 本身，而是**块注释被提前闭合**。`styles/pages.css` 曾在注释里用反引号包住 `*/`，导致该行之后的四份样式表（`pages` / `sensitive` / `auto` / `filter`）全部失效，而 `vite build` 只报一条 `[css-syntax-error] Unexpected "\`"`、末尾照样打印 `✓ built`。改完 CSS 后**必须在产物里数一遍选择器**（`dist/assets/*.css`），不能只看构建成功。
 6. **不引入第二套 UI 库**：玻璃与控件规范由 `styles/` 与 `liquid-glass` 技能确定。
 7. **`src/` 里不放调试桩**：浏览器单独调试用的 `__TAURI_INTERNALS__` 桩不得进入正式路径。
+8. **vue 系 CSS 零颜色字面量，零例外（Chief 裁决 2026-11-23）**：`vue-dashboard / vue-chat / vue-pages` 三份禁止 hex/rgb/rgba 颜色字面量（`tests/geometry.test.ts` 守卫）。原型真值自带颜色字面量（高光、遮罩 alpha 等）时，**一律在 `tokens.css` 新增语义令牌**，vue 系只消费 `var()`；多一枚令牌是可接受代价，不允许「这一处特殊」的例外。新令牌照 C7 深浅两套独立定义；原型无浅色覆盖值时两套共用并在注释写明缘由（先例：`--spec-avatar-top`，原型 L1158 `rgba(255,255,255,.5)`，比 `--spec-top` 亮一档不可复用）。
+   **宿主边界（不是例外）**：11 份契约 CSS 是原型逐字宿主，颜色字面量收口另轮（见 HANDOFF）；原型规则的同族已住契约 CSS 时，整条规则可随族宿主（先例：`.chat-rail::before` 与 `.card::before` 同在 `layout.css`，数值照原型 L1055–1057 逐字），vue 系原地留指向说明。**不得借「挪进契约 CSS」为 vue 系规则规避本红线**。
 
 ---
 
