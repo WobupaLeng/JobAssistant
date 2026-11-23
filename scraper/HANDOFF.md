@@ -21,6 +21,8 @@
 
 真实小批量 E2E（Java，maxJd=10，门槛 70，已登录真实 profile）：scraped=15 / inserted=7 / below_threshold=5 / rejected=3，新入库行规则五维打分字段齐全，日志无撞名 / 无 `TargetClosedError`；`scrape_close` 整树回收约 1.6s；`login_save` → `saved=true` → `logout` → `saved=false` 标记链通过。
 
+**抓取自然完成信号已发**（本轮 fix(sidecar)）：`_run_scrape` 的全部出口（自然完成 / 关键词为空与未登录早退 / 异常 / 用户停止）都在 finally 发 `scrape.finished`（`{count,stopped,error}`；`stopped` 取 `_stop.is_set()`，`start_scrape` 每轮清 `_stop`，故为 per-run 权威）；emit 包 try/except 防 stdout 已断时 BrokenPipe 掩盖原始异常。Rust 侧消费与竞态守卫见 `backend-tauri/HANDOFF.md`。真实 E2E 自然跑完 +151s 界面自动转「空闲」（证据 `%TEMP%\jt-running\t8\RESULT-t8.json`）。
+
 ---
 
 ## 2. 坑（踩过的，别再踩）
@@ -82,7 +84,6 @@ Response.text: Connection closed while reading from the driver
 ### 3.1 等产品级验收
 
 1. **新设备扫码登录全流程**：本轮 E2E 用的是已登录 profile；新设备 / 登录失效态的扫码 → 保存 → 抓取全流程未实测。
-2. **抓取自然完成信号**：`_run_scrape` 结束只发 log（`sidecar.py:258`），Rust `progress.running` 只在 stop/Exited 清，界面停在「抓取中」直到用户手动停止。需协议完成事件（动 `protocol.rs` 高冲突单点）+ 前端消费。
 
 ### 3.2 可独立开工
 

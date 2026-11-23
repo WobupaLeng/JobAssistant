@@ -91,6 +91,11 @@ pub fn parse_line(line: &str) -> LineParse {
             state: json_str(&data, "state").unwrap_or_else(|| "error".to_string()),
             msg: json_str(&data, "msg").unwrap_or_default(),
         })),
+        "scrape.finished" => LineParse::Event(SidecarEvent::Event(Event::ScrapeFinished {
+            count: data.get("count").and_then(|c| c.as_u64()).unwrap_or(0) as u32,
+            stopped: data.get("stopped").and_then(|s| s.as_bool()).unwrap_or(false),
+            error: json_str(&data, "error").unwrap_or_default(),
+        })),
         // 未来新增的事件类型：老版本壳不认识，丢弃而不是报错
         _ => LineParse::Ignore,
     }

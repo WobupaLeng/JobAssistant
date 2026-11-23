@@ -230,6 +230,19 @@ pub enum Event {
         state: String,
         msg: String,
     },
+    /// 抓取流程收尾（自然完成 / 早退 / 异常 / 用户停止都会发）。
+    /// Rust 侧靠它清 `running`——sidecar 抓完仍守在 stdin 上不发 Exited，
+    /// 缺这帧界面永停「抓取中」。additive 扩展：老壳不认识该事件名，
+    /// codec 按未知事件静默丢弃，不报错。
+    #[serde(rename = "scrape.finished")]
+    ScrapeFinished {
+        /// sidecar 自报抓取条数（诊断用；权威入库计数在 Rust 侧）
+        count: u32,
+        /// 用户主动停止（scrape.stop）收尾时为 true
+        stopped: bool,
+        /// 非空 = 异常收尾（早退 / 异常），用于 finished_reason 文案
+        error: String,
+    },
 }
 
 /// 一条抓取到的岗位原始数据。
@@ -525,6 +538,24 @@ mod tests {
             Event::JobScraped(j) => {
                 assert_eq!(j.salary.as_deref(), Some("20-30K"));
                 assert_eq!(j.founded_years, Some(5));
+            }
+            _ => panic!("类型不匹配"),
+        }
+    }
+
+    /// `scrape.finished` 的帧名与字段必须和 `scraper/sidecar.py::_run_scrape`
+    /// 的 emit 逐字一致；写错不会编译失败，只会让界面永停「抓取中」。
+    #[test]
+    fn scrape_finished_event_roundtrip() {
+        let ev = Event::ScrapeFinished { count: 7, stopped: false, error: String::new() };
+        let line = serde_json::to_string(&ev).unwrap();
+        assert!(line.contains("\"event\":\"scrape.finished\""), "实际：{line}");
+        let back: Event = serde_json::from_str(&line).unwrap();
+        match back {
+            Event::ScrapeFinished { count, stopped, error } => {
+                assert_eq!(count, 7);
+                assert!(!stopped);
+                assert!(error.is_empty());
             }
             _ => panic!("类型不匹配"),
         }

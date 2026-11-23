@@ -147,6 +147,38 @@ use super::handle::SidecarError;
         ));
     }
 
+    /// `scrape.finished` 是自然完成信号：缺它界面永停「抓取中」。
+    /// 字段缺省必须宽容（data 可能不全），但事件名必须认识、不能落到 Ignore。
+    #[test]
+    fn parse_line_reads_scrape_finished() {
+        match parse_line(
+            r#"{"event":"scrape.finished","data":{"count":7,"stopped":false,"error":""}}"#,
+        ) {
+            LineParse::Event(SidecarEvent::Event(Event::ScrapeFinished {
+                count,
+                stopped,
+                error,
+            })) => {
+                assert_eq!(count, 7);
+                assert!(!stopped);
+                assert!(error.is_empty());
+            }
+            other => panic!("实际 {other:?}"),
+        }
+        match parse_line(r#"{"event":"scrape.finished"}"#) {
+            LineParse::Event(SidecarEvent::Event(Event::ScrapeFinished {
+                count,
+                stopped,
+                error,
+            })) => {
+                assert_eq!(count, 0);
+                assert!(!stopped);
+                assert!(error.is_empty());
+            }
+            other => panic!("实际 {other:?}"),
+        }
+    }
+
     #[test]
     fn truncate_keeps_char_boundary() {
         let s = "汉".repeat(2000);
@@ -292,6 +324,12 @@ use super::handle::SidecarError;
         // 事件帧也会带 id；它属于事件流，绝不能抢走这个 id 的回执槽位
         assert!(!route_reply(
             r#"{"id":"e1","event":"log","data":{"level":"info","msg":"x"}}"#,
+            &pending
+        ));
+        assert!(pending.lock().unwrap().contains_key("e1"));
+        // scrape.finished 同理：它是事件流，不是 scrape.stop 的回执
+        assert!(!route_reply(
+            r#"{"id":"e1","event":"scrape.finished","data":{"count":1,"stopped":true,"error":""}}"#,
             &pending
         ));
         assert!(pending.lock().unwrap().contains_key("e1"));

@@ -19,6 +19,8 @@
 
 **Chrome 硬阻塞已除**（提交 `1f5910b`）：① sidecar 子进程 spawn 即纳入 Job Object（`KILL_ON_JOB_CLOSE`，`core/sidecar/process/job.rs`），shutdown/强杀关句柄回收 python + node driver + Chrome 整树；② `SidecarHandle::Drop` 加 `Arc::strong_count` 守卫——克隆共享子进程，只有最后一个持有者触发 shutdown，修掉「前端挂载即 `login_status`，其瞬态克隆出 scope 就关掉共享 stdin 杀掉会话」；③ sidecar 侧改常驻单车道执行器（见 `scraper/HANDOFF.md`）。真实小批量抓取 E2E 实测通过：`scrape_start`(Java, maxJd=10, 门槛 70) → scraped=15 / inserted=7 / below_threshold=5 / rejected=3，新入库行规则五维打分字段齐全，日志无撞名 / 无 `TargetClosedError`，`scrape_close` 整树回收约 1.6s，`login_save` → `saved=true` → `logout` → `saved=false` 标记链通过。`login_status.saved` 恒 false 已修（提交 `348eb1a`）。
 
+**抓取自然完成信号已接线**（本轮 fix(sidecar)）：协议新增 `scrape.finished` 事件（`{count,stopped,error}`，additive，Envelope 三帧形状不变）；`session.rs` consume 收到即 `running=false` 并按帧写 `finished_reason`（`stopped`→「已按用户请求停止」；`error` 非空→「抓取异常结束：…」；否则「抓取完成，共 N 条」，N 用 Rust 权威计数 `p.scraped`），五段计数保留；`if p.running` 守卫保证与手动 stop 竞态不互相覆盖原因。**consume 侧只信帧内 `stopped`，不用 `stop_requested`**——后者只在 stop/Drop 置 true 从不复位，跨轮次粘滞会把上一轮用户停止误记到新一轮自然完成。前端零改动：Dashboard 每 tick 轮询 `scrape_progress`，下一 tick 自动退出「抓取中」。真实 E2E（Java，maxJd=10，已登录真实 profile，自然跑完、全程不手动 stop）：+151s `running=false`、reason=「抓取完成，共 15 条」、scraped=15 / inserted=4 / below_threshold=6 / rejected=5 计数保留，CDP 取证顶条转「空闲」，`scrape_close` 整树回收 1.7s，硬杀 exe 后残留 0（证据 `%TEMP%\jt-running\t8\RESULT-t8.json`）。
+
 ---
 
 ## 2. 坑（踩过的，别再踩）
@@ -83,4 +85,3 @@
 3. **`tauri.conf.json` 与 `Cargo.toml` 版本号对齐**：两个文件都是高冲突单点，**必须单线程做**。
 4. **`app/src-tauri/.agents/skills/rust-tauri` 的过期锚点**：仍写 `window-vibrancy 0.8`；`rust-domain-purity` / `rust-testing` 的分组用例数与实测不符。
 5. **`app/node_modules/` 用途不明**：`app/` 下没有 `package.json`，这个目录来源待查。查清前**不要删**，`npx tauri` 依赖它。
-6. **抓取自然完成信号**：sidecar 完成只发 log，`progress.running` 只在 stop/Exited 清，界面停在「抓取中」直到用户手动停止。需 `protocol.rs` 新增完成事件 + `session.rs` 消费 + 前端接线（高冲突单点，单线程做）。

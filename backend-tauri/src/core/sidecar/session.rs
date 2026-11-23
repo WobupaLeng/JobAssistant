@@ -473,6 +473,25 @@ fn consume(
                 }
                 let _ = tx.send(SessionUpdate::Login { state, msg });
             }
+            SidecarEvent::Event(Event::ScrapeFinished { stopped, error, .. }) => {
+                // 自然完成也要清 running，否则界面永停「抓取中」（sidecar 抓完
+                // 仍守在 stdin 上，永远不会发 Exited）。`p.running` 守卫是与 stop()
+                // 的竞态契约：谁先到谁写原因，后到者不覆盖。这里只看帧里的
+                // stopped，不用 user_stopped——后者跨轮次粘滞（stop_requested
+                // 从不复位），会把上一轮的用户停止误记到新一轮的自然完成上。
+                if let Ok(mut p) = progress.lock() {
+                    if p.running {
+                        p.running = false;
+                        p.finished_reason = Some(if stopped {
+                            STOPPED_BY_USER.to_string()
+                        } else if error.is_empty() {
+                            format!("抓取完成，共 {} 条", p.scraped)
+                        } else {
+                            format!("抓取异常结束：{error}")
+                        });
+                    }
+                }
+            }
             SidecarEvent::Malformed { line } => {
                 let _ = tx.send(SessionUpdate::Malformed { line });
             }
@@ -1193,5 +1212,257 @@ mod tests {
         );
         assert!(notes.lock().unwrap().is_empty(), "重复不是决策，不该记日志");
         assert_eq!(progress.lock().unwrap().duplicates, 1);
+    }
+
+    // ---- scrape.finished：自然完成清 running ----
+    //
+    // 缺陷现场：sidecar 抓完只 log「抓取结束」，仍守在 stdin 上不发 Exited，
+    // Rust 侧 running 永远 true，界面永停「抓取中」直到用户手动停止。
+
+    /// 直接喂事件给 consume（与 ready/login 用例同风格）。
+    fn consume_events(
+        events: Vec<SidecarEvent>,
+        progress: &Arc<Mutex<ScrapeProgress>>,
+        put_ok: bool,
+        stop: Arc<AtomicBool>,
+    ) {
+        let (tx, _rx) = mpsc::channel();
+        let (events_tx, events_rx) = mpsc::channel();
+        for ev in events {
+            events_tx.send(ev).unwrap();
+        }
+        drop(events_tx);
+        consume(
+            events_rx,
+            Arc::clone(progress),
+            tx,
+            DEFAULT_PROFILE.clone(),
+            IngestConfig {
+                min_score: 0,
+                ..Default::default()
+            },
+            Ports::new(
+                move |_: &Job| Ok(put_ok),
+                |_: &SensitiveEntry<'_>| {},
+                |_: &DecisionNote| {},
+            ),
+            NoSensitive,
+            stop,
+        );
+    }
+
+    #[test]
+    fn scrape_finished_clears_running_and_keeps_counts() {
+        let progress = Arc::new(Mutex::new(ScrapeProgress::new()));
+        // send(ScrapeStart) 已把状态切成「抓取中」
+        progress.lock().unwrap().running = true;
+        consume_events(
+            vec![
+                SidecarEvent::Event(Event::JobScraped(high_score_job("boss:fin1"))),
+                SidecarEvent::Event(Event::ScrapeFinished {
+                    count: 1,
+                    stopped: false,
+                    error: String::new(),
+                }),
+            ],
+            &progress,
+            true,
+            Arc::new(AtomicBool::new(false)),
+        );
+        let snap = progress.lock().unwrap().clone();
+        assert!(!snap.running, "自然完成必须退出「抓取中」");
+        assert_eq!(snap.scraped, 1, "完成不得清计数");
+        assert_eq!(snap.inserted, 1, "完成不得清计数");
+        assert_eq!(snap.finished_reason.as_deref(), Some("抓取完成，共 1 条"));
+    }
+
+    #[test]
+    fn scrape_finished_with_stopped_flag_reports_user_stop() {
+        let progress = Arc::new(Mutex::new(ScrapeProgress::new()));
+        progress.lock().unwrap().running = true;
+        consume_events(
+            vec![SidecarEvent::Event(Event::ScrapeFinished {
+                count: 0,
+                stopped: true,
+                error: String::new(),
+            })],
+            &progress,
+            true,
+            Arc::new(AtomicBool::new(false)),
+        );
+        let snap = progress.lock().unwrap().clone();
+        assert!(!snap.running);
+        assert_eq!(snap.finished_reason.as_deref(), Some(STOPPED_BY_USER));
+    }
+
+    #[test]
+    fn scrape_finished_with_error_reports_abnormal_end() {
+        let progress = Arc::new(Mutex::new(ScrapeProgress::new()));
+        progress.lock().unwrap().running = true;
+        consume_events(
+            vec![SidecarEvent::Event(Event::ScrapeFinished {
+                count: 0,
+                stopped: false,
+                error: "RuntimeError: 页面崩溃".into(),
+            })],
+            &progress,
+            true,
+            Arc::new(AtomicBool::new(false)),
+        );
+        let snap = progress.lock().unwrap().clone();
+        assert!(!snap.running);
+        assert_eq!(
+            snap.finished_reason.as_deref(),
+            Some("抓取异常结束：RuntimeError: 页面崩溃")
+        );
+    }
+
+    /// stop_requested 从不复位：上一轮用户停止后，新一轮自然完成不得被
+    /// 粘滞的 user_stopped 误记成「已按用户请求停止」。只信帧里的 stopped。
+    #[test]
+    fn scrape_finished_ignores_sticky_stop_flag_from_previous_run() {
+        let progress = Arc::new(Mutex::new(ScrapeProgress::new()));
+        progress.lock().unwrap().running = true;
+        consume_events(
+            vec![SidecarEvent::Event(Event::ScrapeFinished {
+                count: 0,
+                stopped: false,
+                error: String::new(),
+            })],
+            &progress,
+            true,
+            Arc::new(AtomicBool::new(true)),
+        );
+        let snap = progress.lock().unwrap().clone();
+        assert!(!snap.running);
+        assert_eq!(snap.finished_reason.as_deref(), Some("抓取完成，共 0 条"));
+    }
+
+    // ---- 手动 stop 与自然完成的竞态（真 sidecar 进程 + 真 stop()）----
+
+    fn wait_until(mut pred: impl FnMut() -> bool, timeout: Duration) -> bool {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if pred() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        pred()
+    }
+
+    fn start_cmd() -> Command {
+        Command::ScrapeStart {
+            platform: "boss".into(),
+            keywords: vec!["Java".into()],
+            max_jd: 10,
+            min_score: 70,
+            city: None,
+            salary: Vec::new(),
+            experience: Vec::new(),
+            degree: Vec::new(),
+            scale: Vec::new(),
+            stage: Vec::new(),
+            industry: Vec::new(),
+            job_type: None,
+            max_pages: None,
+        }
+    }
+
+    fn fake_session(tag: &str, script: &str) -> (SidecarSession, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("aja-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        std::fs::write(dir.join("sidecar.py"), script).expect("写假 sidecar");
+        let session = SidecarSession::start(
+            SidecarConfig::new(&dir),
+            DEFAULT_PROFILE.clone(),
+            IngestConfig::default(),
+            Ports::new(
+                |_: &Job| Ok(true),
+                |_: &SensitiveEntry<'_>| {},
+                |_: &DecisionNote| {},
+            ),
+            NoSensitive,
+        )
+        .expect("spawn 假 sidecar");
+        (session, dir)
+    }
+
+    /// 完成先到、停止后到：stop() 不得把「抓取完成」改写成「用户停止」，
+    /// 随后到达的 stopped=true 完成帧也不得二次触发。
+    #[test]
+    fn finished_then_stop_keeps_completion_reason() {
+        let (mut session, dir) = fake_session(
+            "finish-first",
+            r#"import sys, os, json
+def emit(p):
+    print(json.dumps(p), flush=True)
+emit({'event': 'ready', 'data': {'pid': os.getpid()}})
+for line in sys.stdin:
+    try:
+        cmd = json.loads(line).get('cmd')
+    except Exception:
+        continue
+    if cmd == 'scrape.start':
+        emit({'event': 'job.scraped', 'data': {'job_id': 'boss:f1', 'title': 'Java'}})
+        emit({'event': 'scrape.finished', 'data': {'count': 1, 'stopped': False, 'error': ''}})
+    elif cmd == 'scrape.stop':
+        emit({'event': 'scrape.finished', 'data': {'count': 1, 'stopped': True, 'error': ''}})
+"#,
+        );
+        session.send(&start_cmd()).expect("scrape.start");
+        assert!(
+            wait_until(|| !session.progress().running, Duration::from_secs(10)),
+            "scrape.finished 应把 running 清掉"
+        );
+        let snap = session.progress();
+        assert_eq!(snap.finished_reason.as_deref(), Some("抓取完成，共 1 条"));
+        assert_eq!(snap.scraped, 1);
+        session.stop();
+        // 等第二条 stopped=true 的完成帧被消费：不得覆盖已完成的原因
+        std::thread::sleep(Duration::from_millis(500));
+        let snap = session.progress();
+        assert!(!snap.running);
+        assert_eq!(snap.finished_reason.as_deref(), Some("抓取完成，共 1 条"));
+        assert_eq!(snap.scraped, 1);
+        session.shutdown();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 停止先到、完成后到：完成帧不得把「已按用户请求停止」改写成「抓取完成」。
+    #[test]
+    fn stop_then_finished_keeps_user_stop_reason() {
+        let (mut session, dir) = fake_session(
+            "stop-first",
+            r#"import sys, os, json
+def emit(p):
+    print(json.dumps(p), flush=True)
+emit({'event': 'ready', 'data': {'pid': os.getpid()}})
+for line in sys.stdin:
+    try:
+        cmd = json.loads(line).get('cmd')
+    except Exception:
+        continue
+    if cmd == 'scrape.start':
+        emit({'event': 'job.scraped', 'data': {'job_id': 'boss:s1', 'title': 'Java'}})
+    elif cmd == 'scrape.stop':
+        emit({'event': 'scrape.finished', 'data': {'count': 1, 'stopped': True, 'error': ''}})
+"#,
+        );
+        session.send(&start_cmd()).expect("scrape.start");
+        assert!(
+            wait_until(|| session.progress().scraped >= 1, Duration::from_secs(10)),
+            "假 sidecar 应先推一条岗位"
+        );
+        assert!(session.progress().running);
+        session.stop();
+        // 等 stopped=true 的完成帧到达：必须被 p.running 守卫忽略
+        std::thread::sleep(Duration::from_millis(500));
+        let snap = session.progress();
+        assert!(!snap.running);
+        assert_eq!(snap.finished_reason.as_deref(), Some(STOPPED_BY_USER));
+        assert_eq!(snap.scraped, 1, "停止不得清计数");
+        session.shutdown();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
