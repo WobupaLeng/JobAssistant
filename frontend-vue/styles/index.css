@@ -26,3 +26,7 @@
  * 由总控在并行派发前预挂，lane 只填各自文件，不再改本入口。 */
 @import './vue-chat.css';
 @import './vue-pages.css';
+
+/* 第 15 份：Liquid Glass L2/L3（SPEC-003 裁定 1，前端单写者例外，L2-1 批内追加）。
+ * 只消费前面令牌与文档级滤镜，追加末尾不动既有 14 条相对顺序。 */
+@import './vue-glass.css';

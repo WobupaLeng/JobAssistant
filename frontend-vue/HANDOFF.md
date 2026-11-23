@@ -74,6 +74,14 @@
 - **数据真实性**：Rust 核心无累计写入路径（偏差②更正），读数为旧库遗留值（无 Tauri 预览下为 0），前端不造数；后端补累计排 M4 之后（Chief 顺序）。
 - **门禁**：typecheck 0 错；vitest 34 文件 573 全绿；build 76.39 kB，`{` 计数 743 = 738 + 新增 5 块，分项规则与 1360–1599 媒体块可达；槽位 A cargo 独占 `%TEMP%\jt-m3b-polish` exit 0 + compileall 0。实测 1600 分项可见（text-1/650）、1440 分项与分隔线隐藏、1150 chip title 全量三值且横向出口仍生效。证据 `%TEMP%\jt-m3-polish\m3b-1600-stats.png`。
 
+**Liquid Glass L2 完成**（SPEC-003 裁定 1–7，上游规格 `d39bae4` 冻结；根 §7.2 #3 第二层落地）：
+- **L2-0 闸门 PASS**：真 WebView2（Chrome/157）探针实证 `filter:url()` 湍流像素差 >0、`feImage data:` 生效、webgl2 可用——最高风险项确证，无需 `data-l2` 降级。探针在 `%TEMP%\jt-glass-l23\`（红线 7 禁入 src）。
+- **L2-1 基础**：`index.html` 加 svg defs（`lg-turb-dark` 0.008/3/scale10、`lg-turb-light` 0.006/2/scale5，seed 同 11）；`styles/vue-glass.css` 第 15 份追加 `index.css` @import 链末尾；`lib_ui/glass.ts` ThemeParams 与 `tokens.css` 折射令牌同源（vitest 断言）。
+- **L2-2 抽屉/敏感库 P0**（裁定 6）：`GlassClone.vue` backdrop 模式 + `use-glass-clone.ts`——面板背后窗内内容非交互副本（剥全部 id/data-testid、剥既有克隆层防递归、排除叠层、aria-hidden/inert/pointer-events:none），`computeGlassOffset` 反平移 rect+scroll，按面板 rect 预裁剪 +20px 出血，内容变更节流 200ms 重克隆、滚动只更新反平移。
+- **L2-3 卡片 P1**（裁定 7）：material 模式克隆卡自身玻璃 tint（card-local 不反平移，链 1 滤镜）+ `use-glass-budget.ts` IntersectionObserver 限 ≤12 可见卡施滤镜；`use-glass-support.ts` 运行时探针不支持则 `<html data-l2="off">` 整层降级。
+- **映射/红线**：Leptos `glass.rs`→`glass.ts`、`shell.rs`→`AppShell.vue`（L3 `glass_canvas.rs`→`GlassCanvas.vue` 在途）；`.card` 补 `overflow:hidden`（规格铁律 3，`layout.css` 只加这一条）；零新依赖（禁 three/pixi/wgpu/html2canvas），颜色全运行时读 token、TS/CSS 零字面量；jsdom 无 IO/RO 加能力守卫（真实 WebView2 照常）。
+- **门禁**：typecheck 0；vitest 35 文件 589 全绿；build CSS 77.61 kB `{` 758（glass 规则全可达、`.card overflow:hidden` present）、JS 241.76 kB（L2 增量远低于 A9 40KB 预算）；C4 @import 15、vue 系 CSS 4 份零字面量守卫绿。**真窗口视觉验收（规格 5.2/5.3 A2–A8）与槽位 C 冒烟按 Chief 裁定搁置至统一验收**；L3（GlassCanvas 抽屉透镜 WebGL）在途。
+
 ---
 
 ## 2. 坑（踩过的，别再踩）
@@ -123,7 +131,7 @@
 3. **槽位 C 产物冒烟**（根 AGENTS §5.3 / ARCH-003 §6 R5，用户已授权 release lane）：先删 CSP `'wasm-unsafe-eval'`（ARCH-003:248 阶段 4 遗漏，WASM 已不存在），再 `cd backend-tauri && npx tauri build --no-bundle`（独占 `CARGO_TARGET_DIR=%TEMP%\jt-release`），产物拷到**工作区外**启动，确认 Vue 真渲染（CSP 白屏唯一实测点）。
 4. **登出入口接线**：✅ 已完成（`login-state` emit + 前端订阅 + 保存/退出按钮，见 §1）。
 5. **M1 同屏编排合并**：✅ 已完成（ADR-004 / SPEC-001，见 §1 的锚点增删清单）。**M2 像素对齐** ✅（`9a60d3f`）、**M3 视觉收尾** ✅（见 §1）。下一手：**QA** 按清单重锚 + 零 Mock 验收；分项 token 展示接线 ✅（M3 后续批，见 §1）；后端补累计写入排 M4 之后（Chief 顺序）。
-6. **Liquid Glass L2/L3**（根 §7.2 #3，待用户裁决是否开工）：规格 `git show d39bae4:docs/ui/UI-SPEC-liquid-glass-l2-l3.md`。
+6. **Liquid Glass L2/L3**（根 §7.2 #3）：✅ L2 已完成（SPEC-003 裁定 1–7，见 §1）；**L3 在途**（GlassCanvas 抽屉透镜 WebGL，规格 `git show d39bae4:docs/ui/UI-SPEC-liquid-glass-l2-l3.md`）。单休小批（SPEC-004 `single` 定案）排 L3 之后独立提交，不混 Glass。
 7. 后端未决项（根 §7.2 #1/#4/#5）与 QA 低#1-3 alias 缺口，单独路由 legacy/backend lane。
 
 ### 3.2 需要拍板的开放项
@@ -131,7 +139,7 @@
 | # | 问题 | 影响的文件 |
 |---|---|---|
 | 1 | **`filter.rs` 1,445 行怎么拆** | 建议 `features/scrape/components/*.vue` + `composables/useScrapeFilter.ts` |
-| 2 | **是否同时接 Liquid Glass L2/L3** | 影响 `styles/` 与 WebGL 依赖（Vue 侧需装 canvas 库或手写） |
+| 2 | ~~是否同时接 Liquid Glass L2/L3~~ ✅ 已裁决开工（SPEC-003 冻结，L2 完成、L3 在途；零新依赖，手写 canvas/WebGL，见 §1） | — |
 | 3 | **是否设覆盖率门槛** | 基线是 96 个纯函数断言，不是 40 |
 | 4 | **`set_job_flag` / `list_logs` 这类多分支封装是否拆成独立函数** | 建议拆，但命令名字面量不能变 |
 | 5 | **`job-row-*` / `score-*` 隐藏表是否保留** | 唯一理由的 `gui_e2e.py` 已不存在。若改用 `job-card-{id}` / `job-score-{id}` 可删 |

@@ -9,6 +9,7 @@
  * 卡片单击（那会变成"再切一次"，两次结果互相抵消）。
  */
 import type { CardView } from '../lib_ui/job-list-model';
+import GlassClone from './GlassClone.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -44,12 +45,14 @@ function onOpen(): void {
 
 <template>
   <article
-    class="job-card"
+    class="job-card glass-l2"
     :class="{ 'is-checked': selected, 'is-delivered': view.delivered, 'is-rejected': view.rejected }"
     :data-testid="`job-card-${view.tid}`"
     :data-card="view.jobId"
     @click="onOpen"
   >
+    <!-- L2-3 P1：卡自身玻璃 tint 折射材质（裁定 7，card-local）；同屏滤镜数由网格层 IO ≤12 收口。 -->
+    <GlassClone mode="material" />
     <div class="job-card-top">
       <span class="job-check-slot">
         <input

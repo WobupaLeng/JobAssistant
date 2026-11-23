@@ -19,6 +19,7 @@ import {
   visibleRecords,
   type SensitiveTab,
 } from '../lib_ui/sensitive-model';
+import GlassClone from './GlassClone.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -112,12 +113,14 @@ defineExpose({
   <Teleport to="body">
     <div v-if="open" class="sensitive-backdrop" data-testid="sensitive-backdrop" @click="emit('close')"></div>
     <aside
-      class="sensitive-panel"
+      class="sensitive-panel glass-l2"
       :class="{ 'is-open': open }"
       data-testid="sensitive-panel"
       :aria-hidden="!open"
       aria-label="敏感库"
     >
+      <!-- L2-2 P0：面板背后窗内内容（.dashboard）的非交互折射副本（裁定 6），开合时建 / 拆。 -->
+      <GlassClone mode="backdrop" :active="open" />
       <div class="sensitive-head">
         <div class="sensitive-head-text">
           <span class="sensitive-title">敏感库</span>

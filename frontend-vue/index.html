@@ -54,6 +54,25 @@
   </head>
   <body>
     <div id="app"></div>
+    <!-- Liquid Glass L2 滤镜宿主（SPEC-003 裁定 2 / 规格 Q5）：文档级全局解析一次被任意元素引用，
+         组件卸载不丢滤镜（退出动画期间仍在），首帧就有不「先平后皱」。0×0、aria-hidden、移出视口。
+         深/浅两条湍流滤镜参数与 lib_ui/glass.ts ThemeParams、tokens.css 折射令牌三方同源
+         （tests/glass.test.ts 守卫）；SVG 属性不吃 CSS 变量，故数值静态写死并由单测钉住。
+         真斜面链 lg-lens-drawer 随 L2-2 抽屉克隆层落地（feImage href 由 TS 运行时注入 dataURL）。 -->
+    <svg width="0" height="0" style="position:absolute; left:-9999px; top:0" aria-hidden="true">
+      <defs>
+        <filter id="lg-turb-dark" x="-8%" y="-8%" width="116%" height="116%"
+                primitiveUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.008" numOctaves="3" seed="11" result="n"/>
+          <feDisplacementMap in="SourceGraphic" in2="n" scale="10" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
+        <filter id="lg-turb-light" x="-8%" y="-8%" width="116%" height="116%"
+                primitiveUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.006" numOctaves="2" seed="11" result="n"/>
+          <feDisplacementMap in="SourceGraphic" in2="n" scale="5" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
+      </defs>
+    </svg>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

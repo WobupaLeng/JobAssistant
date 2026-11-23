@@ -69,7 +69,7 @@ describe('契约样式表：裸 font-size px 归零', () => {
     }
   });
 
-  it('index.css 仍是 14 条 @import，顺序不动', () => {
+  it('index.css 仍是 15 条 @import，顺序不动', () => {
     const imports = [...read('styles/index.css').matchAll(/@import\s+'\.\/([\w-]+)\.css';/g)].map(
       (m) => m[1],
     );
@@ -88,6 +88,7 @@ describe('契约样式表：裸 font-size px 归零', () => {
       'vue-dashboard',
       'vue-chat',
       'vue-pages',
+      'vue-glass',
     ]);
   });
 });

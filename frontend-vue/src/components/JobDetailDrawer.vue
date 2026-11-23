@@ -36,6 +36,7 @@ import {
   EMPTY_DETAIL,
 } from '../lib_ui/job-detail-model';
 import { CLASS, playNextFrame } from '../lib_ui/motion';
+import GlassClone from './GlassClone.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -180,13 +181,15 @@ defineExpose({ patch, closeDetail, jdLoading, jdError });
   <aside
     ref="panel"
     v-show="isOpen"
-    class="drawer"
+    class="drawer glass-l2"
     :class="{ 'is-open': isOpen }"
     data-testid="job-detail-drawer"
     role="dialog"
     aria-label="岗位详情"
     aria-modal="false"
   >
+    <!-- L2-2 P0：面板背后窗内内容（.dashboard）的非交互折射副本（裁定 6），开合时建 / 拆。 -->
+    <GlassClone mode="backdrop" :active="isOpen" />
     <div class="drawer-head">
       <span class="card-title" data-testid="job-detail-title">{{ title }}</span>
       <span class="spacer" />

@@ -6,9 +6,10 @@
  * `features/jobs/list-model.ts`；长按状态机来自 `features/jobs/longpress.ts`。
  * 组件本身不 import 任何 `features` 之外的领域模块。
  */
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { Job, JobTabCounts } from '../api/types';
 import JobCard from './JobCard.vue';
+import { useGlassBudget } from '../lib_ui/use-glass-budget';
 import {
   LIST_TABS,
   SORT_FIELDS,
@@ -59,6 +60,10 @@ const emit = defineEmits<{
   (e: 'empty-filter'): void;
   (e: 'empty-start'): void;
 }>();
+
+/** L2-3：网格同屏折射预算（IO ≤12 张挂滤镜，超出退回纯第一层）。 */
+const gridEl = ref<HTMLElement | null>(null);
+useGlassBudget(gridEl);
 
 const visible = computed(() => visibleJobs(props.jobs, props.tab, props.showAll));
 const views = computed(() => visible.value.map((j) => cardView(j, props.scoreMax)));
@@ -184,6 +189,7 @@ function onSort(field: SortField): void {
     </div>
 
     <div
+      ref="gridEl"
       class="job-grid"
       :class="{ 'is-selecting': selection.selecting }"
       :data-state="loading ? 'loading' : error ? 'error' : visible.length === 0 ? 'empty' : 'ready'"

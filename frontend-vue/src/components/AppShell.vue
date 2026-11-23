@@ -24,6 +24,7 @@ import { onMounted } from 'vue';
 
 import { scrapeClose } from '../api/commands/scrape';
 import { useCanvasScale } from '../lib_ui/use-canvas-scale';
+import { useGlassSupport } from '../lib_ui/use-glass-support';
 
 const props = withDefaults(
   defineProps<{
@@ -49,6 +50,9 @@ onMounted(() => {
  */
 const canvas = useCanvasScale();
 defineExpose({ syncCanvas: canvas.sync });
+
+/** Liquid Glass 第二层能力探针：不支持 filter:url() 的环境整层降级（data-l2="off"，规格 Q6）。 */
+useGlassSupport();
 </script>
 
 <template>
