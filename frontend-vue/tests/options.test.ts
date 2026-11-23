@@ -45,7 +45,7 @@ describe('options/项数锚点', () => {
     expect(STAGE_OPTIONS).toHaveLength(8);
     expect(JOB_TYPE_OPTIONS).toHaveLength(3);
     expect(INDUSTRY_OPTIONS).toHaveLength(18);
-    expect(WEEKEND_OPTIONS).toHaveLength(3);
+    expect(WEEKEND_OPTIONS).toHaveLength(4);
     expect(HR_ACTIVE_OPTIONS).toHaveLength(4);
     expect(DEGREE_VETO_OPTIONS).toHaveLength(4);
     expect(PLATFORMS).toHaveLength(3);
@@ -59,6 +59,12 @@ describe('options/项数锚点', () => {
     expect([MAX_PAGES_MIN, MAX_PAGES_DEFAULT, MAX_PAGES_MAX]).toEqual([1, 3, 20]);
     expect(DEFAULT_EXCLUDE).toContain('外包');
     expect(EXCLUDE_PLACEHOLDER).toContain('驻场');
+  });
+
+  // SPEC-004 §一：work_weekend 走 JSON 透传无编译期枚举校验，错一个字母＝筛选静默丢失。
+  // 字面量集前后端逐字同源（后端 rules.rs 三档枚举），这里把全集钉死。
+  it('WEEKEND_OPTIONS 字面量集逐字同源 SPEC-004', () => {
+    expect(WEEKEND_OPTIONS.map((o) => o.value)).toEqual(['any', 'double', 'no_bigweek', 'single']);
   });
 });
 

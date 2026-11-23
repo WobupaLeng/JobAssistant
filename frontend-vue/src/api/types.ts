@@ -252,7 +252,8 @@ export interface ScrapeDefaultsArgs {
   maxPages?: unknown;
   excludeKeywords?: unknown;
   hrActive?: unknown;
-  workWeekend?: unknown;
+  /** 休息制度三档＋不限；字面量逐字同源 SPEC-004（后端 rules.rs 枚举），错一个字母＝筛选静默丢失 */
+  workWeekend?: 'any' | 'double' | 'no_bigweek' | 'single';
   jdDegree?: unknown;
   minYears?: unknown;
 }

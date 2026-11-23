@@ -212,6 +212,15 @@ describe('applyBackend（后端权威优先，C12）', () => {
     expect(n).toBe(9);
   });
 
+  // SPEC-004：single 档由 WEEKEND_OPTIONS 选项表驱动校验（decode L266 / applyBackend L546），
+  // 无需改校验代码；这里证明新字面量经蛇形回读与本地解码两条路都被接受，不静默回落 any。
+  it('single 档经选项表驱动被 decode/applyBackend 接受（SPEC-004 字面量同源）', () => {
+    expect(decode('weekend=single').weekend).toBe('single');
+    const d = createDraft();
+    expect(applyBackend(d, { work_weekend: 'single' })).toBe(1);
+    expect(d.weekend).toBe('single');
+  });
+
   it('驼峰回显不再被当作有效输入（写入/读取两个方向不混用）', () => {
     const d = createDraft();
     // 驼峰是 set_scrape_defaults 的入参名，不是 get_app_config 的回显名。
