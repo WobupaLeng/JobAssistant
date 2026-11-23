@@ -164,6 +164,32 @@ describe('撤导航后的锚点净口径（用户裁决 5 / SPEC-001 AC9）', ()
   });
 });
 
+describe('Liquid Glass L3 透镜锚点（SPEC-003 裁定 3/5）', () => {
+  function readTree(dir: string): string {
+    const out: string[] = [];
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) out.push(readTree(p));
+      else if (/\.(vue|ts)$/.test(e.name)) out.push(readFileSync(p, 'utf8'));
+    }
+    return out.join('\n');
+  }
+
+  it('glass-l3-canvas 锚点在 GlassCanvas.vue 且全站唯一', () => {
+    const canvas = read('frontend-vue/src/components/GlassCanvas.vue');
+    expect(canvas).toContain('data-testid="glass-l3-canvas"');
+    const src = readTree(join(ROOT, 'frontend-vue', 'src'));
+    const hits = src.split('data-testid="glass-l3-canvas"').length - 1;
+    expect(hits).toBe(1);
+  });
+
+  it('透镜画布不吞事件（pointer-events:none 在 vue-glass.css）', () => {
+    const css = readFileSync(join(ROOT, 'frontend-vue', 'styles', 'vue-glass.css'), 'utf8');
+    expect(css).toContain('.glass-l3-canvas');
+    expect(css).toMatch(/\.glass-l3-canvas\s*\{[^}]*pointer-events:\s*none/);
+  });
+});
+
 describe('禁用 testid 全部为 0', () => {
   const banned = [
     'chat-rail-expand-btn',

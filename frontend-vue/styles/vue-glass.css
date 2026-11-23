@@ -77,3 +77,30 @@
 
 /* 同屏折射预算（规格 L2-3 ≤12）：超预算卡片关滤镜退回纯第一层（use-glass-budget 打类）。 */
 .glass-budget-off .glass-clone { filter: none !important; }
+
+/* ---- L3：WebGL 抽屉透镜画布（规格 §3.5 / SPEC-003 裁定 5） ---- */
+
+/* 固定铺满视口、z-index:40（盖过同层遮罩，低于抽屉面板 41）、不吞事件。
+ * 挂 .app-shell 末尾，DOM 序在后。opacity 由 use-glass-l3 逐帧写（随抽屉淡入），初始 0。 */
+.glass-l3-canvas {
+  position: fixed;
+  inset: 0;
+  display: block;
+  z-index: 40;
+  pointer-events: none;
+  opacity: 0;
+}
+
+/* webgl2 创建失败 / 着色器失败 → data-l3="off"，整层隐藏（第二层照常，规格 §3.4）。 */
+[data-l3='off'] .glass-l3-canvas { display: none !important; }
+
+/* 无障碍降级：减少动效 / 减少透明度 / 强制颜色不显示透镜（A8 的 v-if 已在源头不创建，此处兜底）。 */
+@media (prefers-reduced-motion: reduce) {
+  .glass-l3-canvas { display: none !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass-l3-canvas { display: none !important; }
+}
+@media (forced-colors: active) {
+  .glass-l3-canvas { display: none !important; }
+}

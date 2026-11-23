@@ -25,6 +25,7 @@ import { onMounted } from 'vue';
 import { scrapeClose } from '../api/commands/scrape';
 import { useCanvasScale } from '../lib_ui/use-canvas-scale';
 import { useGlassSupport } from '../lib_ui/use-glass-support';
+import GlassCanvas from './GlassCanvas.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -73,5 +74,9 @@ useGlassSupport();
     <div class="app-body">
       <slot />
     </div>
+
+    <!-- Liquid Glass 第三层透镜画布（SPEC-003 裁定 5）：挂 .app-shell 内部末尾，
+         position:fixed z-40 盖过同层遮罩、低于抽屉面板 41；reduced-motion 时 v-if 不创建（A8）。 -->
+    <GlassCanvas />
   </div>
 </template>

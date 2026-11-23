@@ -7,7 +7,17 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { GLASS_DARK, GLASS_LIGHT, GLASS_MAX_FILTERED_CARDS, computeGlassOffset } from '../src/lib_ui/glass';
+import {
+  GLASS_DARK,
+  GLASS_LIGHT,
+  GLASS_L3,
+  GLASS_MAX_FILTERED_CARDS,
+  bevelSlope,
+  clampDpr,
+  computeGlassOffset,
+  snellDeflection,
+  squircleSDF,
+} from '../src/lib_ui/glass';
 
 const FRONTEND = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel: string) => readFileSync(join(FRONTEND, rel), 'utf8');
@@ -83,5 +93,85 @@ describe('P0 反平移偏移纯函数（裁定 6：--glass-x/y = host - source +
 describe('P1 同屏折射预算常量（规格 L2-3 ≤12）', () => {
   it('GLASS_MAX_FILTERED_CARDS = 12', () => {
     expect(GLASS_MAX_FILTERED_CARDS).toBe(12);
+  });
+});
+
+describe('L3 透镜光学常量（规格 §3.4 / REFERENCE §2）', () => {
+  it('折射率 1.5 / 斜边 18px / 实例≤64 / dpr≤2 / 静止 500ms', () => {
+    expect(GLASS_L3.refractiveIndex).toBe(1.5);
+    expect(GLASS_L3.bevelWidth).toBe(18);
+    expect(GLASS_L3.maxInstances).toBe(64);
+    expect(GLASS_L3.dprCap).toBe(2);
+    expect(GLASS_L3.idleStopMs).toBe(500);
+  });
+});
+
+describe('L3 Snell 折射偏转（glass.ts ↔ GLSL 同源数学）', () => {
+  it('零坡度零偏转', () => {
+    expect(snellDeflection(0)).toBe(0);
+  });
+  it('正坡度偏转为正且随坡度单调增', () => {
+    const a = snellDeflection(0.5);
+    const b = snellDeflection(2);
+    expect(a).toBeGreaterThan(0);
+    expect(b).toBeGreaterThan(a);
+  });
+  it('n=1.5 永不全内反射（sinθt≤0.667<1）', () => {
+    expect(snellDeflection(1e6, 1.5)).toBeLessThan(1);
+  });
+  it('n<1 大坡度触发全内反射返回 1.0', () => {
+    expect(snellDeflection(100, 0.5)).toBe(1);
+  });
+});
+
+describe('L3 squircle SDF + 法线（p=4 超椭圆）', () => {
+  it('平底核心：dist 负、法线零（核心不折射）', () => {
+    const s = squircleSDF(0, 0, 100, 60, 22);
+    expect(s.dist).toBe(-60);
+    expect(s.nx).toBe(0);
+    expect(s.ny).toBe(0);
+  });
+  it('直边中点：dist≈0、法线指向外（+x）', () => {
+    const s = squircleSDF(100, 0, 100, 60, 22);
+    expect(Math.abs(s.dist)).toBeLessThan(1e-6);
+    expect(s.nx).toBeCloseTo(1, 5);
+    expect(s.ny).toBeCloseTo(0, 5);
+  });
+  it('圆角外角：dist 正（在形状外）', () => {
+    const s = squircleSDF(110, 70, 100, 60, 22);
+    expect(s.dist).toBeGreaterThan(0);
+  });
+  it('法线单位化（圆角带内模长≈1）', () => {
+    const s = squircleSDF(95, 55, 100, 60, 22);
+    expect(Math.hypot(s.nx, s.ny)).toBeCloseTo(1, 5);
+  });
+});
+
+describe('L3 斜边坡度剖面 bevelSlope', () => {
+  it('内缘 t=1 坡度归零（平底衔接）', () => {
+    expect(bevelSlope(1)).toBe(0);
+  });
+  it('外缘 t=0 坡度最大且为正', () => {
+    expect(bevelSlope(0)).toBeGreaterThan(bevelSlope(0.5));
+    expect(bevelSlope(0)).toBeGreaterThan(0);
+  });
+  it('在 [0,1] 单调递减', () => {
+    expect(bevelSlope(0.25)).toBeGreaterThan(bevelSlope(0.75));
+  });
+});
+
+describe('L3 dpr 夹值（规格 §3.4 上限 2.0）', () => {
+  it('超上限夹到 2', () => {
+    expect(clampDpr(3)).toBe(2);
+    expect(clampDpr(2.5)).toBe(2);
+  });
+  it('上限内原样', () => {
+    expect(clampDpr(1.5)).toBe(1.5);
+    expect(clampDpr(1)).toBe(1);
+  });
+  it('非有限 / 非正回退 1', () => {
+    expect(clampDpr(0)).toBe(1);
+    expect(clampDpr(-1)).toBe(1);
+    expect(clampDpr(Number.NaN)).toBe(1);
   });
 });

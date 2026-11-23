@@ -65,3 +65,88 @@ export function computeGlassOffset(
 ): { x: number; y: number } {
   return { x: hostX - sourceX + scrollLeft, y: hostY - sourceY + scrollTop };
 }
+
+/* ---- L3：WebGL 抽屉透镜光学（规格 §3.2/§3.3 / SPEC-003 裁定 3/4/5） ----
+ * 折射源限定「自绘卡片层」：WebGL readPixels 读不到 DOM 合成 / 亚克力，故不读背景，
+ * 改为自画卡片几何到 FBO，透镜片元就地算 squircle SDF + Snell 法线偏移 UV 采样该 FBO。
+ * 下列纯函数是 GLSL 的同源 TS 真值（tests/glass.test.ts 数学单测，毫秒级纯逻辑）；
+ * 实际渲染在 use-glass-l3.ts 的着色器里端口同一公式。颜色一律运行时读 token，TS 无字面量。 */
+
+/** L3 透镜常量（REFERENCE §2 默认参数 / 规格 §3.4 预算）。 */
+export const GLASS_L3 = {
+  /** 折射率：浮法玻璃 ~1.5（Snell n1·sinθ1 = n2·sinθ2）。 */
+  refractiveIndex: 1.5,
+  /** 透镜斜边宽度 px：边缘法线折射只发生在这条带内，平底核心零折射。 */
+  bevelWidth: 18,
+  /** 实例化卡片上限：超出只画前 64 个最近矩形（规格 §3.4）。 */
+  maxInstances: 64,
+  /** canvas  backing store 的 dpr 上限（规格 §3.4，防 4K 副本进滤镜）。 */
+  dprCap: 2,
+  /** 静止降频：抽屉静止 500ms 停 rAF 保留最终 draw（规格 §3.4，禁 requestIdleCallback）。 */
+  idleStopMs: 500,
+} as const;
+
+/**
+ * Snell 折射偏转量（REFERENCE §2 / generate_glass_map.js 同源）。
+ * 入射角 thetaI=atan(slope)，折射角 thetaT=asin(sin(thetaI)/n)，返回 sin(thetaI-thetaT)。
+ * 全内反射（|sinThetaT|>=1）返回 1.0。n=1.5 时 sinThetaT<=0.667 永不全内反射。
+ */
+export function snellDeflection(slope: number, n: number = GLASS_L3.refractiveIndex): number {
+  const thetaI = Math.atan(slope);
+  const sinThetaT = Math.sin(thetaI) / n;
+  if (Math.abs(sinThetaT) >= 1) return 1.0;
+  const thetaT = Math.asin(sinThetaT);
+  return Math.sin(thetaI - thetaT);
+}
+
+/** squircle（p=4 超椭圆）SDF 结果：dist 符号距离（内负外正）＋单位外法线。 */
+export interface SquircleSDF {
+  dist: number;
+  nx: number;
+  ny: number;
+}
+
+/**
+ * squircle SDF + 梯度法线（REFERENCE §2 逐字端口）。
+ * 平底核心（dx=dy=0）返回负距离与零法线（核心不折射）；圆角带用 p=4 超椭圆。
+ */
+export function squircleSDF(
+  px: number,
+  py: number,
+  halfW: number,
+  halfH: number,
+  radius: number,
+): SquircleSDF {
+  const r = Math.max(radius, 1e-3);
+  const dx = Math.max(0, Math.abs(px) - (halfW - r));
+  const dy = Math.max(0, Math.abs(py) - (halfH - r));
+  if (dx === 0 && dy === 0) {
+    return { dist: -Math.min(halfW - Math.abs(px), halfH - Math.abs(py)), nx: 0, ny: 0 };
+  }
+  const qx = dx / r;
+  const qy = dy / r;
+  const p = 4.0;
+  const pNorm = Math.pow(Math.pow(qx, p) + Math.pow(qy, p), 1 / p);
+  const dist = (pNorm - 1) * r;
+  const gradFactor = pNorm > 1e-6 ? Math.pow(pNorm, 1 - p) : 0;
+  const gx = Math.pow(Math.max(0, qx), p - 1) * gradFactor * Math.sign(px);
+  const gy = Math.pow(Math.max(0, qy), p - 1) * gradFactor * Math.sign(py);
+  const gradLen = Math.hypot(gx, gy) || 1;
+  return { dist, nx: gx / gradLen, ny: gy / gradLen };
+}
+
+/**
+ * 斜边坡度剖面（generate_glass_map.js L127-133 同源）：t=edgeDist/bevelWidth∈[0,1]，
+ * 外缘（t=0）最陡、内缘（t=1）归零。slope=(invT^3 / max(1e-5,1-invT^4)^0.75)·2.5。
+ */
+export function bevelSlope(t: number): number {
+  const invT = 1 - t;
+  const denom = Math.pow(Math.max(1e-5, 1 - Math.pow(invT, 4)), 0.75);
+  return (Math.pow(invT, 3) / denom) * 2.5;
+}
+
+/** dpr 夹值（规格 §3.4 上限 2.0）：非有限 / 非正回退 1，防 backing store 爆炸。 */
+export function clampDpr(dpr: number): number {
+  if (!Number.isFinite(dpr) || dpr <= 0) return 1;
+  return Math.min(dpr, GLASS_L3.dprCap);
+}
