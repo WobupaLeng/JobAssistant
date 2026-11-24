@@ -11,7 +11,7 @@
  *
  * 所有判定都在 `features/*` 的纯函数里，本文件不做业务计算。
  */
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import AppErrorBar from '../components/AppErrorBar.vue';
 import FilterPanel from '../components/FilterPanel.vue';
 import JobDetailDrawer from '../components/JobDetailDrawer.vue';
@@ -126,6 +126,7 @@ import { PRIMARY_PLATFORM, pickPlatform } from '../lib_ui/platform-model';
 import { PLATFORMS } from '../lib_ui/options';
 import { mergeLoginState } from '../lib_ui/login-model';
 import { CHAT_ACTIVE_COMPANY_EVENT, CHAT_ACTIVE_COMPANY_KEY } from '../lib_ui/chat-model';
+import { closePanel, PAN_CLASS, playOpen, resetPanel } from '../lib_ui/pan';
 import {
   EMPTY_QUEUE,
   clearErrors,
@@ -170,6 +171,35 @@ const progress = shallowRef<ScrapeProgressLike>(fromProgress(null));
 const pausedByUser = ref(false);
 const starting = ref(false);
 const filterOpen = ref(false);
+/** 筛选抽屉的节点：展开类挂在它身上，收起时用它等回程跑完再摘（与另两个抽屉同一套）。 */
+const filterBar = ref<HTMLElement | null>(null);
+
+/** 打开筛选抽屉：等节点挂上再补一帧挂展开类，关键帧才从起点播。 */
+function openFilter(): void {
+  if (filterOpen.value) return;
+  filterOpen.value = true;
+  void nextTick(() => playOpen(filterBar.value, PAN_CLASS.DRAWER));
+}
+
+/**
+ * 关闭筛选抽屉：**当帧**先摘掉展开态，让 `--drawer-dur` 的位移回程真的播出来，
+ * 过渡结束再把节点摘掉。
+ *
+ * 之前写法是「先挂 `.is-closing` 播回程、过渡完才卸载」，但从点击到卸载之间
+ * 用户看到的是「点了没反应，过一会儿才没」——因为 `.is-closing` 只是把
+ * transform 推回起点，眼睛先看到不动的那一帧。现在反过来：
+ * `filterOpen = false` 立刻生效（`.is-open` 摘掉 → transform 回程开播），
+ * 节点留在 DOM 里直到过渡跑完，离场这一段能看见。
+ */
+function closeFilter(): void {
+  if (!filterOpen.value) return;
+  filterOpen.value = false;
+  const node = filterBar.value;
+  void closePanel(node).then(() => {
+    resetPanel(node);
+    resetPanel(filterBar.value);
+  });
+}
 
 const scoreMax = ref<number | null>(null);
 const minScore = ref<number | null>(null);
@@ -196,6 +226,20 @@ const logLines = shallowRef<LogLine[]>([]);
 const logSince = ref<number>(0);
 
 const sensitiveOpen = ref(false);
+/**
+ * 敏感库是否挂载：打开即挂，**关掉就立刻摘**。
+ *
+ * 面板 teleport 在 `.app-shell` 之后、`z-index: 61`（高于窗口内所有浮层），常驻 DOM
+ * 的后果是：一块关掉的透明面板压在顶栏的主题菜单 / 城市选择器之上，菜单钻到底下点不动；
+ * 它自己排的收起回调又是个自由计时器，晚到一步就是「关了又弹回来」。
+ *
+ * 关闭的观感不再依赖退场补间：保留这一帧的意义只是让面板「当场消失」。
+ */
+const sensitiveMounted = ref(false);
+watch(sensitiveOpen, (open) => {
+  if (open) sensitiveMounted.value = true;
+  else sensitiveMounted.value = false;
+});
 const sensitivePage = shallowRef<SensitivePage>({ items: [], total: 0 });
 const sensitiveLoading = ref(false);
 const sensitiveError = ref('');
@@ -359,9 +403,9 @@ async function loadMore(): Promise<void> {
   if (!hasMore.value || pageLoading.value || listLoading.value) return;
   pageLoading.value = true;
   try {
-    const items = await listJobs(listArgs(jobs.value.length));
-    jobs.value = [...jobs.value, ...items];
-    hasMore.value = items.length === PAGE_SIZE;
+        const items = await listJobs(listArgs(jobs.value.length));
+        jobs.value = [...jobs.value, ...items];
+        hasMore.value = items.length === PAGE_SIZE;
   } catch (e) {
     fail(`加载更多失败：${errText(e)}`, 'list_jobs', { label: '重试', run: () => void loadMore() });
   } finally {
@@ -561,7 +605,7 @@ async function applyNow(): Promise<void> {
   if (saveTimer !== null) clearTimeout(saveTimer);
   await persistDraft();
   filterNote.value = '筛选条件已保存';
-  filterOpen.value = false;
+  closeFilter();
 }
 
 /** 「应用」入口把关闭抽屉的时机交给这里：先关，用户才看得到抓取条上的进度。 */
@@ -1020,7 +1064,7 @@ async function onStart(): Promise<void> {
   const kws = searchKeywords(keywords.value);
   if (kws.length === 0) {
     filterNote.value = KW_REQUIRED_NOTE;
-    filterOpen.value = true;
+    openFilter();
     return;
   }
   // 登录把关放在发请求之前：未登录时 scrape_start 必然失败，先问再走。
@@ -1158,7 +1202,7 @@ function onGlobalPointerDown(ev: PointerEvent): void {
   if (target === null) return;
   if (target.closest('[data-testid="scrape-filter-bar"]') !== null) return;
   if (target.closest('[data-overlay="popover"]') !== null) return;
-  filterOpen.value = false;
+  closeFilter();
 }
 
 onMounted(() => {
@@ -1281,7 +1325,7 @@ watch(
       @stop="onStop"
       @update:max-jd="onMaxJd"
       @update:min-score="onMinScore"
-      @toggle-filter="filterOpen = !filterOpen"
+      @toggle-filter="filterOpen ? closeFilter() : openFilter()"
     />
 
     <div class="job-fill" @pointerdown="onGridPointerDown" @pointermove="onGridPointerMove" @pointerup="cancelPress" @pointerleave="cancelPress" @pointercancel="cancelPress" @click="onGridClick">
@@ -1311,21 +1355,26 @@ watch(
         @greet="onGreet"
         @allow="onAllowJob"
         @undeliver="onUndeliverJob"
-        @empty-filter="filterOpen = true"
+        @empty-filter="openFilter()"
         @empty-start="onStart"
       />
       <!-- 筛选抽屉：盖在岗位列表原位置上（展开大小 = 列表大小），
-           不再把列表和日志卡往下顶，页面外层也就不出现滚动条。 -->
+           不再把列表和日志卡往下顶，页面外层也就不出现滚动条。
+           展开 / 收起与岗位详情、敏感库走同一套（lib_ui/pan.ts + motion.css 第 6 段）：
+           `filterOpen = false` 当帧摘掉 `.is-open` → 位移回程立刻开播，
+           节点留到过渡跑完才卸载。 -->
       <div
-        v-if="filterOpen"
+        v-show="filterOpen"
         class="filter-backdrop"
         data-testid="scrape-filter-backdrop"
-        @click="filterOpen = false"
+        @click="closeFilter"
       ></div>
       <div
-        v-if="filterOpen"
+        v-show="filterOpen"
         id="scrape-filter-bar"
+        ref="filterBar"
         class="drawer glass-l2 scrape-filter-bar is-floating"
+        :class="{ 'is-open': filterOpen }"
         data-testid="scrape-filter-bar"
         @click.stop
       >
@@ -1338,7 +1387,7 @@ watch(
           @update:draft="onDraft"
           @update:keywords="keywords = $event"
           @apply="onApplyFilter"
-          @cancel="filterOpen = false"
+          @cancel="closeFilter"
           @reset="resetFilter"
           @read-expect="onReadExpect"
         />
@@ -1373,6 +1422,7 @@ watch(
     />
 
     <SensitivePanel
+      v-if="sensitiveMounted"
       :open="sensitiveOpen"
       :page="sensitivePage"
       :loading="sensitiveLoading"

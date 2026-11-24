@@ -4,7 +4,8 @@
   外壳照冻结原型 job-detail-*：job-detail-drawer / -title / -close-btn /
   -body / -reject-btn / -deliver-btn。
   正文与字段口径照后端口径（原型正文只是占位串）。
-  滑入动画用 C17 的 drawer-in-play，退场不加类（原型用 .is-open 过渡）。
+  展开与收起统一由 `lib_ui/pan.ts` 驱动（类 `.drawer-anim` / `.is-closing`，
+  时长与曲线在 motion.css 第 0、6 段），与其他三个抽屉完全一致。
 -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -36,7 +37,7 @@ import {
   type DetailAction,
   EMPTY_DETAIL,
 } from '../lib_ui/job-detail-model';
-import { CLASS, playNextFrame } from '../lib_ui/motion';
+import { useDrawerPresence } from '../lib_ui/use-drawer';
 import GlassClone from './GlassClone.vue';
 
 const props = withDefaults(
@@ -59,7 +60,43 @@ const emit = defineEmits<{
   (e: 'chat', jobId: string): void;
 }>();
 
-const panel = ref<HTMLElement | null>(null);
+/** 展开 / 收起过渡：展开由 watch 触发，收起点击即刻广播 close。 */
+const { panel, animateOpen, animateClose } = useDrawerPresence(() => emit('close'));
+/**
+ * 点击抽屉以外即关闭。
+ *
+ * **必须挂在 `click` 上，不能挂在 `pointerdown` 上**（这一条踩过两次）：
+ *   · 打开详情的动作由列表容器的 `@click` 触发，发生在一次 pointerdown →
+ *     pointerup → click 序列的末尾；
+ *   · 若关闭判据挂在捕获阶段的 `pointerdown`，用户「下一次」点卡片时，
+ *     pointerdown 会先跑并把抽屉关掉，紧接着容器的 click 又把详情打开——
+ *     中间那一帧抽屉是关的，观感就是「没展开、直接变成选中」；
+ *     而长按多选的 pointerdown 建立的长按计时器，也会被这一次关闭打断。
+ *   · 改挂冒泡阶段的 `click` 后，打开与关闭发生在同一种事件上，
+ *     容器先拿到 click（先打开），冒泡到 document 时 `props.job` 已经有值，
+ *     但目标是列表内的卡片 → 仍会被「点外部」命中。所以还要按**按下起点**
+ *     判定：`pointerdown` 只记录起点，`click` 时看起点是否落在抽屉外。
+ */
+function onDocPointerDown(ev: PointerEvent): void {
+  if (!props.job) return;
+  const el = ev.target as HTMLElement | null;
+  if (el === null) return;
+  pressOutsideDrawer = el.closest('[data-testid="job-detail-drawer"]') === null;
+}
+
+function onDocClick(ev: MouseEvent): void {
+  if (!props.job) return;
+  if (hasHigherOverlay('drawer')) return;
+  const el = ev.target as HTMLElement | null;
+  if (el === null) return;
+  if (el.closest('[data-testid="job-detail-drawer"]') !== null) return;
+  // 这一次点击的按下起点在抽屉内部（拖选文字、在抽屉里按下再移出）：不算点外部。
+  if (!pressOutsideDrawer) return;
+  close();
+}
+
+/** 最近一次 pointerdown 是否落在抽屉之外：`click` 用它区分「点外面」与「从里面开始点」。 */
+let pressOutsideDrawer = false;
 /** 补拉后的完整岗位（`jd_text` 在列表接口里是空的）。 */
 const full = ref<Job | null>(null);
 const jdLoading = ref(false);
@@ -68,9 +105,9 @@ const jdError = ref('');
 let alive = true;
 let loadToken = 0;
 
-/** 关闭：先广播再清本地态——父组件据此把 `job` 置空。 */
+/** 关闭：先播收起回程，过渡结束再广播——父组件那时才把 `job` 置空。 */
 function close(): void {
-  emit('close');
+  animateClose();
 }
 
 /** 按当前 job 初始化，并在需要时补拉完整 JD（失败不干掉抽屉）。 */
@@ -104,11 +141,8 @@ watch(
   (job) => {
     void load(job);
     if (job) {
-      // 面板挂载后补一帧再打动画类：初始态必须先被浏览器算一次，
-      // 否则初始态与动画同帧生效，进场会被整段跳过（`drawer.rs:90-97`）。
-      void nextTick(() => {
-        if (panel.value) playNextFrame(panel.value, CLASS.DRAWER_IN);
-      });
+      // 面板节点在这一帧之后才存在，等 tick 完再挂展开类（pan.ts 内部会强制回流）。
+      void nextTick(animateOpen);
     }
   },
   { immediate: true },
@@ -127,26 +161,14 @@ function onKeydown(ev: KeyboardEvent): void {
 onMounted(() => {
   window.addEventListener('keydown', onKeydown);
   document.addEventListener('pointerdown', onDocPointerDown, true);
+  document.addEventListener('click', onDocClick);
 });
 onBeforeUnmount(() => {
   alive = false;
   window.removeEventListener('keydown', onKeydown);
   document.removeEventListener('pointerdown', onDocPointerDown, true);
+  document.removeEventListener('click', onDocClick);
 });
-
-/** 点击抽屉以外的任意位置关闭（捕获阶段）：遮罩只覆盖右侧一列，
- *  页面其余区域的点击不会冒泡到遮罩上，必须挂在 document 层判定。
- *  规则同 Esc：上层（决策记录 / 配置）开着时这层不出手。 */
-function onDocPointerDown(ev: PointerEvent): void {
-  if (!props.job) return;
-  if (hasHigherOverlay('drawer')) return;
-  const el = ev.target as HTMLElement | null;
-  if (el === null) return;
-  if (el.closest('[data-testid="job-detail-drawer"]') !== null) return;
-  // 抽屉的触发点（岗位卡）不参与关闭，否则「点开」会立刻被同一次点击关掉。
-  if (el.closest('[data-testid="job-detail-close-btn"]') !== null) return;
-  close();
-}
 
 const j = computed<Job | null>(() => full.value);
 const isOpen = computed(() => j.value !== null);
@@ -174,6 +196,8 @@ const footActions = computed(() =>
 
 function act(a: DetailAct): void {
   if (!j.value) return;
+  // 动作会改岗位状态（不投递 / 已投递 / 待投递），抽屉要跟着收——走同一条收起回程。
+  animateClose();
   emit('act', a);
 }
 

@@ -4,7 +4,7 @@
  * 从右侧滑入，`translateX(100%) → 0` 过渡 220ms；遮罩点击关闭、Esc 关闭。
  * 其余结构（标题行、工具行七个按钮、三列卡片网格、卡片四段、移出按钮）照旧。
  *
- * 颜色一律走 tokens.css 的变量；本文件里的字面值只有 rgba(0,0,0,·) 遮罩色。
+ * 颜色一律走 tokens.css 的变量（遮罩色用 --bad-border 这一档半透明暗色）。
  *
  * 结构：
  *   .sensitive-backdrop  全屏遮罩（点击关闭）
@@ -18,14 +18,9 @@
 
 .sensitive-backdrop {
   position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: min(calc(1120px * var(--ui-scale)), calc(100vw - 40px));
-  height: min(calc(720px * var(--ui-scale)), calc(100vh - 56px));
-  border-radius: var(--radius-lg);
-  z-index: 50;
-  background: var(--popup-surface);
+  inset: 0;
+  z-index: 60;
+  background: var(--glass-0);
   -webkit-backdrop-filter: blur(calc(var(--blur-pop) * 2.4));
   backdrop-filter: blur(calc(var(--blur-pop) * 2.4));
   opacity: 1;
@@ -40,12 +35,12 @@
  * 700 行正文的滚动交给 .sensitive-body（flex:1 1 auto + min-height:0 + overflow-y:auto），
  * 所以这里必须 max-height:none —— 否则 min() 算出的高度会被视口高度二次夹住。
  *
- * z-index 51 > 遮罩 50 > 岗位详情抽屉 41——两者由页面层保证互斥，
- * 万一动画尾帧重叠，后打开的（敏感库）压在上面更符合直觉。
+ * z-index 61 > 遮罩 60 > 窗口内其余浮层（最高 51）：遮罩要能盖住整个窗口才算模态，
+ * 所以两者都抬到 60 以上。万一动画尾帧重叠，后打开的（敏感库）压在上面更符合直觉。
  * 动画走 opacity + 轻微缩放（合成层友好，不逐帧重排）。 */
 .sensitive-panel {
   position: fixed;
-  z-index: 51;
+  z-index: 61;
   top: 50%;
   left: 50%;
   width: min(calc(1120px * var(--ui-scale)), calc(100vw - 40px));
@@ -68,11 +63,20 @@
 }
 
 /* 打开态：居中归位。收起态由基础规则承担（缩放 0.98 + 透明），
- * 所以关闭时也会走同一条 220ms 回程，不需要额外的出场关键帧。 */
+ * 所以关闭时也会走同一条 220ms 回程，不需要额外的出场关键帧。
+ * transform 取 translate+scale 同一写法：只写 translate 会把基础规则的 scale(.98)
+ * 抹掉，收起态与打开态几何完全相同，只剩透明度在变（「轻微缩放」从未发生）。
+ * 也不能用 scale() 简写——它会把 translate(-50%,-50%) 一起覆盖成 0 位移。 */
 .sensitive-panel.is-open {
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%) scale(1);
   opacity: 1;
   pointer-events: auto;
+}
+
+/* 进场不叠 motion.css 的 modal-in 关键帧：面板常驻 DOM，交接靠 transition；
+ * 两者同特异性时动画优先，关闭那一帧会从关键帧首帧重放（先跳小再缩回）。 */
+.sensitive-panel.is-open {
+  animation: none;
 }
 
 /* 宿主同时挂 glass-l2 时，vue-glass.css（后加载）的 .glass-l2{position:relative}
@@ -310,9 +314,14 @@
   }
 }
 
-/* 系统要求减少动效：抽屉直接到位，不做平移。 */
+/* 系统要求减少动效：面板**只淡不缩放**。
+ * 不能写 transition: none——那会让开合变成硬切；而缩放本身就是需要压掉的那部分。
+ * 基础规则的 scale(.98) 由 motion.css 末尾的纯淡规则接管（它排在后面、同特异性胜出）。 */
 @media (prefers-reduced-motion: reduce) {
-  .sensitive-panel,
+  .sensitive-panel {
+    transform: translate(-50%, -50%);
+    transition: opacity 0.14s linear;
+  }
   .sensitive-backdrop {
     transition: none;
   }

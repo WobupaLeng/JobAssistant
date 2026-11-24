@@ -129,7 +129,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
   <!-- 窗体锚点 config-panel 已唯一，页容器不再重复挂 page-config（SPEC-001 AC9）。 -->
   <section class="page page-config">
     <div
-      class="config-modal is-open"
+      class="config-modal is-open pan-modal"
       data-testid="config-panel"
       role="dialog"
       aria-modal="true"

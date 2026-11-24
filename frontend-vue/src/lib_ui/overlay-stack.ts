@@ -24,7 +24,7 @@ export type OverlayLayer = 'decisions' | 'config' | 'drawer' | 'sensitive' | 'ch
 export const OVERLAY_LAYERS: ReadonlyArray<{ readonly layer: OverlayLayer; readonly open: string | null }> = [
   { layer: 'decisions', open: '[data-testid="decisions-panel"]' },
   { layer: 'config', open: '[data-testid="config-panel"]' },
-  { layer: 'drawer', open: '[data-testid="job-detail-rail"].is-open' },
+  { layer: 'drawer', open: '[data-testid="job-detail-drawer"].is-open' },
   { layer: 'sensitive', open: '[data-testid="sensitive-panel"].is-open' },
   { layer: 'chat', open: null },
 ];

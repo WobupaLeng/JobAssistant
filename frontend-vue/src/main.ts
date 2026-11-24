@@ -180,4 +180,31 @@ document.addEventListener('pointerout', (ev) => {
  */
 installDragAllow(document);
 
+/**
+ * 窗口变化（用户：窗口变化也要有契合的过渡）。
+ *
+ * WebView2 的 resize 是逐帧连续的，拖动边框时布局本来就跟手，不需要（也不该）
+ * 给尺寸补间——那会让内容滞后于窗口，错觉成卡顿。真正生硬的是**落定那一帧**：
+ * 从 1200px 一次跳到最大化的宽高时，网格换列、表格重排都是瞬切的。
+ *
+ * 做法：resize 期间记时，停下来 140ms 后给 `.app-shell` 挂一次性的 `.shell-resized`，
+ * 播一段 200ms 的落定淡入（`styles/motion.css` 的 shell-settle），动画结束后自摘。
+ * 只动外层容器的 opacity，不动任何子元素几何——布局口径一个字没改。
+ * 时间常数与 motion.css 的 shell-settle 时长一致（改一处须同改另一处）。
+ */
+const RESIZE_IDLE_MS = 140;
+let resizeTimer = 0;
+window.addEventListener('resize', () => {
+  window.clearTimeout(resizeTimer);
+  resizeTimer = window.setTimeout(() => {
+    const shell = document.querySelector<HTMLElement>('.app-shell');
+    if (!shell) return;
+    shell.classList.remove('shell-resized');
+    // 同一 class 连续挂两次不会重播动画，先读一次布局强制回流再挂。
+    void shell.offsetWidth;
+    shell.classList.add('shell-resized');
+    shell.addEventListener('animationend', () => shell.classList.remove('shell-resized'), { once: true });
+  }, RESIZE_IDLE_MS);
+});
+
 createApp(App).mount('#app');

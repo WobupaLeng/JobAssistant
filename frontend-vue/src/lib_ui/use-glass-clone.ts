@@ -12,8 +12,13 @@
 import { onBeforeUnmount, onMounted, watch, type Ref } from 'vue';
 import { computeGlassOffset } from './glass';
 
-/** 面板自身与其上层叠层：克隆背景时必须排除（裁定 6）。敏感库 teleport 到 body，本就不在源内。 */
+/**
+ * 面板自身与其上层叠层：克隆背景时必须排除（裁定 6）。敏感库 teleport 到 body，本就不在源内。
+ * 状态类另单列一份：`inert` 会整棵子树不响应指针事件，但状态类本身也要从副本剥离，
+ * 否则副本上会挂着 `.is-open`（常驻 DOM 的抽屉收起后副本仍是打开态）。
+ */
 const OVERLAY_SELECTORS = '.drawer,.drawer-backdrop,.sensitive-panel,.sensitive-backdrop';
+const STATE_CLASSES = ['is-open', 'is-closing', 'pan-pop', 'pan-modal', 'drawer-anim', 'shell-resized'];
 /** 内容变更重克隆节流（ms）：滚动走反平移不重克隆，仅 childList/characterData 变更触发（裁定 6）。 */
 const RECLONE_THROTTLE_MS = 200;
 
@@ -29,11 +34,21 @@ function sanitizeBackdropCopy(root: HTMLElement, width: number): void {
   root.querySelectorAll('[data-testid]').forEach((n) => n.removeAttribute('data-testid'));
   root.setAttribute('aria-hidden', 'true');
   root.setAttribute('inert', '');
+  // inert 已经能挡住交互（副本走 .glass-clone-wrap 的 pointer-events:none 之外还有这层），
+  // 这里再写一次是为了「副本上永远不会有可命中的盒子」这条断言在 DOM 层面直接成立。
   root.style.pointerEvents = 'none';
   root.style.overflow = 'visible';
   root.style.height = 'auto';
   root.style.maxHeight = 'none';
   root.style.width = `${width}px`;
+  // 副本是静态快照：把状态类与交互候选一并摘掉，滚轮也穿不过去（不接就落到下面的真内容）。
+  root.querySelectorAll('.is-open, .is-closing, .pan-pop, .pan-modal, .drawer-anim, .shell-resized').forEach((n) => {
+    for (const c of STATE_CLASSES) n.classList.remove(c);
+  });
+  root.querySelectorAll('button, a, input, select, textarea, label, [tabindex]').forEach((n) => {
+    n.setAttribute('inert', '');
+    n.setAttribute('tabindex', '-1');
+  });
 }
 
 /**

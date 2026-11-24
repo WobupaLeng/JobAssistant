@@ -127,6 +127,11 @@
   font-size: var(--fs-md);
   line-height: 1;
   cursor: pointer;
+  /* 排序键是三态（未选 / 降序 / 升序），切换时字色与底一起变，补一条短过渡。 */
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
 }
 
 .sort-pill:hover {
@@ -1120,6 +1125,12 @@ body {
   line-height: 1;
   cursor: pointer;
   opacity: 0.7;
+  /* 悬停时底色与亮度一起变，没有过渡会像两台不同的控件。只动颜色与透明度。 */
+  transition:
+    opacity var(--dur-fast) var(--ease-glass),
+    background-color var(--dur-fast) var(--ease-glass),
+    color var(--dur-fast) var(--ease-glass),
+    filter var(--dur-fast) var(--ease-glass);
 }
 
 .win-btn:hover,
@@ -1131,6 +1142,15 @@ body {
 .win-close:hover,
 .win-close:focus-visible {
   filter: brightness(1.4);
+}
+
+/* 关闭键在浅色主题下不能靠「加亮」表示悬停：白底上 brightness(1.4) 等于消失。
+ * 改为压深一档 + 危险色，深浅两套都能读出「这是关闭」。 */
+[data-theme='light'] .win-close:hover,
+[data-theme='light'] .win-close:focus-visible {
+  filter: none;
+  background: var(--bad-soft);
+  color: var(--bad-text);
 }
 
 /* 平台卡去勾选框：保留 DOM 与 testid，仅隐藏视觉，点击切换仍走卡片事件。 */
@@ -1233,7 +1253,9 @@ body {
 }
 
 .theme-panel .font-scale-btn.is-active {
-  color: var(--primary);
+  /* 深浅通用：--primary 在浅色块里没有覆盖（仍是 #10b981），压在白玻璃上只有约 2.2:1。
+   * --primary-text 是同一枚色的「作文字用」档（深 #6ee7b7 / 浅 #047857），行内选中态用它。 */
+  color: var(--primary-text);
   background: var(--primary-soft);
 }
 
@@ -1244,7 +1266,7 @@ body {
 }
 
 .theme-panel .theme-mode-btn.is-active {
-  color: var(--primary);
+  color: var(--primary-text);
   background: var(--primary-soft);
 }
 
@@ -1289,6 +1311,11 @@ body {
   color: var(--text-3);
   font-size: var(--fs-md);
   cursor: pointer;
+  /* 打分模式切换是顶栏最主要的「交互」，选中底色的出现/消失要跟手而不是瞬跳。 */
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
 }
 
 .seg.is-active {

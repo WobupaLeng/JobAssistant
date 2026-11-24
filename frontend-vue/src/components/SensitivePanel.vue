@@ -8,7 +8,7 @@
  * 抽屉不是路由页：C13 的页面分发是插槽，这里的开合由顶栏按钮控制，
  * 因此用 `position: fixed` 覆盖层而不是切页（原型同款）。
  */
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { SensitivePage, SensitiveRecord } from '../api/types';
 import {
   SENSITIVE_TABS,
@@ -20,6 +20,8 @@ import {
   type SensitiveTab,
 } from '../lib_ui/sensitive-model';
 import GlassClone from './GlassClone.vue';
+import { PAN_CLASS, playOpen, resetPanel } from '../lib_ui/pan';
+import { hasHigherOverlay } from '../lib_ui/overlay-stack';
 
 const props = withDefaults(
   defineProps<{
@@ -41,6 +43,10 @@ const tab = ref<SensitiveTab>('all');
 const keyword = ref('');
 const checked = ref<number[]>([]);
 const appliedKeyword = ref('');
+/** 面板节点：展开关键帧挂在它身上（与另三个抽屉同一套，见 lib_ui/pan.ts）。 */
+const panel = ref<HTMLElement | null>(null);
+/** 首次挂载那次加载是否已经发过：避免 onMounted 与 watch 各发一次。 */
+let booted = false;
 
 const visible = computed(() => visibleRecords(props.page.items, tab.value, appliedKeyword.value));
 const allOn = computed(() => allChecked(checked.value, visible.value));
@@ -64,9 +70,51 @@ watch(
       return;
     }
     checked.value = [];
-    emit('reload', kindOf(tab.value));
+    // **加载必须落在挂载之后**：父级用 v-if 控制面板块，打开那一帧本组件还没挂，
+    // 这里的 watch 回调拿不到节点、更拿不到数据；真正的首次加载由 onMounted 负责
+    // （见下方 mounted 那次 emit）。这里只管「重新打开同一实例」时的重播与刷新。
+    if (panel.value !== null) {
+      resetPanel(panel.value);
+      playOpen(panel.value, PAN_CLASS.DRAWER);
+    }
+    if (booted) emit('reload', kindOf(tab.value));
   },
 );
+
+/**
+ * 关闭：**立刻**通知父级卸载面板，不排任何计时器。
+ *
+ * 用户口径（本轮）：「关闭有延时」——之前把 `emit('close')` 排在 320ms 收起回程之后，
+ * 点下去到面板消失之间就多出一段空窗，期间遮罩还在、点击还被吃。
+ * 遮罩点击 / 关闭按钮 / Esc 三条路走同一个函数，也不再需要防重入标记：
+ * 卸载是父级一次同步改 state，重复调用无副作用。
+ */
+function close(): void {
+  if (!props.open) return;
+  emit('close');
+}
+
+/**
+ * Esc 只在这一层最上面时生效（与岗位详情 / 配置 / 决策记录同一张分层表）。
+ * 挂 window 冒泡阶段：排在那几个 `document` 捕获监听之后，一次按键只关一层。
+ */
+function onKeydown(ev: KeyboardEvent): void {
+  if (ev.key !== 'Escape' || !props.open) return;
+  if (hasHigherOverlay('sensitive')) return;
+  ev.preventDefault();
+  close();
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown);
+  // 面板区块由父级 v-if 控制：能挂载就一定是要打开的那一次。
+  // 首次数据加载发生在这里（watch 在挂载前不会触发，见上面那段注释）。
+  booted = true;
+  resetPanel(panel.value);
+  playOpen(panel.value, PAN_CLASS.DRAWER);
+  emit('reload', kindOf(tab.value));
+});
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 
 function search(): void {
   appliedKeyword.value = keyword.value;
@@ -111,10 +159,11 @@ defineExpose({
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="sensitive-backdrop" data-testid="sensitive-backdrop" @click="emit('close')"></div>
+    <div v-if="props.open" class="sensitive-backdrop" data-testid="sensitive-backdrop" @click="close"></div>
     <aside
+      ref="panel"
       class="sensitive-panel glass-l2 hl-surface"
-      :class="{ 'is-open': open }"
+      :class="{ 'is-open': props.open }"
       data-testid="sensitive-panel"
       :aria-hidden="!open"
       aria-label="敏感库"
@@ -127,7 +176,7 @@ defineExpose({
           <span class="sensitive-sub" data-testid="sensitive-count">{{ total }}</span>
         </div>
         <span class="spacer"></span>
-        <button class="btn btn-sm btn-ghost" type="button" data-testid="sensitive-close-btn" @click="emit('close')">
+        <button class="btn btn-sm btn-ghost" type="button" data-testid="sensitive-close-btn" @click="close">
           关闭
         </button>
       </div>

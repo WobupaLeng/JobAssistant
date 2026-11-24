@@ -57,7 +57,8 @@
 .auto-toggle.is-on {
   border-color: rgba(16, 185, 129, 0.5);
   background: linear-gradient(180deg, var(--primary) 0%, var(--primary-strong) 100%);
-  color: #04120c;
+  /* 与 `.btn-primary` 同一枚「主色块上的字」令牌：深色取近黑绿、浅色取白。 */
+  color: var(--btn-primary-fg);
   box-shadow:
     0 2px 10px rgba(16, 185, 129, 0.32),
     
@@ -66,7 +67,7 @@
 .auto-toggle.is-warn {
   border-color: rgba(210, 153, 34, 0.5);
   background: var(--warn-soft);
-  color: #f0c674;
+  color: var(--btn-warn-fg);
 }
 
 /* 状态胶囊：呼吸点在左，文字单行省略（完整文案在 title 里）。

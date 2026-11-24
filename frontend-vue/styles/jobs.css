@@ -59,7 +59,9 @@
 }
 
 .job-tab.is-active .job-tab-count {
-  color: var(--primary);
+  /* 计数是文字：--primary 的绿在白玻璃上只有约 2.2:1，浅色主题几乎读不出。
+   * 同色族的文字档 --primary-text（深 #6ee7b7 / 浅 #047857）两套都够对比。 */
+  color: var(--primary-text);
 }
 
 /* 「查看全部」开关：故意与药丸拉开距离（margin-left），

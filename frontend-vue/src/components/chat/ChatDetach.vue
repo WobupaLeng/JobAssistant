@@ -4,9 +4,11 @@
  *
  * 结构照 SPEC §2.1：头（标题/计数/副行/收起）→ 体（左段 Boss 列表 + 右段聊天区）。
  *
- * 宽度不做过渡动画：`flex-basis` 从 0 长到 `--detach-w` 只在 `.is-chat-open`
- * 这个类切换时发生，规则在 `styles/vue-chat.css`（禁止 translateX，A15 要求
- * computed `position: static`）。
+ * 宽度过渡：`flex-basis` 从 0 长到 `--detach-w` 在 `is-open` 切换时补间，规则在
+ * `styles/vue-chat.css`（禁止 translateX，A15 要求 computed `position: static`）；
+ * 收起态的 `[hidden]` 在 `styles/motion.css` 里被改成零宽盒而不是 `display: none`，
+ * 否则同一帧 display 翻转会让那条过渡永远不跑（用户：聊天框展开没有过渡）。
+ * 语义随之由 `inert` 承接：收起时整块不可聚焦、不进无障碍树。
  *
  * 自动投递条由页面决定放「对话框头」还是「右栏」，本组件留一个 head slot
  * —— 同一时刻只渲染一处，全站仍只有一个 `auto-greet-toggle-btn`。
@@ -35,6 +37,7 @@ const emit = defineEmits<{ (e: 'close'): void }>();
     aria-label="Boss 消息（对话框）"
     :aria-hidden="props.open ? 'false' : 'true'"
     :hidden="!props.open"
+    :inert="!props.open"
   >
     <div class="chat-detach-head" data-testid="chat-detach-head">
       <!-- 两行：第一行是标题行（标题 / 计数 / 副行 / 自动投递按钮），

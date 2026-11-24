@@ -103,6 +103,35 @@ const batchVisible = computed(() => showBatchActions(selectedCount.value));
 /** 当前页签允许的批量动作（未投递两颗、不投递/已投递各一颗）。 */
 const ops = computed(() => batchOps(props.tab));
 
+/* 卡片 key 的代次后缀：页签切换 / 追加下一页时 +1，让这批卡片重播进场。
+ *
+ * 为什么换 key 而不是挂过渡 class：`.job-card` 的 animation 位已经被 `rail-in`
+ * 占着（契约样式里钉死的入场），再挂一条带 transform 的动画会把它顶掉。
+ * 换 key 让 Vue 重建节点，卡片上的 `rail-in` **按原样**重播一次——
+ * 过渡复用既有动画，卡片样式一行不改。
+ *
+ * 代次由内容自己判断，不靠外部调用：
+ *   列表往后长（追加下一页）→ +1，新条目与整批一起重播
+ *   页面重置后又拉回同一页（切换页签 / 换排序 / 换「查看全部」）→ +1
+ *   其余情况（原地改状态、列表变短）→ 不动，卡片节点不重建、滚动位置不丢 */
+const gen = ref(0);
+let prevSig = '';
+watch(
+  () => props.jobs.map((j) => j.job_id).join('\u0000'),
+  (sig) => {
+    // 只认「往后长」这一种可判定情形：新 id 串以旧串为前缀即追加下一页。
+    // 首屏、重置、切换页签都不在这里判定——那时 id 是另一批，key 动与不动都会重建节点，
+    // 不如什么都不做，少一次无谓的全量替换。
+    if (prevSig !== '' && sig !== prevSig && sig.startsWith(prevSig)) gen.value += 1;
+    prevSig = sig;
+  },
+  { immediate: true },
+);
+
+function listKey(jobId: string): string {
+  return `${gen.value}:${jobId}`;
+}
+
 /** 批量按钮配色：危险动作用 danger，正向动作用 primary，撤销类用 ghost。 */
 function opClass(op: BatchOp): string {
   if (op === 'reject') return 'btn btn-sm btn-danger';
@@ -268,7 +297,7 @@ function onSort(field: SortField): void {
       <template v-else>
         <JobCard
           v-for="v in views"
-          :key="v.jobId"
+          :key="listKey(v.jobId)"
           :view="v"
           :selecting="selection.selecting"
           :selected="selection.checked.includes(v.jobId)"

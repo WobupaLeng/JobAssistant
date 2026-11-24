@@ -326,7 +326,7 @@ function onPrefilterInput(ev: Event): void {
         v-if="themeOpen && box"
         id="theme-panel"
         ref="panelEl"
-        class="theme-panel"
+        class="theme-panel pan-pop"
         data-testid="theme-panel"
         data-overlay="popover"
         role="group"

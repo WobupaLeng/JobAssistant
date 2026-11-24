@@ -55,8 +55,8 @@
   box-shadow: var(--shadow-pop);
   -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-2));
   backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-2));
-  /* 进场时长与曲线照 apple-design：sheet/drawer = damping 0.8 / response 0.3，
-   * 落到 CSS 就是 220ms + 一条「快出缓收」的曲线（与旧版逐字相同）。
+  /* 进场时长与曲线由 motion.css 第 6 段统一：展开 / 收起同一时长、同一条曲线
+   * （`.drawer-anim` 把 transform 补间到 none，`.is-closing` 补间回这里写的 24px）。
    * 初始态显式写出来：动画类由 JS 挂载后补上，不能靠「没用类 = 可见」兜底。 */
   opacity: 0;
   transform: translateX(24px);
@@ -211,6 +211,8 @@
   cursor: default;
 }
 
+/* 左抽屉同样只写初始位移：时长与曲线在 motion.css 第 6 段统一，
+ * 这里不再自带一条 220ms 的独立开场动画（否则左右两个抽屉手感不一致）。 */
 .scrape-filter-bar.glass-l2 {
   position: fixed;
   top: 12px;
@@ -226,11 +228,15 @@
   border: 1px solid var(--hairline-strong);
   box-shadow: var(--shadow-pop);
   opacity: 1;
-  transform: none;
-  animation: scrape-filter-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* 收起态就停在这个位移上；展开态由 motion.css 第 6 段按 `.is-open` 补间到 0。
+   * 位移量必须留在基础规则里，否则「关」那一帧没有起点，回程无从播起。 */
+  transform: translateX(-24px);
+  transition: transform var(--drawer-dur) var(--ease-out);
 }
 
+/* 关键帧保留供未接线的调用点使用，内容与 motion.css 的抽屉段一致，
+ * 避免两处口径漂移（Vue 侧现已统一走 `.drawer-anim`）。 */
 @keyframes scrape-filter-in {
-  from { opacity: 0; transform: translateX(-24px); }
-  to   { opacity: 1; transform: none; }
+  from { transform: translateX(-24px); }
+  to   { transform: none; }
 }
