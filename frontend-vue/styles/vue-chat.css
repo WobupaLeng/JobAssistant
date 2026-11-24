@@ -114,22 +114,33 @@
   margin-left: auto;
 }
 
-/* 收起对话框：Boss 列表左侧的竖条（用户显式要求覆盖 SPEC A16 的禁竖排）。
- * 常态只有一圈暗淡边框，不显示文字；
- * 鼠标移入/键盘聚焦时，流光沿边框跑：两段光从上下两端出发、向左右两条竖边汇聚，
- * 可以溢出按钮压住邻近内容；文字单独占内层，四周留内边距，不与线条重叠。 */
+/* 收起对话框：对话框左边缘中点的竖条（用户显式要求覆盖 SPEC A16 的禁竖排）。
+ *
+ * 三段口径（用户 m04278「默认样式不变」→ m04550 定形状 → m04575「c1，贴住线框」
+ * → m04611「不要影响 boss 列表的布局，这个箭头悬浮起来」）：
+ *
+ * 1. **默认样式不变** —— 22px 宽、200px 高、透明底，只有一条贯穿的细亮线；
+ *    常驻装饰，不抢视觉。
+ * 2. **悬停换成双 chevron** —— 用户给定的形状（两笔各 10px 粗、圆头圆角，
+ *    笔画在尖端由 stroke-linejoin: round 自然收成圆弧，不是尖角）。
+ *    C1 配色：linear-gradient 从 --primary 斜铺到 --primary-text，越朝右越亮。
+ * 3. **悬浮，不进流** —— 按钮盒尺寸恒为 22px，悬停时**一个字都不变**；
+ *    变的是里面那枚 chevron 的 transform（贴着线框向左平移 40px 并展开）。
+ *    所以 Boss 列表的宽度与位置一格不动，箭头是"浮"在它上面的。
+ *
+ * 为什么 position: absolute 且 left: 0：纯浮层，不进流 —— 左侧 Boss 列表因此能贴住
+ * 对话框左边框。左扩能露出来，靠的是 .chat-detach-body 的 overflow-x: visible。
+ *
+ * 悬停的每一步都有过渡（用户 m04373）：细线淡出 160ms、chevron 300ms 走 --ease-glass
+ * （scaleX 0→1 配合位移），观感是"细线长成箭头并浮到外面"，不是硬切。
+ * 按钮本体一直接管指针（否则 :hover 永远不触发）；伪元素与 SVG 都 pointer-events: none，
+ * 指针不会因为移到图形上而闪断。 */
 @property --chat-rail-angle {
   syntax: '<angle>';
   inherits: false;
   initial-value: 0deg;
 }
 
-/* 纯浮层：绝对定位在对话框左边缘的中点，不进流——左侧 BOSS 列表因此能贴住
- * 对话框左边框，不会被这条竖条挤出一段空隙。按钮本体一直接管指针（否则 :hover
- * 永远不触发，文字标签也就永远不出现）；::before / ::after 两个伪元素都
- * pointer-events: none，指针不会因为移到光条上而闪断。
- * left 取 0 而不是 -50%：对话框是 overflow: hidden，居中压在边框上会被裁掉一半，
- * 流光与竖线就只剩一半可见。 */
 .chat-detach-collapse {
   position: absolute;
   z-index: 3;
@@ -138,7 +149,7 @@
   width: 22px;
   height: 200px;
   margin: 0;
-  padding: 6px 0;
+  padding: 0;
   transform: translateY(-50%);
   display: flex;
   align-items: center;
@@ -147,17 +158,15 @@
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
-  overflow: visible;
   cursor: pointer;
-  transition: box-shadow var(--dur) var(--ease-out);
 }
 
 .chat-detach-collapse:hover,
 .chat-detach-collapse:focus-visible {
-  box-shadow: 0 0 12px -2px var(--primary-soft);
+  outline: none;
 }
 
-/* 常态只留一条居中的短竖线，不构成第二层边框 */
+/* 常态的细亮竖线（默认样式，别改）：2px，上下渐隐。 */
 .chat-detach-collapse::after {
   content: '';
   position: absolute;
@@ -171,7 +180,7 @@
   box-shadow: 0 0 8px var(--primary-soft);
   opacity: 0.85;
   pointer-events: none;
-  transition: opacity var(--dur) var(--ease-out);
+  transition: opacity 160ms linear;
 }
 
 .chat-detach-collapse:hover::after,
@@ -179,14 +188,13 @@
   opacity: 0;
 }
 
-/* 只保留 1px 宽的边框环，conic 渐变沿环跑：亮段初始在上下两端，转半圈汇聚到左右两边 */
+/* 聚焦时补一圈呼吸流光（悬停只用 chevron，不再让边框跑动，减少干扰）。 */
 .chat-detach-collapse::before {
   content: '';
   position: absolute;
   inset: 0;
   padding: 1px;
   border-radius: inherit;
-  /* 两段光弧：中点最亮（primary 实色），向两端逐渐暗淡到透明；弧宽加大让流光更明显。 */
   background: conic-gradient(
     from var(--chat-rail-angle),
     var(--primary-soft) 0deg,
@@ -210,7 +218,6 @@
   transition: opacity var(--dur) var(--ease-out);
 }
 
-.chat-detach-collapse:hover::before,
 .chat-detach-collapse:focus-visible::before {
   opacity: 1;
   animation: chat-rail-sweep 2.6s linear infinite;
@@ -226,34 +233,72 @@
   }
 }
 
-/* 文字标签悬停时浮在邻近内容之上（不挤压、不改布局尺寸）：
- * 底色用不透明的玻璃令牌而不是 accent-soft，否则竖排字会与底下的 BOSS 列表文字叠成一团。 */
-.chat-detach-collapse-label {
-  position: relative;
-  z-index: 1;
-  writing-mode: vertical-rl;
-  letter-spacing: 2px;
-  font-size: var(--fs-xs);
-  color: var(--primary);
-  padding: 8px 3px;
-  border-radius: var(--radius-sm);
+/* 双 chevron（用户 m04550 给的形状，m04575 选 C1 渐变版，m04611 要求浮起来）。
+ *
+ * 几何：viewBox 46x52，两笔「M5 5 L23 26 L5 47」「M23 5 L41 26 L23 47」，
+ * stroke-width 10 + linecap/linejoin 全 round —— 尖端是两个对称的 10px 圆角，
+ * 与那把"刀"完全不同。笔间距 18，两笔不粘连。
+ *
+ * 静止位置 left: 2px：起笔点落在 x=5、半笔宽 5，外沿贴到 x=0 —— 正好压在边框线上
+ * （这就是"贴住线框"）。悬停时整块 translateX(-40px)：两笔的中段正好压在细线位置，
+ * 箭头浮到对话框左缘之外、悬在 Boss 列表上，但**不改变任何盒子的尺寸**。
+ * 横向裁切由 .chat-detach-body 的 overflow-x: visible 放开。 */
+.chat-detach-chevrons {
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  width: 46px;
+  height: 52px;
+  margin-top: -26px;
+  overflow: visible;
   opacity: 0;
-  transition: opacity var(--dur) var(--ease-out);
+  transform: translateX(0) scaleX(0);
+  transform-origin: left center;
+  pointer-events: none;
+  transition:
+    opacity 160ms linear,
+    transform 300ms var(--ease-glass);
 }
 
-.chat-detach-collapse:hover .chat-detach-collapse-label,
-.chat-detach-collapse:focus-visible .chat-detach-collapse-label {
+.chat-detach-collapse:hover .chat-detach-chevrons,
+.chat-detach-collapse:focus-visible .chat-detach-chevrons {
   opacity: 1;
-  background: var(--glass-3);
-  box-shadow: var(--shadow-pop);
+  transform: translateX(-40px) scaleX(1);
+}
+
+.chat-detach-chevrons path {
+  fill: none;
+  stroke-width: 10;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* C1 渐变：斜向 45°，从主色铺到主色亮字色，箭头越朝右越亮。 */
+.chat-detach-chevrons .chev-a {
+  stop-color: var(--primary);
+}
+
+.chat-detach-chevrons .chev-b {
+  stop-color: var(--primary-text);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-detach-collapse:hover::before,
+  .chat-detach-collapse::before,
+  .chat-detach-collapse::after,
+  .chat-detach-chevrons {
+    transition: none;
+  }
+
+  .chat-detach-collapse:hover .chat-detach-chevrons,
+  .chat-detach-collapse:focus-visible .chat-detach-chevrons {
+    transform: translateX(-40px) scaleX(1);
+  }
+
   .chat-detach-collapse:focus-visible::before {
     animation: none;
   }
 }
+
 
 .rail-search {
   flex: 0 0 auto;
@@ -594,7 +639,11 @@
   min-height: 0;
   min-width: 0;
   flex: 1 1 auto;
-  overflow: hidden;
+  overflow-y: hidden;
+  /* 收起按钮悬停时会向左侧外扩（用户 m04611「不要影响 boss 列表的布局，这个箭头悬浮起来」）。
+   * 横向裁切放开，箭头才能「浮」到对话框左缘之外；纵向仍裁，免得内容/列表溢出到桌面。
+   * 外扩的是绝对定位的浮层，不在流里，所以 Boss 列表宽度与位置一格都不动。 */
+  overflow-x: visible;
 }
 
 .chat-detach-rail {

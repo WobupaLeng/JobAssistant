@@ -14,6 +14,7 @@ import { createApp } from 'vue';
 import { bootstrapTheme } from './lib_ui/theme';
 import { DEFAULT_LIGHT_ANGLE, isInside } from './lib_ui/light-edge';
 import { applyFontScale, applyPalette, readFontScale, readPalette } from './lib_ui/palette';
+import { installDragAllow } from './lib_ui/drag-allow';
 import '../styles/index.css';
 import './app.css';
 import App from './App.vue';
@@ -167,5 +168,16 @@ document.addEventListener('pointerout', (ev) => {
   from.style.setProperty('--light-angle', `${DEFAULT_LIGHT_ANGLE}deg`);
   restoreDefaultLight(from, st);
 });
+
+/**
+ * 窗口拖动兜底（用户 m04113「窗口顶部空白区域不能拖到窗口」）。
+ *
+ * 窗口 `decorations: false`，拖动只能靠 Tauri 的 `data-tauri-drag-region`；而它只认
+ * **被点到的那一个元素**，事件不从子节点冒泡。顶栏里每块可视物件（品牌名、平台卡、
+ * 打分分段、token 读数、配置 / 敏感库 / 主题、三个窗口键）都把 pointerdown 抢走，
+ * 于是「顶栏看着大片空白、按下去却拖不动」。做法与两处 WebView2 的反直觉行为
+ * 都写在 `lib_ui/drag-allow` 里，这里只负责挂上。
+ */
+installDragAllow(document);
 
 createApp(App).mount('#app');

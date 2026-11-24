@@ -101,7 +101,7 @@ import {
 } from '../lib_ui/scrape-filter-model';
 import { loadDraft, saveDraft } from '../features/scrape/filter';
 import { parseLogLevel } from '../lib_ui/logfmt';
-import { readInitialTheme, flipTheme, applyTheme } from '../lib_ui/theme';
+import { readInitialTheme, applyTheme } from '../lib_ui/theme';
 import {
   FONT_SCALES,
   PALETTES,
@@ -242,12 +242,17 @@ const themePanelOpen = ref(false);
 function onToggleThemePanelHandler(next: boolean): void {
   themePanelOpen.value = next;
 }
-/** 面板里点「深色 / 浅色」：直接指定主题，不翻转（用户可能在面板里连点两次）。 */
+/**
+ * 面板里点「深色 / 浅色」：**直接用点中的那一档**（用户 m04260「深浅两色的选择反了」）。
+ *
+ * 这里原先写的是 `flipTheme(mode)` —— 把一个已经确定的取值又翻转了一次，
+ * 于是点「深色」得到浅色、点「浅色」得到深色。按钮语义是「选哪个就是哪个」，
+ * 不该经过翻转；`flipTheme` 只服务于需要取反的场合（本页已无调用方）。
+ */
 function onPickThemeMode(mode: 'dark' | 'light'): void {
-  const t = flipTheme(mode);
-  applyTheme(t);
-  themeLabel.value = t === 'dark' ? '深色' : '浅色';
-  applyPalette(paletteId.value, t);
+  applyTheme(mode);
+  themeLabel.value = mode === 'dark' ? '深色' : '浅色';
+  applyPalette(paletteId.value, mode);
 }
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -1258,14 +1263,6 @@ watch(
         @pick-mode="onPickMode"
         @update:prefilter="onPrefilter"
         @open-config="emit('navigate', 'config')"
-        @toggle-theme="
-          () => {
-            const t = flipTheme(themeLabel === '深色' ? 'dark' : 'light');
-            applyTheme(t);
-            themeLabel = t === 'dark' ? '深色' : '浅色';
-            applyPalette(paletteId, t);
-          }
-        "
         @pick-theme-mode="onPickThemeMode"
         @toggle-theme-panel="onToggleThemePanelHandler"
       />

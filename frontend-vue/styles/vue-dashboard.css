@@ -43,7 +43,9 @@
   gap: 10px;
   flex-wrap: wrap;
   flex: 0 0 auto;
-  padding: 10px 14px 6px;
+  /* 排序药丸 22 → 26（用户 m04113 加大字号）后，上下 10 / 6 会把行压到 42px，
+   * 与岗位卡行高推导里的 40px 对不上；这里收成 8 / 4，药丸 26 正好落回 40。 */
+  padding: 8px 14px 4px;
 }
 
 .job-tabs {
@@ -113,14 +115,17 @@
 .sort-pill {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  height: 22px;
-  padding: 0 8px;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-3);
-  font-size: var(--fs-2xs);
+  /* 用户 m04113「加大图中的字体」：原本是最小的 --fs-2xs，整行排序字号发虚；
+   * 抬到 --fs-md 与顶栏工具组（配置 / 敏感库 / 主题）同级，行高同步 22 → 26。 */
+  font-size: var(--fs-md);
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -135,7 +140,8 @@
 }
 
 .sort-arrow {
-  font-size: var(--fs-2xs);
+  /* 箭头是文字字形，跟正文同档才不会显得比相邻文字小一号。 */
+  font-size: var(--fs-md);
   color: var(--primary);
 }
 
@@ -1237,8 +1243,7 @@ body {
   gap: 4px;
 }
 
-.theme-panel .theme-mode-btn.is-active,
-.theme-panel .theme-mode.is-active {
+.theme-panel .theme-mode-btn.is-active {
   color: var(--primary);
   background: var(--primary-soft);
 }

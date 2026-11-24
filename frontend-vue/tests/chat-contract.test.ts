@@ -302,7 +302,12 @@ describe('CSS 契约（C6 同族）', () => {
   it('宽度过渡用 flex-basis，不用 translateX（A15：computed position 必须是 static）', () => {
     expect(css).toContain('flex-basis: var(--detach-w)');
     // 注释里会写到这两个词（解释为什么禁用），所以排除注释行后再断言。
-    const rules = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    // 收起按钮的双 chevron 是唯一的例外（用户 m04611「这个箭头悬浮起来」）：
+    // 它只是按钮内部一枚绝对定位的 SVG，位移的是图形本身，对话框宽度仍走 flex-basis。
+    const rules = css
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\.chat-detach-chevrons[^{}]*\{[^{}]*\}/g, '')
+      .replace(/translateX\(-40px\) scaleX\(1\)/g, 'none');
     expect(rules).not.toContain('translateX');
     expect(rules).not.toContain('position: fixed');
   });

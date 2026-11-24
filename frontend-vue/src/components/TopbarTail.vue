@@ -79,7 +79,6 @@ const emit = defineEmits<{
   (e: 'update:prefilter', value: number): void;
   (e: 'toggle-sensitive'): void;
   (e: 'open-config'): void;
-  (e: 'toggle-theme'): void;
   (e: 'pick-theme-mode', mode: 'dark' | 'light'): void;
   (e: 'toggle-theme-panel', next: boolean): void;
 }>();
@@ -93,9 +92,13 @@ const llmActive = computed(() => props.segs.some((s) => s.key === 'llm' && s.act
 /* ---------------- 主题面板（调色板 + 字号）
  *
  * 用户裁决：主题 / 调色板 / 字号三组收成一枚「主题」按钮，点开才展开。
- *
- * 面板必须 Teleport 到 body：这一行住在 `header.topbar`，顶栏带 backdrop-filter
+ * 面板 teleport 到 body：这一行住在 `header.topbar`，顶栏带 backdrop-filter
  * （会新建包含块），面板若留在原地会卡在顶栏这条 46px 的带子里被裁掉。
+ *
+ * **开合状态归本组件自己**（用户 m04113「主题现在打不开」）。此前它由概览页持有一份、
+ * 经 emit 回写，面板挂在 `<body>` 上跟按钮不在同一棵子树，任何一边没对齐就表现为
+ * 「点了没反应」——这类纯 UI 的开关不该跨组件往返。
+ *
  * 定位与 `CityPicker` 同一套口径：量触发按钮矩形，下面放得下就向下展，否则翻上。
  * 面板根节点带 `data-overlay="popover"`，概览页的全局 pointerdown 会据此放行。
  */
@@ -115,11 +118,11 @@ const MODES: readonly { id: 'dark' | 'light'; label: string }[] = [
 ];
 
 /**
- * 面板开合：由页面通过 `themePanelOpen` 持有真值，本组件只发意图。
- * 面板挂在 `<body>` 上（Teleport），按钮留在顶栏「配置 · 敏感库」之后，
- * 两者不在同一棵子树上，页面用一份状态统一管住更不容易走形。
+ * 面板开合：本组件唯一持有（不再经父组件往返）。
+ * 按钮在顶栏、面板 teleport 到 `<body>`，两者虽不同子树，但开关是纯 UI 状态，
+ * 放在同组件里最不容易走形：点开 / 点外部 / Esc 三条路都只改这一处。
  */
-const themeOpen = computed(() => props.themePanelOpen);
+const themeOpen = ref(props.themePanelOpen);
 const triggerEl = ref<HTMLButtonElement | null>(null);
 const panelEl = ref<HTMLElement | null>(null);
 const box = ref<PanelBox | null>(null);
@@ -140,14 +143,21 @@ function placePanel(): void {
 
 function toggleThemePanel(): void {
   const next = !themeOpen.value;
+  themeOpen.value = next;
   emit('toggle-theme-panel', next);
   if (!next) return;
+  // 先量再渲染：box 为空时面板不会渲染（模板里 `v-if="themeOpen && box"`），
+  // 所以 placePanel 必须早于下一次渲染，否则首帧无处定位。
   placePanel();
-  void nextTick(() => panelEl.value?.querySelector<HTMLElement>('button')?.focus());
+  void nextTick(() => {
+    if (box.value === null) placePanel();
+    panelEl.value?.querySelector<HTMLElement>('button')?.focus();
+  });
 }
 
 function closeThemePanel(): void {
   if (!themeOpen.value) return;
+  themeOpen.value = false;
   emit('toggle-theme-panel', false);
   triggerEl.value?.focus();
 }
@@ -158,7 +168,7 @@ function onOutsidePointer(ev: PointerEvent): void {
   if (!(target instanceof Node)) return;
   if (triggerEl.value?.contains(target)) return;
   if (panelEl.value?.contains(target)) return;
-  emit('toggle-theme-panel', false);
+  closeThemePanel();
 }
 
 function onDocumentKeydown(ev: KeyboardEvent): void {
@@ -173,6 +183,14 @@ watch(themeOpen, (open) => {
   if (!open) return;
   placePanel();
 });
+
+// 父组件若清了 `themePanelOpen`（例如切页），本地跟着收，避免两处不一致。
+watch(
+  () => props.themePanelOpen,
+  (next) => {
+    if (!next && themeOpen.value) themeOpen.value = false;
+  },
+);
 
 if (typeof document !== 'undefined') {
   document.addEventListener('pointerdown', onOutsidePointer, true);
@@ -317,17 +335,10 @@ function onPrefilterInput(ev: Event): void {
       >
         <div class="theme-row">
           <span class="theme-row-label">明暗</span>
-          <button
-            class="btn btn-sm btn-ghost theme-mode"
-            type="button"
-            :title="`切换明暗主题（当前${themeLabel}）`"
-            data-testid="theme-mode-btn"
-            @click="emit('toggle-theme')"
-          >
-            {{ themeLabel === '深色' ? '☾ 深色' : '☀ 浅色' }}
-          </button>
-          <!-- 深/浅两档各自一个按钮：比单个「翻转」按钮少一次歧义（用户可能在面板里连点），
-               也让「明暗」这一行与下面的主题色、字号两行视觉对齐。 -->
+          <!-- 只有深 / 浅两枚按钮（用户 m04203「主题中多了一个深色的选择」）：
+               此前这里还并排着一枚「翻转」按钮，它显示的也是「☾ 深色 / ☀ 浅色」，
+               与右侧两枚并列时看起来就是同一个选项出现两次。翻转能力由两枚并列按钮
+               本身覆盖，多余的这枚已删除。 -->
           <div class="theme-modes" data-testid="theme-mode-group">
             <button
               v-for="m in MODES"

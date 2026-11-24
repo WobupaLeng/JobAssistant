@@ -143,8 +143,9 @@ export const CHAT_SEARCH_PLACEHOLDER = '搜索 HR / 公司 / 消息';
 export const CHAT_EMPTY_TITLE = '没有会话';
 export const CHAT_DETACH_EMPTY_TITLE = '在左侧 Boss 列表点一位，开始聊天';
 export const CHAT_DETACH_EMPTY_SUB = '点左侧 Boss 列表里的任意一位即可查看聊天';
-/** 收起按钮逐字（§5）。 */
-export const CHAT_CLOSE_LABEL = '收起对话框';
+/** 收起按钮逐字（用户 m04331：两字「收起」；原四字「收起对话框」在竖排胶囊里溢出）。
+ * 模板里它被拆成两段，竖排自上而下摆成「收 ⟩ 起」。 */
+export const CHAT_CLOSE_LABEL = '收起';
 /** 输入框占位与发送按钮逐字（§5）。 */
 export const CHAT_COMPOSE_PLACEHOLDER = '输入消息…';
 export const CHAT_SEND_LABEL = '发送';
