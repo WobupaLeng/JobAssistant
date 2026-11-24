@@ -203,11 +203,10 @@
   flex: 1 1 auto;
   min-height: 120px;
   overflow-y: auto;
-  /* 与 vue-dashboard.css 的 .job-grid 同口径：三行撑满内容区，行高夹在卡片内容高
-   * （--job-card-content-h 只在 .job-grid 上定义，本规则若写在前面会取不到值，
-   * 故这里只声明不重复的项，行高交给 .job-grid 本体）。 */
-  grid-template-rows: repeat(3, minmax(var(--job-card-content-h, var(--job-card-h)), 1fr));
-  grid-auto-rows: minmax(var(--job-card-content-h, var(--job-card-h)), auto);
+  /* 行高交给 .job-grid 本体（`minmax(--job-card-h, 1fr)` 三等分，用户 m03518）。
+   * 这里若再写一次 `grid-template-rows` 会整条覆盖掉：早先那句把下限换成
+   * `--job-card-content-h`、再把隐式行写成 `auto`，结果是隐式行不再等分，
+   * 第 4 行起高度塌回内容高。所以本块只保留滚动与内边，不重复声明行高。 */
   /* 滚动条贴着网格内边，不压住卡片右边缘的描边（14px 网格内边距 − 10px＝4px）。
    * 用 margin 而不是 padding：padding 会覆盖掉 .job-grid 的上下 10px 留白，
    * 卡片就又贴住列表卡头与窗口底边。 */
@@ -241,13 +240,25 @@
 }
 
 
+/* 已投递 / 不投递的状态表达以页签（tone-*）为准：卡片没有边框，颜色只出现在
+ * 光带上，真源是 vue-dashboard.css 的 .job-card.tone-delivered / .job-card.tone-rejected
+ * （覆写 --spec-* 光带令牌）。
+ *
+ * JobCard.vue 还会按岗位状态挂 is-delivered / is-rejected（详情或后续筛选可能用到），
+ * 那条路径没有页签名，这里补同样的语义色，免得「状态已投递但光带还是白的」。
+ * 两组选择器都只改光带令牌，不恢复描边。 */
 .job-card.is-delivered {
-  border-color: var(--good);
+  --spec-peak: var(--good);
+  --spec-top: color-mix(in srgb, var(--good) 62%, transparent);
+  --spec-side: color-mix(in srgb, var(--good) 34%, transparent);
+  --spec-bottom: color-mix(in srgb, var(--good) 14%, transparent);
 }
 
 .job-card.is-rejected {
-  /* 不再整卡降透明：与已投递列表保持同一尺寸、同一可读性，只由描边表达状态。 */
-  border-color: var(--bad);
+  --spec-peak: var(--bad);
+  --spec-top: color-mix(in srgb, var(--bad) 62%, transparent);
+  --spec-side: color-mix(in srgb, var(--bad) 34%, transparent);
+  --spec-bottom: color-mix(in srgb, var(--bad) 14%, transparent);
 }
 
 /* 骨架卡不需要交互反馈 */

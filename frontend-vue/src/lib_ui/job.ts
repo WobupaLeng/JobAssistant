@@ -77,16 +77,6 @@ export function emptyJob(): Job {
 }
 
 /**
- * 规则否决的岗位。`rejected` 是 number 不是 boolean（史遗留列），非 0 即否决。
- *
- * SQLite 没有布尔列——这个判定只看 `!= 0`，不要改成真值判断
- * （`-1` 等非 0 值同样是「被排除」）。
- */
-export function isRejected(job: Job): boolean {
-  return job.rejected !== 0;
-}
-
-/**
  * 分数落在门槛的哪一侧：用于 CSS 类 `score-num is-{tone}`。
  *
  * `score === 0` 视为「未打分」，必须与「0 分」区分开——否则未打分岗位

@@ -1,7 +1,7 @@
 /**
  * 投递列表的纯逻辑：页签 / 排序 / 可见性 / 计数 / 批量显隐 / 卡片派生字段。
  *
- * 为什么单独一个 `.ts`：Leptos 版这些规则散在 `features/jobs/state.rs` 与
+ * 为什么单独一个 `.ts`：这些规则原本散在列表状态与卡片渲染两处，
  * `features/jobs/cards.rs` 的组件体里，只能靠肉眼看；搬成纯函数后 vitest 能
  * 逐条盯住（`tests/jobs-list.test.ts`）。组件只负责画，不再自己算。
  *
@@ -78,7 +78,7 @@ export function sortSlug(field: SortField): string {
  * 每个字段的默认方向。
  *
  * 界面上的箭头语义是「走强的方向」：分值/薪资先看大的（降序），
- * 加入时间先看新的（也是降序）。Leptos 版默认 `ascending = true` 是因为它
+ * 加入时间先看新的（也是降序）。早期实现默认 `ascending = true` 是因为它
  * 把 `asc/desc` 直传给后端；这里改成更直白的 `desc`，由 `sortOrder()` 统一翻译。
  */
 export function defaultDescending(field: SortField): boolean {
@@ -313,7 +313,7 @@ const DASH = '—';
 /**
  * 卡片展示模型：一次算完，模板只做插值。
  *
- * 空字段的兜底文案与 Leptos 版逐字一致（`cards.rs:126-152`）——
+ * 空字段的兜底文案逐字固定（`cards.rs:126-152`）——
  * 「（无标题）」/「（未知公司）」/「面议」。
  */
 export function cardView(job: Job, maxScore: number | null): CardView {
@@ -370,7 +370,3 @@ export function keepaliveRows(jobs: readonly Job[]): KeepaliveRow[] {
   }));
 }
 
-/** 决策/日志里常见的 `公司 / 岗位` 串拆开（Leptos 版已退役，见 git 历史，提交 53d05cb 之前）。 */
-export function splitCompanyTitle(raw: string): [string, string] {
-  return splitCompanyJob(raw);
-}

@@ -11,7 +11,6 @@ import {
   GLASS_DARK,
   GLASS_LIGHT,
   GLASS_L3,
-  GLASS_MAX_FILTERED_CARDS,
   bevelSlope,
   clampDpr,
   computeGlassOffset,
@@ -87,12 +86,6 @@ describe('P0 反平移偏移纯函数（裁定 6：--glass-x/y = host - source +
   });
   it('减去源的视口偏移（源不在窗口原点时仍对齐）', () => {
     expect(computeGlassOffset(720, 80, 16, 64, 0, 120)).toEqual({ x: 704, y: 136 });
-  });
-});
-
-describe('P1 同屏折射预算常量（规格 L2-3 ≤12）', () => {
-  it('GLASS_MAX_FILTERED_CARDS = 12', () => {
-    expect(GLASS_MAX_FILTERED_CARDS).toBe(12);
   });
 });
 

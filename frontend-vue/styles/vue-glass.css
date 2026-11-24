@@ -73,9 +73,6 @@
   will-change: transform;
 }
 
-/* 同屏折射预算（规格 L2-3 ≤12）：超预算卡片关滤镜退回纯第一层（use-glass-budget 打类）。 */
-.glass-budget-off .glass-clone { filter: none !important; }
-
 /* ---- L3：WebGL 抽屉透镜画布（规格 §3.5 / SPEC-003 裁定 5） ---- */
 
 /* 固定铺满视口、z-index:40（盖过同层遮罩，低于抽屉面板 41）、不吞事件。

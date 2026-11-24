@@ -138,7 +138,13 @@ describe('vue 系样式：裸 px 字号归零', () => {
     });
 
     it(`${rel} 注释里不出现反引号包住星号斜杠的写法`, () => {
-      expect(read(rel)).not.toMatch(/`[^`\n]*\*\//);
+      // 浏览器把 `*/` 当成块注释的**结束**，所以「反引号 … `*/`（收尾）」这种写法
+      // 会让整份样式表被静默丢弃。判定只在注释区里找，并且只认真正的收尾
+      // （`*/` 之后是行尾或空白），不会把 `styles/*.css` 这类通配路径误报成违规。
+      const comments = read(rel).match(/\/\*[\s\S]*?\*\//g) ?? [];
+      for (const block of comments) {
+        expect(block).not.toMatch(/`[^`\n]*\*\/(?=\s|$)/);
+      }
     });
   }
 
@@ -220,6 +226,34 @@ describe('三窗固定高 / 敏感库 720 / A54 方块', () => {
     // 兜底与原型 :root 一致为 0px（规格 A36）：聊天默认收起，expand 时由 canvas.ts 写行内值。
     expect(css).toContain('--detach-w: 0px');
   });
+
+it('岗位卡行高锁定 142px、三行占满 1440×900 窗口（用户 m03968 裁决）', () => {
+  const css = stripComments(read('styles/vue-dashboard.css'));
+  const grid = css.match(/(?:^|\n)\.job-grid\s*\{([^}]*)\}/);
+  expect(grid).not.toBeNull();
+  const block = grid![1];
+
+  // 行高是单一像素值，不是 minmax(下限, 1fr)：1fr 会让行高随窗口无限放大
+  // （1000 高时到 172px），卡内内容被拉开，看起来「没占满也没对齐」。
+  expect(block).toContain('--job-card-h: 142px');
+  expect(block).toContain('grid-template-rows: repeat(3, var(--job-card-h))');
+  expect(block).toContain('grid-auto-rows: var(--job-card-h)');
+  // 142px 的来源（CDP 实测，不是估算）：900 − 14(外壳底边距) − 46(顶栏) = 840；
+  // − 42(抓取条) − 20(两处页面 gap) − 220(日志卡) = 558（列表卡可用高）；
+  // − 40(页签行) − 40(批量条 32+8) = 478（网格盒高）；
+  // − 24(网格内边) − 28(两处行 gap) = 426，除以 3 正好 142。
+  // 列宽仍用 1fr（自适应），只有行高锁死；这条断言只针对行声明。
+  expect(block).not.toMatch(/grid-template-rows:\s*repeat\(3,\s*minmax\(/);
+  expect(block).not.toMatch(/grid-auto-rows:\s*minmax\(/);
+  // 行高定死后余量不能摊进行里：从顶部排列，多出来的高度落在底部。
+  expect(block).toContain('align-content: start');
+
+  // 加载哨兵是网格的最后一个子项，会占一个隐式行。它必须从行份额里脱身，
+  // 否则第 4 个行槽会把三行卡片挤矮。
+  const sentinel = css.match(/(?:^|\n)\.job-load-sentinel\s*\{([^}]*)\}/);
+  expect(sentinel).not.toBeNull();
+  expect(sentinel![1]).toContain('position: absolute');
+});
 
 it('窄窗不出现整窗滚动条：body 两个方向都裁死，宽度交给各列（用户 m03014 裁决）', () => {
   const dash = stripComments(read('styles/vue-dashboard.css'));

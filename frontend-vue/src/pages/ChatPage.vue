@@ -10,7 +10,7 @@
  *
  * ## 口径
  * 结构与 testid 的唯一真源是冻结原型 `prototypes/ui-v1` + `docs/ui/UI-SPEC-chat-detach-v3.md`
- * （v3–v10 全部裁决），行为规则来自 Leptos 版 `features/chat/*.rs`。
+ * （v3–v10 全部裁决），行为规则来自 `lib_ui/chat-model`。
  *
  * - 右栏 `aside.chat-rail` 常驻；对话框 `.chat-detach` 默认 `hidden`；
  * - 点任意 Boss ⇒ 展开（宽 `clamp(600px, 50vw, 80vw)`，下限 600），右栏让位；

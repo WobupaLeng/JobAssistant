@@ -18,7 +18,6 @@
 :root {
   --vp-fs-2xs: var(--fs-2xs);
   --vp-fs-xs: var(--fs-xs);
-  --vp-fs-sm: var(--fs-sm);
   --vp-fs-md: var(--fs-md);
 }
 

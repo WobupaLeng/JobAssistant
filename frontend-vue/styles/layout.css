@@ -18,20 +18,19 @@
   /* 去边界感：顶栏与页面主体共用同一块玻璃面板，外壳不再留缝。 */
   padding: 0 0 14px;
   gap: 0;
-  /* M3：应用四角圆角 + 桌面磨砂。窗口本身透明，圆角在外壳上绘制；
-   * 磨砂由令牌 --glass-0 / --blur-0 提供，不另写颜色字面量。 */
-  /* 内容区铺满整个窗口（用户 m03129「先把内容区占满整个窗口，保持顶部无间距」）：
-   * 外壳不再四周内缩，`margin: 0` + `height: 100%`，顶部第一个元素是 46px 顶栏，
-   * 页面内容紧贴它下沿。
+  /* 窗口外形 = DWM 的 8px 弧（用户 m03488 / m03505 裁决）。
    *
-   * 代价与规避：DWM 的系统弧画在窗口边缘，外壳贴边时四角会被系统弧再裁一次。
-   * `overflow: hidden` 让外壳先按 `--radius` 自裁圆角，系统的 1px 边线在弧段上被
-   * 裁掉、在直边段照常显示，不会出现「边线在四角断开」的断口；角弧仍由
-   * `var(--radius)` 一处令牌定义。`height: 100%` 也不再叠加 margin，最窄窗口
-   * 不会多出 4px（用户 m03014 的滚动条）。 */
+   * 透明客户区的四个方角只有系统能裁：前端 `.app-shell` 的 `border-radius` 只裁自己
+   * 那一层，裁不到窗口矩形，弧外仍会漏出一块桌面方角。所以外形交给
+   * `apply_round_corners`（DWMWCP_ROUND = 8px），这里用**同样的半径**
+   * `--shell-radius` 画一层同心弧，两层不互相啃，也不需要为躲弧而留透明缝：
+   * 外壳真正贴满窗口，四角干净。
+   *
+   * `overflow: hidden` 仍是硬要求：内容按这个弧裁，否则顶栏/卡片会在角上探出去。
+   * 内部卡片继续用 `--radius`（16px），与窗口外形无关。 */
   margin: 0;
   height: 100%;
-  border-radius: var(--radius);
+  border-radius: var(--shell-radius);
   background: var(--glass-0);
   -webkit-backdrop-filter: blur(var(--blur-0)) saturate(var(--saturate-0));
   backdrop-filter: blur(var(--blur-0)) saturate(var(--saturate-0));

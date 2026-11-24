@@ -89,12 +89,6 @@ impl HttpLlmClient {
         }
     }
 
-    /// 覆盖超时时间（主要给测试和特殊网络环境用）。
-    pub fn with_timeout(mut self, secs: u64) -> Self {
-        self.timeout = Duration::from_secs(secs);
-        self
-    }
-
     /// 用配置里的原始文本装填两份温度（`None` / 空串 / 非数字 → 默认值）。
     pub fn with_temperature_text(mut self, score: Option<&str>, greet: Option<&str>) -> Self {
         self.score_temperature = resolve_temperature(score, SCORE_TEMPERATURE);

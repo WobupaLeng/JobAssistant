@@ -9,6 +9,8 @@
  * 落位（SPEC-001 决策 7 / AC10）：
  * 顶栏是一行，本组件由概览页 teleport 进 `AppShell` 的 `.tb-embed`，
  * 顺序按冻结 SPEC §11.3：`scrape-mode-segmented` → `sensitive-open` → token → 配置。
+ * 尾段再分两组（用户 m04039）：`.tb-tools`（分段 · token · 配置 · 敏感库，紧贴登录按钮）
+ * 与 `.tb-theme`（主题，独占右端）。
  *
  * 两处口径别改回去：
  * - **满分 / 门槛 chip 不在这里**（legacy-baseline §160「满分口径 `.score-spec` 已迁出顶栏」）——
@@ -199,6 +201,9 @@ function onPrefilterInput(ev: Event): void {
 
 <template>
   <div class="tb-tail">
+    <!-- 左半段 .tb-tools：打分分段 + token 读数 + 配置 + 敏感库，紧贴登录按钮。
+         用户 m04039：这组「与主题分开，靠近登录按钮」。主题单独落在右端 .tb-theme。 -->
+    <div class="tb-tools">
     <!-- 打分方式分段 + 初筛线（用户裁决：移到登录按钮右边）。
          登录动作住在 `PlatformCard`（同一行 `.tb-embed` 内），本组件紧随其后，
          所以 DOM 顺序上恰好就是「登录按钮 → 规则/大模型分段 → 初筛线」。
@@ -268,7 +273,7 @@ function onPrefilterInput(ev: Event): void {
       配置
     </button>
     <!-- 敏感库紧跟在「配置」右侧（用户 m02692）。它原先排在打分分段之后，
-         现在与配置同属顶栏右段的一组工具，顺序：… token · 配置 · 敏感库 · 主题。 -->
+         现在与配置同属「贴登录按钮」这一组，顺序：… 分段 · token · 配置 · 敏感库。 -->
     <button
       class="btn btn-sm btn-ghost"
       type="button"
@@ -278,8 +283,11 @@ function onPrefilterInput(ev: Event): void {
     >
       敏感库
     </button>
-    <!-- 主题按钮留在这一行末尾（用户 m03059：不要脱离「配置 · 敏感库」跑到窗口控件旁）。
-         按钮与面板是同一个 `<body>` 外的两层宿主，页面用 `themePanelOpen` 统管开合。 -->
+    </div>
+    <!-- 主题按钮独占尾段右端 .tb-theme（用户 m04039：主题位置保持不变）。
+         与左边那组之间留一条 auto 边距，两组各占一头；按钮与面板是同一个
+         `<body>` 外的两层宿主，页面用 `themePanelOpen` 统管开合。 -->
+    <div class="tb-theme">
     <button
       ref="triggerEl"
       class="btn btn-sm btn-ghost theme-btn"
@@ -294,6 +302,7 @@ function onPrefilterInput(ev: Event): void {
       <span aria-hidden="true">{{ themeLabel === '深色' ? '☾' : '☀' }}</span>
       <span class="theme-btn-label">主题</span>
     </button>
+    </div>
     <Teleport to="body">
       <div
         v-if="themeOpen && box"

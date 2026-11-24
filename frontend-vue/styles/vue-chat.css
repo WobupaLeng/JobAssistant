@@ -343,8 +343,7 @@
   color: var(--on-primary-deep);
   font-size: var(--fs-sm);
   font-weight: 650;
-  /* 原型 L1158 的迎光内高光：值 0.5，比 --spec-top（0.22）亮一档，不能复用；
-   * 本文件是 vue 系样式，字面量必须走令牌（见 tokens.css 的 --spec-avatar-top）。 */
+  /* 头像顶边的迎光内高光已移除（用户裁决：卡片以外不再出高光边）。 */
   box-shadow: none;
 }
 

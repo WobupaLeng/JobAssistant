@@ -2,7 +2,7 @@
  * 抓取互斥按钮与进度文案的纯逻辑（C9 的文案在这里逐字定死）。
  *
  * 三态：idle（未在跑）/ running（在跑）/ paused（用户暂停）。
- * 注意"暂停"在 Leptos 版就是 `scrape_stop`——sidecar 停止后进度仍保留，
+ * 注意"暂停"就是 `scrape_stop`——sidecar 停止后进度仍保留，
  * 再点「继续抓取」会重新 `scrape_start`。所以本文件只负责**显示成什么**
  * 与**点了发哪条命令**，不负责真正的抓取编排。
  */
@@ -27,18 +27,6 @@ export interface ScrapeProgressLike {
   readonly below_threshold: number;
   readonly rejected: number;
   readonly last_title?: string | null;
-}
-
-export function emptyProgress(): ScrapeProgressLike {
-  return {
-    running: false,
-    scraped: 0,
-    inserted: 0,
-    duplicates: 0,
-    below_threshold: 0,
-    rejected: 0,
-    last_title: null,
-  };
 }
 
 /** 从命令返回体里取字段，缺字段用 0 兜底（后端旧版本可能没有 duplicates）。 */

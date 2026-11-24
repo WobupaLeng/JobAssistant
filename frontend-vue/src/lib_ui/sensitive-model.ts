@@ -24,8 +24,6 @@ export const SENSITIVE_TABS: readonly SensitiveTabMeta[] = [
   { key: 'excluded', label: '已排除', kind: 'rejected' },
 ];
 
-export const SENSITIVE_TAB_DEFAULT: SensitiveTab = 'all';
-
 /** 页签 → 命令参数。**`excluded` 必须映射成 `rejected`**，后端只认后者。 */
 export function sensitiveKind(tab: SensitiveTab): 'all' | 'stored' | 'rejected' {
   return SENSITIVE_TABS.find((t) => t.key === tab)?.kind ?? 'all';

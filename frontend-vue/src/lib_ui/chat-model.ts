@@ -1,10 +1,10 @@
 /**
  * Boss 消息页的纯逻辑层（无 IO、无 DOM）。
  *
- * 全部规则是从 Leptos 版 `features/chat/{state,list,thread}.rs` 直译过来的，
+ * 全部规则对齐后端聊天命令的返回口径，
  * 差异只有一处且必须记住：**页面 DOM 口径按冻结原型 v3 走**
  * （`prototypes/ui-v1` + `docs/ui/UI-SPEC-chat-detach-v3.md`），
- * 不是 Leptos 那套整页 `.chat-grid`。两边的行为规则一致，结构不同：
+ * 不是整页 `.chat-grid` 布局。行为规则一致，结构不同：
  *
  * - 收起态：右栏 `aside.chat-rail` 常驻（Boss 列表），对话框 `.chat-detach` 带 `hidden`；
  * - 展开态：点任意 Boss ⇒ 对话框展开（宽 `clamp(600px, 50vw, 80vw)`），
@@ -34,10 +34,9 @@ export const PENDING_UID_PREFIX = 'g';
 /** 未读数封顶显示。 */
 export const UNREAD_CAP = 99;
 /**
- * 自动投递轮询间隔：**已废弃**，恒为 undefined。
+ * 自动投递**没有**轮询间隔：恒为 undefined，保留导出供契约测试断言。
  *
- * 保留这个导出只是为了让契约测试能断言「前端不再有轮询间隔」；状态请求现在
- * 全由 60~90 秒随机心跳与用户操作驱动（见 `auto-heartbeat.ts`）。
+ * 状态请求全由 60~90 秒随机心跳与用户操作驱动（见 `auto-heartbeat.ts`）。
  */
 export const AUTO_TICK_MS = undefined;
 
@@ -100,16 +99,6 @@ export function closeDetach(state: ChatUiState): ChatUiState {
   return { chatOpen: false, activeFriendsUid: state.activeFriendsUid };
 }
 
-/** Esc 分层：上层还有可关对象时由上层消费，这一层不动（A10）。 */
-export function escClosesDetach(hasUpperLayer: boolean): boolean {
-  return !hasUpperLayer;
-}
-
-/** 刷新会话列表不得改变展开态与选中（SPEC §3「刷新会话列表」一行）。 */
-export function stateSurvivesRefresh(state: ChatUiState): ChatUiState {
-  return state;
-}
-
 /* ------------------------------------------------------------------ *
  * 会话列表
  * ------------------------------------------------------------------ */
@@ -135,7 +124,7 @@ export function friendLine(friend: Friend): string {
   return '（暂无消息）';
 }
 
-/** 列表名字兜底：没名字就显示 uid（Leptos `name or uid`）。 */
+/** 列表名字兜底：没名字就显示 uid。 */
 export function friendName(friend: Friend): string {
   const name = (friend.name ?? '').trim();
   return name !== '' ? name : friend.uid;
@@ -173,7 +162,7 @@ export const CHAT_STATE_ANNOUNCE_TEXT = '会话列表';
 
 export type SenderSlug = 'me' | 'system' | 'hr';
 
-/** Leptos `sender_slug`：me/self→me，system/typing→system，空→hr，其余原样。 */
+/** 发送方归类：me/self→me，system/typing→system，空→hr，其余原样。 */
 export function senderSlug(raw: string): SenderSlug | string {
   const s = String(raw ?? '').trim().toLowerCase();
   if (s === 'me' || s === 'self') return 'me';
@@ -182,7 +171,7 @@ export function senderSlug(raw: string): SenderSlug | string {
   return s;
 }
 
-/** 「对方正在输入」不是气泡，渲染成 typing 行（Leptos `load_messages` 的拆分规则）。 */
+/** 「对方正在输入」不是气泡，渲染成 typing 行（后端已在 `load_messages` 里拆好）。 */
 export function isTypingMessage(msg: ChatMessage): boolean {
   return senderSlug(msg.sender) === 'system' && String(msg.content ?? '').includes('正在输入');
 }
@@ -211,7 +200,7 @@ export function msgTestId(msg: ChatMessage): string | null {
   return id === '' ? null : `chat-msg-${id}`;
 }
 
-/** 撤回样式覆盖正文（Leptos `.bubble-recall`）。 */
+/** 撤回样式覆盖正文（`.bubble-recall`）。 */
 export const RECALL_TEXT = '该消息已撤回';
 export const TYPING_TEXT = '对方正在输入…';
 /** 对话头副行：`公司 · 岗位`，都没有时 `—`。 */
@@ -226,7 +215,7 @@ export function canSend(draft: string, sending: boolean): boolean {
   return draft.trim() !== '' && !sending;
 }
 
-/** Ctrl/⌘ + Enter 触发发送（Leptos composer 的键盘规则）。 */
+/** Ctrl/⌘ + Enter 触发发送（输入框的键盘规则）。 */
 export function isSendHotkey(ev: { key: string; ctrlKey: boolean; metaKey: boolean }): boolean {
   return ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey);
 }
@@ -356,7 +345,7 @@ function safeStorage(): Storage | null {
 }
 
 /* ------------------------------------------------------------------ *
- * 错误态（Leptos `load_friends` 的三条分支）
+ * 错误态（`load_friends` 的三条分支）
  * ------------------------------------------------------------------ */
 
 export const SESSION_BOOTING_NOTE = '正在启动浏览器…';

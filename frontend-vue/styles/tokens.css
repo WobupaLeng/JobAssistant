@@ -78,7 +78,6 @@
    * 同一个 blur 值给所有层，玻璃会变成一片糊在一起的塑料。 */
   --blur-0: 18px;
   --blur-1: 24px;
-  --blur-2: 18px;
   --blur-3: 12px;
   --blur-pop: 30px; /* 抽屉 / 弹层：脱离页面，糊得更狠 */
 
@@ -154,16 +153,12 @@
   --primary-text: #6ee7b7; /* 主色系文字（高分徽标） */
   --primary-border: rgba(16, 185, 129, 0.4);
   --warn-text: #fbbf24; /* 警示文字（暂停按钮 / WARN 日志） */
-  --warn-bg: rgba(245, 158, 11, 0.16);
-  --warn-bg-strong: rgba(245, 158, 11, 0.24);
-  --warn-border: rgba(245, 158, 11, 0.42);
   --bad-text: #ff6b6b; /* 错误文字（ERROR 日志 / 空态图标） */
   --bad-text-soft: #ffb4b0; /* 错误条正文 */
   --bad-text-softer: #ffd9d6; /* 错误条图标上的字 */
   --bad-bg: rgba(255, 107, 107, 0.14);
   --bad-bg-strong: rgba(255, 107, 107, 0.3);
   --bad-border: rgba(255, 107, 107, 0.42);
-  --on-bad: #fff; /* 未读角标在 --bad 底上的字 */
 
   /* ---------- 圆角 ----------
    * Liquid Glass 的圆角比常规 UI 大：玻璃边缘要留出高光宽度。
@@ -177,7 +172,12 @@
    * 因此外壳四周退开这一圈透明内边距，让系统弧与外壳弧同心：
    * 外壳圆角 = DWM 弧半径 - 内缩量。DWM 弧半径约 8px，故内缩取 2px。
    * 改这个值必须同步看 `.app-shell` 的 padding（layout.css）。 */
-  --win-corner-cut: 2px;
+  /* 窗口外形的圆角 = Win11 DWM 的固定弧径（8px），前端外壳按它同心内缩。
+ * 这两个值必须与 backend-tauri/src/lib.rs 的 DWMWCP_ROUND 口径一致：
+ * 系统画 8px，外壳用同样的半径、同样的内缩，两层弧才不会互相啃。
+ * 卡片等内部圆角仍用 --radius（16px），不与窗口外形争。 */
+--shell-radius: 8px;
+--win-corner-cut: 2px;
 
   /* ---------- 投影 ----------
    * 两层：贴身的窄影定形（near），远处的宽影分层（far）。
@@ -195,17 +195,13 @@
   --inner-scatter: inset 0 24px 48px -32px rgba(255, 255, 255, 0.10);
   /* ---------- 暂停主按钮（原型 L326-328 `.btn-pause`，用户裁决 D）----------
    * 原型这组值是琥珀系里另一档（描边 rgba(240,198,100,.46) / 悬停 .62 / 字色 #f0c674），
-   * 与 --warn-border / --warn-text 都不同档，不能复用；vue 系样式表禁写颜色字面量
+   * 与 --warn-text 也不同档，不能复用；vue 系样式表禁写颜色字面量
    * （frontend-vue/AGENTS.md 红线 8），所以按 Chief 裁决新增语义令牌，浅色覆盖在 light 块。 */
   --btn-pause-border: rgba(240, 198, 100, 0.46);
   --btn-pause-border-hover: rgba(240, 198, 100, 0.62);
   --btn-pause-bg: rgba(240, 198, 100, 0.16);
   --btn-pause-fg: #f0c674;
 
-  /* 头像方块顶边的高光（原型 `.avatar` 的 `inset 0 1px 0 rgba(255,255,255,.5)`）。
-   * 值是 0.5，比 --spec-top 的 0.22 亮得多，不能复用；浅色主题原型没有覆盖值，
-   * 所以这条只在 :root 定义，两套主题共用（同 --ui-scale 的例外口径）。 */
-  --spec-avatar-top: rgba(255, 255, 255, 0.5);
 
   /* ---------- 动效 ----------
    * Liquid Glass 的动画要「慢且带惯性」：苹果那套普遍 320-420ms、非线性。
@@ -214,7 +210,6 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-fast: 160ms;
   --dur: 320ms;
-  --dur-slow: 420ms;
 
   --font-sans: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
   --font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
@@ -241,7 +236,6 @@
   /* 浅底更刺眼：模糊与饱和度都要更狠 */
   --blur-0: 24px;
   --blur-1: 30px;
-  --blur-2: 24px;
   --blur-3: 16px;
   --blur-pop: 36px;
   --saturate-0: 1.7;
@@ -297,7 +291,6 @@
   --bad-bg: rgba(255, 107, 107, 0.14);
   --bad-bg-strong: rgba(255, 107, 107, 0.3);
   --bad-border: rgba(255, 107, 107, 0.42);
-  --on-bad: #1a1208;
 
   /* 浅底投影必须更重：没有暗部托住，轻影会让卡片「浮不起来」 */
   --shadow-near: 0 1px 3px rgba(15, 23, 42, 0.10);
@@ -317,11 +310,24 @@
   box-sizing: border-box;
 }
 
+/* 挂载点语义与 #root 相同（index.html 的 `<div id="app">`）。
+ * `#app` 必须一起列进来：外壳的 `height: 100%` 需要一个确定高度的父级，
+ * 否则按 CSS 规范退化成 auto —— 表现是外壳被内容撑高而不是填满窗口。 */
 html,
 body,
-#root {
+#root,
+#app {
   height: 100%;
   margin: 0;
+}
+
+/* 圆角裁切：窗口是 `decorations:false + transparent:true`，外形完全由这里决定。
+ * 中间盒（body / #app）默认是不透明矩形，比 `.app-shell` 的圆角区域更大，
+ * 会把四个角盖成方角（系统弧已按 `DWMWCP_DONOTROUND` 关掉）。所以每一层都
+ * 按同一半径裁一次，且背景必须透明，桌面才从弧外透进来。 */
+#app {
+  border-radius: var(--shell-radius);
+  overflow: hidden;
 }
 
 body {

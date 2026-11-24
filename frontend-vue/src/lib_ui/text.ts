@@ -54,27 +54,3 @@ export function joinList(list: readonly string[]): string {
   return list.join(', ');
 }
 
-export interface MergedKeywords {
-  text: string;
-  added: string[];
-}
-
-/**
- * 把若干新词并进现有关键词串，**追加不覆盖**。
- *
- * 独立成函数的原因：这个「去重且保持原顺序」的规则被期望职位面板与抓取面板
- * 各写过一遍，任一处写错都会静默丢掉用户手填的关键词。
- */
-export function mergeKeywords(current: string, incoming: readonly string[]): MergedKeywords {
-  const merged = splitList(current);
-  const added: string[] = [];
-  for (const raw of incoming) {
-    const name = raw.trim();
-    if (name.length === 0) continue;
-    if (!merged.includes(name)) {
-      merged.push(name);
-      added.push(name);
-    }
-  }
-  return { text: joinList(merged), added };
-}

@@ -90,11 +90,6 @@ export interface ScoreDelta {
   dir: ScoreDir;
 }
 
-/** 有没有真的「变了」——决定要不要画箭头。两端齐且相等时为 false。 */
-export function deltaChanged(delta: ScoreDelta): boolean {
-  return delta.dir === 'up' || delta.dir === 'down';
-}
-
 /**
  * 由 `old_score` / `new_score` 组装展示数据。
  *
@@ -143,7 +138,7 @@ export function decisionScores(
  * 从 `reason` 文本里找形如 `a → b` / `a→b` / `→ b` 的分数对。
  *
  * 只认 ASCII 数字 + 可选空白 + 箭头；其它字符原样跳过。
- * 导出仅为便于单测（Leptos 版由同文件内的用例覆盖）。
+ * 导出仅为便于单测。
  */
 export function parseReasonScores(reason: string): [number | null, number | null] | null {
   const arrowAt = reason.indexOf('→');

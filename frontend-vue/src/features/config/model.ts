@@ -1,7 +1,7 @@
 /**
  * M3 配置页的纯逻辑（草稿 / diff / 掩码），与视图解耦便于单测。
  *
- * 对照 Leptos 版已退役，见 git 历史，提交 53d05cb 之前的配置草稿与状态机，但只保留冻结原型
+ * 配置草稿与状态机：只保留冻结原型
  * （UI-SPEC-chat-detach-v3 §11 v6）留下的三张卡：大模型 / 提示词 / 技能。
  * 高级卡（门槛 / 上限 / 预筛 / 关键词 / token）已被用户裁决删除，不在本页。
  *
@@ -30,9 +30,6 @@ export interface ConfigDraft {
   /** 话术温度，'0'~'2' 的文本 */
   greet_temperature: string;
 }
-
-/** 输入框控件类型：文本 / 数字。密钥用 password，单独处理。 */
-export type DraftKind = 'text' | 'number';
 
 /**
  * 参与编辑与 diff 的字段全集：六项文本 + 两个温度。

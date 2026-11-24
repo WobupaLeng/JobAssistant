@@ -14,10 +14,6 @@ export const THEME_KEY = 'aja.theme';
 
 export type Theme = 'dark' | 'light';
 
-export function isDark(theme: Theme): boolean {
-  return theme === 'dark';
-}
-
 export function flipTheme(theme: Theme): Theme {
   return theme === 'dark' ? 'light' : 'dark';
 }

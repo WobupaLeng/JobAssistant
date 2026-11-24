@@ -6,7 +6,7 @@
  * 外壳不 import 任何 `pages/`——`frontend-vue/AGENTS.md` §2 把「`AppShell`
  * 不得反向依赖 `pages`」列为硬约束，页面树由 `App.vue` 作为插槽传进来（C13）。
  *
- * 外壳**不调任何业务命令**（Leptos 版在外壳里 `app_info` / `get_scoring_spec` /
+ * 外壳**不调任何业务命令**（此前在外壳里 `app_info` / `get_scoring_spec` /
  * `llm_status` 各打一发，那是外壳替页面做了业务层的活）。外壳只负责：
  * 玻璃顶栏、概览业务尾段的落位（`.tb-embed`，见下）、页面骨架槽，
  * 以及首次挂载时的一次 `scrape_close`（关窗收尾：只 stop 不关 stdin 会让 Python 主循环残留）。
@@ -74,15 +74,6 @@ useGlassSupport();
            `display: contents`（`styles/app-shell.css` 口径见 vue-dashboard.css 的 `.tb-embed`）
            让这个空盒不产生新的 flex 容器：teleport 进来的元素是 `.topbar` 的直接 flex 子项。 -->
       <div class="tb-embed" data-testid="topbar-tail-mount" />
-
-      <!-- 主题按钮的落位槽（用户裁决：靠最右、紧贴「最小化」左侧）。
-           按钮由概览的 `TopbarTail` 原生渲染（`#theme-mount` 插槽），不用 Teleport：
-           早先的 `.theme-mount` 类名同时命中了聊天栏的 `.rail-panel`（二者并在
-           `frontend-vue/styles/layout.css` 的同一组背景规则里，类名粘连所致），
-           而 Teleport 目标解析到 DOM 中第一个匹配项，于是按钮被搬进聊天栏
-           并继承了那里的 layout 样式（用户 m03059 的错位截图）。
-           插槽只在概览页存在，因此 `#theme-mount` 是全局唯一的落位点。 -->
-      <div class="theme-mount" id="theme-mount" data-testid="theme-btn-mount" />
 
       <!-- 窗口控件（无边框窗口）：最右侧 最小化 / 最大化 / 关闭。
            图标是内联 SVG（stroke = currentColor），不用 `_` `□` `×` 字符：

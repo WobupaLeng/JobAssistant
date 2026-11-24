@@ -1,7 +1,7 @@
 /**
  * 自动投递的纯逻辑。
  *
- * 行为对照的是 Leptos 版的自动投递状态机（Leptos 版已退役，见 git 历史，提交 53d05cb 之前）。
+ * 自动投递状态机的行为口径。
  *
  * ## 节奏规则归属（不可改动）
  * 「下一条什么时候发」**完全由后端决定**（`core/domain/auto_greet.rs`：
@@ -152,7 +152,7 @@ export function replyNote(r: AutoNextReply): string {
 }
 
 /**
- * 点主按钮该做什么（Leptos `on_toggle` 的四分支）。
+ * 点主按钮该做什么（四个分支）。
  *
  * - idle / stopped → 先 `reset` 清零上一轮计数，再 `resume`；
  * - running → `pause('用户已暂停')`；

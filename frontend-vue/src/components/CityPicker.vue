@@ -2,11 +2,11 @@
 /**
  * 城市选择器：省 → 市 两级联动 + 输入框搜索（单值 9 位编码）。
  *
- * 为什么要它：Leptos 版是 `features/scrape/filter.rs:1100-1115` 的 `<select>`，
+ * 为什么要它：早期是 `features/scrape/filter.rs:1100-1115` 的 `<select>`，
  * 只有 8 个热门城市写死；BOSS 官方表有 34 省 / 373 市，`<select>` 铺不下。
  *
  * 契约（不可丢）：
- * 1. `data-testid="scrape-filter-city"` 必须留在**触发按钮**上——Leptos 版这个
+ * 1. `data-testid="scrape-filter-city"` 必须留在**触发按钮**上——早期这个
  *    testid 挂在 `<select>` 上，Vue 版换成按钮后 id 字面量不变，否则下游 E2E 与
  *    `filter.rs` 的锚点全部失联；
  * 2. 城市是**单值 string**，本组件只 emit 一个 9 位编码，不碰多选；

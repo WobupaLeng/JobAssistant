@@ -6,7 +6,7 @@
  * 1. **双写**：`localStorage["aja.scrape_filter_draft"]` 只作兜底。
  *    真正的权威是后端 `app_config.scrape_defaults`——它跨机器、跨重装都在。
  *    顺序是「后端先、本地后」，`applyBackend()` 返回值 0 才回落到本地草稿
- *    （Leptos `filter.rs:970-989`）。
+ *    （口径同 `filter.rs:970-989`）。
  * 2. **只发 diff**：`diffArgs()` 只输出变了的 14 个驼峰键。整份回传会把
  *    用户没动过的项也写一遍，后端 `null` 语义是「删除该键」，等于每次保存
  *    都把未设置的项清空（`filter.rs:922-950`）。
@@ -17,7 +17,7 @@
  *
  * **搜索关键词不在草稿里**（`exclude` 是「排除关键词」，两回事）：
  * 搜索词直接进 `scrape_start` 的 `keywords`，不进 `ScrapeDefaultsArgs` 的
- * 14 个键——Leptos 版把 `keywords` 放在页面层持有，`BACKEND_KEYS` 表里
+ * 14 个键——`keywords` 由页面层持有，`BACKEND_KEYS` 表里
  * 只有 `排除关键词 → excludeKeywords`。把两者混成一条，界面会把「排除词」
  * 当搜索词发出去，搜不到任何东西且不报错。本文件的 `searchKeywords()`
  * 是这条边界的唯一出口。
@@ -599,9 +599,6 @@ export function customSalaryText(low: string, high: string): string {
   const code = salaryCode(low, high);
   return code === null ? '' : salaryLabel(code);
 }
-
-/** 薪资上限哨兵值：与 SALARY_OPEN_HIGH 同源，别另写 9999。 */
-export const SALARY_OPEN = SALARY_OPEN_HIGH;
 
 // ---------------------------------------------------------------- 搜索关键词
 

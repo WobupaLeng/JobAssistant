@@ -38,12 +38,6 @@ export const GLASS_LIGHT: GlassThemeParams = {
 };
 
 /**
- * 同屏折射预算（规格 L2-3 / SPEC-003 §4）：IntersectionObserver 可见卡片只给前 12 张挂滤镜，
- * 超出退回纯第一层。纯常量，IO 编排在 use-glass-budget.ts。
- */
-export const GLASS_MAX_FILTERED_CARDS = 12;
-
-/**
  * P0 背景副本反平移偏移（规格 2.2-Q2 / SPEC-003 裁定 6，纯函数）。
  *
  * 克隆副本是「未滚动」的内容快照（cloneNode 不复制 scrollTop），铺在面板局部原点；

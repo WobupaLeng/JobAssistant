@@ -141,8 +141,8 @@ const DWMWA_SYSTEMBACKDROP_TYPE: u32 = 38;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 const DWMSBT_TRANSIENTWINDOW: i32 = 3;
 
-/// `DWMWA_WINDOW_CORNER_PREFERENCE` 的属性号与「不圆角」取值（Win11 22H2+）。
-/// 顺序有讲究：它在 `apply_round_corners` 之前定义，那里只给值起名、常量在这里。
+/// `DWMWA_WINDOW_CORNER_PREFERENCE` 的属性号（Win11 22H2+）。
+/// 取值常量在 `apply_round_corners` 旁边，那里是唯一消费点。
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
 
@@ -252,22 +252,21 @@ fn apply_material_backdrop(window: &tauri::WebviewWindow) -> bool {
     }
 }
 
-/// Win11 的 DWM 圆角偏好：直角 / 圆角。
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-const DWMWCP_DONOTROUND: i32 = 1;
+/// `DWMWA_WINDOW_CORNER_PREFERENCE` 的取值：直角 / 系统圆角。
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 const DWMWCP_ROUND: i32 = 2;
 
-/// `DWMWA_WINDOW_CORNER_PREFERENCE`（Win11 22H2+）：本窗口的四个角交给 DWM 画成圆角。
+/// `DWMWA_WINDOW_CORNER_PREFERENCE`（Win11 22H2+）：本窗口四角交给 DWM 画圆角。
 ///
-/// **为什么改成圆角**：窗口是 `decorations: false` + `transparent: true`，桌面磨砂与阴影
-/// 由 DWM 沿**自己的**外框裁；外框若是直角，磨砂就在四个直角处铺进方形边界，而可见内容
-/// 已被前端 `.app-shell` 的圆角裁过一圈 —— 两者错位，角上会露出系统磨砂的方角。
-/// 让 DWM 画圆角后，系统磨砂、阴影与前端圆角三者终于对齐。
+/// **为什么必须让系统画**：窗口是 `decorations: false` + `transparent: true`，WebView
+/// 客户区是透明矩形，桌面会从矩形的四个角透进来。前端 `.app-shell` 的 `border-radius`
+/// 只裁它自己那一层，裁不到窗口矩形 —— 结果是「弧线画出来了，弧外仍是一块灰色方角」。
+/// 能裁窗口外形的只有 DWM，所以这里必须交给它（用户 m03488 的角点截图）。
 ///
-/// **代价（前端必须同时改）**：DWM 的圆角落在窗口边缘上，外壳因此必须退开
-/// `--win-corner-cut` 的透明内边距，否则外壳自己的圆角被 DWM 的弧裁掉两次。
-/// Win10 没有这个属性，调用返回非 0，忽略即可：那时外壳的内边距只留出一圈透明缝。
+/// 弧径是 Win11 的固定值 8px。前端 `--shell-radius` 取同一个值并按系统弧内缩，
+/// 两层弧才同心；外壳的 16px 内部圆角留给卡片，不与窗口外形争。
+///
+/// 调用失败（Win10 没有这个属性）返回非 0，忽略即可：Win10 本来就不给无边框窗口画弧。
 fn apply_round_corners(window: &tauri::WebviewWindow) {
     #[cfg(target_os = "windows")]
     {
@@ -291,6 +290,7 @@ fn apply_round_corners(window: &tauri::WebviewWindow) {
         let _ = window;
     }
 }
+
 /// 验证脚本用的临时诊断开关：设 `AJA_DIAG_WINDOW=1` 时启动即打印窗口样式位与特效调用结果。
 /// 它不改变任何业务行为，只输出读数，所以可以长期留在代码里。
 fn window_diag(window: &tauri::WebviewWindow) {
@@ -640,8 +640,8 @@ pub fn run() {
             if let Some(win) = app.get_webview_window("main") {
                 window_diag(&win);
                 apply_blur(&win);
-                // 窗口四角由 DWM 画成直角，圆角只由前端 .app-shell 的 --radius 决定，
-                // 否则方形系统外框与应用圆角之间会多出四个直角三角。
+                // 窗口四角由 DWM 按 8px 画弧：透明客户区的方角只能由系统裁掉，
+                // 前端外壳与它同心内缩（--shell-radius），不再自己另画一套外形。
                 apply_round_corners(&win);
             }
 

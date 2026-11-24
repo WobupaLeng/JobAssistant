@@ -6,7 +6,7 @@
  * 后端 `#[serde(rename_all = "snake_case")]` 的 struct 甚至连入参都可能只认蛇形，
  * 转换层多一步就多一处静默失效。
  *
- * 与 Leptos 版相比的修正（以 Rust 侧命令层为准，见 ARCH-003 §5.3）：
+ * 与命令层对齐的修正（以 Rust 侧命令层为准，见 ARCH-003 §5.3）：
  * - `LlmStatus.key_hint` / `model` 是 `Option<String>` → `string | null`；
  * - `ScrapeProgress.last_log` / `last_title` / `finished_reason` 同为可空；
  * - `ScrapeUpdate` 的 `job.score` 是 `Option<u8>` → `number | null`；
@@ -37,11 +37,6 @@ export interface AppInfo {
 export interface ScoringSpec {
   score_max: number;
   score_min_default: number;
-}
-
-/** 占位 spec：分数字段在拿到真实 spec 前显示「…」。 */
-export function emptyScoringSpec(): ScoringSpec {
-  return { score_max: 0, score_min_default: 0 };
 }
 
 /**

@@ -3,7 +3,7 @@
 
   外壳照冻结原型 job-detail-*：job-detail-drawer / -title / -close-btn /
   -body / -reject-btn / -deliver-btn。
-  正文与字段口径照 Leptos features/jobs/drawer.rs（原型正文只是占位串）。
+  正文与字段口径照后端口径（原型正文只是占位串）。
   滑入动画用 C17 的 drawer-in-play，退场不加类（原型用 .is-open 过渡）。
 -->
 <script setup lang="ts">

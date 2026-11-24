@@ -2,7 +2,7 @@
  * `commands_db.rs` 的 15 条命令。
  *
  * 载荷形状**逐条照抄** `backend-tauri/src/commands_db.rs` 的签名与
- * `src/api/mod.rs`（Leptos 版）的构造方式，**不做统一化**（AGENTS.md C2）：
+ * `src/api/mod.rs` 的构造方式，**不做统一化**（AGENTS.md C2）：
  * - 命令层是 `fn foo(state, args: FooArgs)` → 包一层 `{ args }`；
  * - 命令层是平铺参数 → 键名与 Rust 参数名同名（需要驼峰的由 `#[serde(alias)]` 兜）；
  * - `score_job(args: ScoreArgs)` 是**例外**：整个 struct 就是载荷，没有 `args` 层。
@@ -31,7 +31,7 @@ import type {
  *
  * 两处细节都不能省：
  * 1. 字段名是**蛇形**（`min_score` / `include_rejected`），因为结构体本身没有
- *    `rename_all`，只有这两个字段带驼峰 `alias`；照 Leptos 版发蛇形最稳。
+ *    `rename_all`，只有这两个字段带驼峰 `alias`；照后端字段发蛇形最稳。
  * 2. `include_rejected` / `rejected_only` / `ascending` 三个布尔**恒发**：
  *    Rust 侧它们是 `bool` 而不是 `Option<bool>`，前端不发就会退化成 `false`，
  *    而「页签给了但 include_rejected 被吞掉」会列出看不懂的混合列表。

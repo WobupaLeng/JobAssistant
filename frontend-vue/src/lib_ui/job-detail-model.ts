@@ -1,7 +1,7 @@
 /**
  * 岗位详情抽屉的纯视图模型。
  *
- * 真源是 Leptos `features/jobs/drawer.rs`（字段口径与逐字文案）+ 冻结原型
+ * 真源是后端 JD 字段口径与逐字文案 + 冻结原型
  * `prototypes/ui-v1/index.html` 的 `job-detail-*` 骨架（可测锚点）。
  * 两边冲突时**以原型为准的只有外壳**（testid / 头部 / 底部动作条），
  * 正文内容仍按 .rs：原型正文是占位串，.rs 才是真实字段。
@@ -194,7 +194,7 @@ export function needsJdFetch(job: Job): boolean {
  * `job-detail-deliver-btn`，§16.4 裁决保留）。
  *
  * 「不投递」对已排除的岗位反向变成「允许投递」——否则抽屉里会出现一个
- * 点了没反应的按钮（Leptos 卡片上的 `mark_label` 同口径）。
+ * 点了没反应的按钮（卡片上的 `mark_label` 同口径）。
  */
 export type DetailAction = 'reject' | 'allow' | 'deliver';
 /**

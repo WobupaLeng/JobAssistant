@@ -9,7 +9,7 @@ import type { GreetReply } from '../types';
  * 生成一段打招呼话术（**不发出去**）。
  *
  * 载荷结构：`{ args: GreetArgs }`，键名驼峰（`jobId` / `findByCompany` / `reply` / `useLlm`）。
- * `useLlm` 恒为 `true`：Leptos 版也是写死 `true`，走后端配置里的
+ * `useLlm` 恒为 `true`：前端写死 `true`，走后端配置里的
  * 「启用大模型」开关来判断最终用 LLM 还是规则模板——前端不参与这个决策。
  *
  * 三种用法：

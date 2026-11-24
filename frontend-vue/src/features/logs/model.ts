@@ -1,14 +1,14 @@
 /**
  * M4 决策记录页的纯逻辑：运行日志 seq 游标、决策行视图模型、筛选。
  *
- * 对照 Leptos 版已退役，见 git 历史，提交 53d05cb 之前的决策记录状态机，
+ * 决策记录状态机：
  * 但运行日志增量改用 **seq 游标**（根 AGENTS.md §7.1）：
  * 后端 `list_logs(since)` 是闭区间（ts_ms >= since），游标那一毫秒会重送；
  * 旧版按 (ts,level,message) 多重集去重，同毫秒多条会误删。这里改为
  * 「since 走时间戳保证不漏 + afterSeq 过滤保证不重」，恰好一次。
  *
  * 决策行按冻结原型的 `.dl-row` 四列网格渲染（时间 / 行为 / 分数变化 / 原因），
- * 不用 Leptos 的五列表格。分数变化复用 lib_ui/logfmt 的 scoreDelta（两列皆 null
+ * 不用五列表格。分数变化复用 lib_ui/logfmt 的 scoreDelta（两列皆 null
  * 时回落 reason 解析，绝不显示 0 → 0）。
  */
 
@@ -28,7 +28,7 @@ import {
   type ScoreDelta,
 } from '../../lib_ui/logfmt';
 
-/** 自动刷新间隔（与 Leptos AUTO_REFRESH_MS 一致）。 */
+/** 自动刷新间隔。 */
 export const AUTO_REFRESH_MS = 2000;
 /** 决策记录每页条数（无限滚动一次拉这么多；后端 limit=0 会回落 200）。 */
 export const DECISION_PAGE_SIZE = 10;

@@ -99,12 +99,3 @@ export function syncCanvas(innerWidth: number): { scale: number; railWidth: numb
   }
   return { scale, railWidth, detachWidth };
 }
-
-/** 读回当前 `--ui-scale`（原型 `uiScale()` 的等价物），读不到就是 1。 */
-export function readUiScale(): number {
-  const root = typeof document !== 'undefined' ? document.documentElement : null;
-  if (!root) return 1;
-  const raw = getComputedStyle(root).getPropertyValue('--ui-scale');
-  const n = Number.parseFloat(raw);
-  return Number.isFinite(n) && n > 0 ? n : 1;
-}

@@ -395,7 +395,7 @@ async function refreshProgress(): Promise<void> {
   } catch {
     /* 同上：进度是辅助信息 */
   }
-  // 运行中才拉事件流；停了立刻不再拉（Leptos 的 drain 定时器同口径）。
+  // 运行中才拉事件流；停了立刻不再拉（与 drain 定时器同口径）。
   if (progress.value.running) await drainFeed();
   // 进度是「要不要轮询」的唯一判据，这里统一收口：抓取一开就挂上 tick，
   // 一停就卸掉。调用方不必各自记得补一句 syncTick（挂载、启动、停止、
@@ -463,7 +463,7 @@ function stopLogPolling(): void {
 /**
  * 事件流：`scrape_drain(50)` 取增量，转成行追加（`panel.rs` 的 drain 同口径）。
  *
- * 只在**运行中**拉：空闲时拉是白烧 CPU（Leptos 注释原话）。失败静默——
+ * 只在**运行中**拉：空闲时拉是白烧 CPU。失败静默——
  * 事件流是辅助信息，不该盖住真正的错误。
  */
 async function drainFeed(): Promise<void> {
@@ -543,20 +543,20 @@ async function persistDraft(): Promise<void> {
 }
 
 /**
- * 筛选面板的「应用」= 保存条件 **并立刻开始抓取**（用户裁决 m02737）。
+ * 筛选抽屉的「应用」= **只保存条件**（用户裁决 m03447）。
  *
- * 顺序不能反：先把草稿落库（`set_scrape_defaults`），再抓取。反过来的话抓取读到的是
- * 上一版条件，用户会以为「我刚改的城市没生效」。保存失败也不拦抓取 —— 条件是本地
- * 兜底写过的，提示归提示，抓取照走。
+ * 早先这里会连锁「登录把关 + 开始抓取」（m02737），但抽屉是改条件的地方，
+ * 点「应用」的意图是「这套条件我认了」，不是「立刻开工」。抓取仍由抓取条上的
+ * 「开始抓取」发起，那里才做登录把关。
  *
- * 登录把关交给 `ensureLogin()`：未登录先问一句，确认后拉起浏览器扫码。
+ * 顺序不能反：先落库（`set_scrape_defaults`）再关抽屉；关早了用户看不到保存
+ * 结果。保存失败也不拦关闭 —— 条件已由本地兜底写过，提示归提示。
  */
 async function applyNow(): Promise<void> {
   if (saveTimer !== null) clearTimeout(saveTimer);
   await persistDraft();
+  filterNote.value = '筛选条件已保存';
   filterOpen.value = false;
-  if (!(await ensureLogin())) return;
-  await onStart();
 }
 
 /** 「应用」入口把关闭抽屉的时机交给这里：先关，用户才看得到抓取条上的进度。 */
@@ -1002,6 +1002,12 @@ function onGridClick(e: MouseEvent): void {
 
 // ---------------------------------------------------------------- 抓取
 
+/**
+ * 「开始抓取」：**先登录把关，再抓取**（用户裁决 m03432）。
+ *
+ * 抽屉本身不由这里打开；唯一的例外是关键词为空——抓取根本没法发起，弹抽屉
+ * 让用户就地补条件（用户裁决 m03446）。
+ */
 async function onStart(): Promise<void> {
   if (startDisabled(starting.value, progress.value.running)) return;
   // 搜索词只认 `keywords`。为空就拦下来，交给后端回落默认词表会
@@ -1012,6 +1018,8 @@ async function onStart(): Promise<void> {
     filterOpen.value = true;
     return;
   }
+  // 登录把关放在发请求之前：未登录时 scrape_start 必然失败，先问再走。
+  if (!(await ensureLogin())) return;
   starting.value = true;
   try {
     await scrapeStart({
@@ -1041,7 +1049,7 @@ async function onStop(): Promise<void> {
 }
 
 /**
- * 两处限额输入框的保存动作（Leptos `on_max_jd` / `on_min_score` 同口径）。
+ * 两处限额输入框的保存动作（`on_max_jd` / `on_min_score` 同口径）。
  *
  * 只走 `set_limit`——`min_score` 与 `max_jd` 都不在 `set_app_config` 的
  * `WRITABLE_KEYS` 里，塞进 patch 会被**静默跳过**（C11）。

@@ -2,7 +2,7 @@
  * `commands_scrape.rs` 的 10 条命令 + 登录态 4 条（`login_*` / `logout` 同文件）。
  *
  * 两种载荷形状混在一起，**逐条按签名走**（AGENTS.md C2）：
- * - `scrape_start(args: ScrapeArgs)` → 包 `{ args }`（Leptos 版平铺发是错的）；
+ * - `scrape_start(args: ScrapeArgs)` → 包 `{ args }`（平铺发会被拒）；
  * - `scrape_drain(limit)` / `login_start(platform)` / `login_status(platform)` /
  *   `login_save(platform)` / `logout(platform)` / `session_open(platform, page)` →
  *   平铺，键名与参数名同名。

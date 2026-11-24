@@ -265,10 +265,6 @@ function salaryCodeLabel(code: string): string {
               {{ e.name }}
             </button>
           </div>
-          <div class="f-line" data-testid="filter-suggest">
-            <span class="spacer"></span>
-            <span class="dim filter-mini">推荐</span>
-          </div>
           <div class="f-chips">
             <button
               v-for="(kw, i) in RECOMMEND_KEYWORDS"
