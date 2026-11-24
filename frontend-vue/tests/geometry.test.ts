@@ -221,12 +221,16 @@ describe('三窗固定高 / 敏感库 720 / A54 方块', () => {
     expect(css).toContain('--detach-w: 0px');
   });
 
-  it('<1200 横向滚动不裁剪：body 横向出口开在 vue-dashboard.css（基线 §2.3，Rev6 偏差③）', () => {
-    const dash = stripComments(read('styles/vue-dashboard.css'));
-    const body = dash.match(/(?:^|\n)body\s*\{([^}]*)\}/);
-    expect(body).not.toBeNull();
-    expect(body![1]).toContain('overflow-x: auto');
-    expect(body![1]).toContain('overflow-y: hidden');
+it('窄窗不出现整窗滚动条：body 两个方向都裁死，宽度交给各列（用户 m03014 裁决）', () => {
+  const dash = stripComments(read('styles/vue-dashboard.css'));
+  const body = dash.match(/(?:^|\n)body\s*\{([^}]*)\}/);
+  expect(body).not.toBeNull();
+  // 早先这里放开 overflow-x: auto，窗口 minWidth 1200 后被 body 自己当成可滚内容，
+  // 整窗多出一条横向滚动条（用户 m03014「最窄窗口大小底部出现了滚动条」）。
+  // 现在两个方向都裁死，横向裁切交给 .app-shell 的 overflow:hidden。
+  expect(body![1]).not.toContain('overflow-x: auto');
+  expect(body![1]).toContain('overflow-x: hidden');
+  expect(body![1]).toContain('overflow-y: hidden');
     // 1200 基线宿主仍是 .app-shell；契约宿主 tokens.css 的 body overflow:hidden 不改。
     expect(dash).toContain('min-width: 1200px');
     expect(read('styles/tokens.css')).toMatch(/body\s*\{[^}]*overflow:\s*hidden/);

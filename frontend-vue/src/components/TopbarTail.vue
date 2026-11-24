@@ -53,6 +53,7 @@ const props = withDefaults(
     palettes?: readonly PaletteDef[];
     fontScaleId?: FontScaleId;
     fontScales?: readonly { id: FontScaleId; label: string }[];
+    themePanelOpen?: boolean;
   }>(),
   {
     llmPrefilter: LLM_PREFILTER_DEFAULT,
@@ -65,6 +66,7 @@ const props = withDefaults(
     palettes: () => PALETTES,
     fontScaleId: 'm',
     fontScales: () => FONT_SCALES,
+    themePanelOpen: false,
   },
 );
 
@@ -76,6 +78,8 @@ const emit = defineEmits<{
   (e: 'toggle-sensitive'): void;
   (e: 'open-config'): void;
   (e: 'toggle-theme'): void;
+  (e: 'pick-theme-mode', mode: 'dark' | 'light'): void;
+  (e: 'toggle-theme-panel', next: boolean): void;
 }>();
 
 /**
@@ -102,9 +106,18 @@ interface PanelBox {
 const PANEL_MIN_WIDTH = 232;
 const VIEW_GAP = 8;
 
-const themeOpen = ref(false);
-/** `.theme-mount` 是否存在：单测里独立挂载本组件时不存在，落回就地渲染。 */
-const themeMountReady = ref(false);
+/** 明暗两档（顺序即渲染顺序）。 */
+const MODES: readonly { id: 'dark' | 'light'; label: string }[] = [
+  { id: 'dark', label: '☾ 深色' },
+  { id: 'light', label: '☀ 浅色' },
+];
+
+/**
+ * 面板开合：由页面通过 `themePanelOpen` 持有真值，本组件只发意图。
+ * 面板挂在 `<body>` 上（Teleport），按钮留在顶栏「配置 · 敏感库」之后，
+ * 两者不在同一棵子树上，页面用一份状态统一管住更不容易走形。
+ */
+const themeOpen = computed(() => props.themePanelOpen);
 const triggerEl = ref<HTMLButtonElement | null>(null);
 const panelEl = ref<HTMLElement | null>(null);
 const box = ref<PanelBox | null>(null);
@@ -124,15 +137,16 @@ function placePanel(): void {
 }
 
 function toggleThemePanel(): void {
-  themeOpen.value = !themeOpen.value;
-  if (!themeOpen.value) return;
+  const next = !themeOpen.value;
+  emit('toggle-theme-panel', next);
+  if (!next) return;
   placePanel();
   void nextTick(() => panelEl.value?.querySelector<HTMLElement>('button')?.focus());
 }
 
 function closeThemePanel(): void {
   if (!themeOpen.value) return;
-  themeOpen.value = false;
+  emit('toggle-theme-panel', false);
   triggerEl.value?.focus();
 }
 
@@ -142,7 +156,7 @@ function onOutsidePointer(ev: PointerEvent): void {
   if (!(target instanceof Node)) return;
   if (triggerEl.value?.contains(target)) return;
   if (panelEl.value?.contains(target)) return;
-  themeOpen.value = false;
+  emit('toggle-theme-panel', false);
 }
 
 function onDocumentKeydown(ev: KeyboardEvent): void {
@@ -165,17 +179,6 @@ if (typeof document !== 'undefined') {
   window.addEventListener('scroll', placePanel, true);
 }
 
-/**
- * 落位槽必须等到 mount 之后再查。
- *
- * `<script setup>` 顶层跑在 setup 阶段，那时整棵组件树还没提交成 DOM，
- * `querySelector('.theme-mount')` 恒为 null —— 主题按钮会永远留在 `.tb-tail` 里，
- * 看起来就是「位置没有变」。`onMounted` 里 AppShell 的头部已经提交，槽必然可见。
- * `{ once: true }`：槽由壳渲染、寿命长于本组件，只需判定一次。
- */
-onMounted(() => {
-  themeMountReady.value = document.querySelector('.theme-mount') !== null;
-});
 onBeforeUnmount(() => {
   if (typeof document === 'undefined') return;
   document.removeEventListener('pointerdown', onOutsidePointer, true);
@@ -275,26 +278,22 @@ function onPrefilterInput(ev: Event): void {
     >
       敏感库
     </button>
-    <!-- 主题按钮不在这里：它被移到顶栏最右、紧贴窗口控件「最小化」的左侧。
-         落位点在 AppShell 的 `.theme-mount`（本组件是 `.tb-embed` 的内容，排不到那里）。
-         面板仍由本组件持有并 Teleport 到 body，所以这里只留挂载槽。 -->
-    <Teleport to=".theme-mount" :disabled="!themeMountReady" defer>
-      <button
-        ref="triggerEl"
-        class="btn btn-sm btn-ghost theme-btn"
-        type="button"
-        data-testid="theme-toggle"
-        aria-haspopup="dialog"
-        :aria-expanded="themeOpen ? 'true' : 'false'"
-        aria-controls="theme-panel"
-        title="主题：明暗 / 主题色 / 字号"
-        @click="toggleThemePanel"
-      >
-        <span aria-hidden="true">{{ themeLabel === '深色' ? '☾' : '☀' }}</span>
-        <span class="theme-btn-label">主题</span>
-      </button>
-    </Teleport>
-
+    <!-- 主题按钮留在这一行末尾（用户 m03059：不要脱离「配置 · 敏感库」跑到窗口控件旁）。
+         按钮与面板是同一个 `<body>` 外的两层宿主，页面用 `themePanelOpen` 统管开合。 -->
+    <button
+      ref="triggerEl"
+      class="btn btn-sm btn-ghost theme-btn"
+      type="button"
+      data-testid="theme-toggle"
+      aria-haspopup="dialog"
+      :aria-expanded="themeOpen ? 'true' : 'false'"
+      aria-controls="theme-panel"
+      title="主题：明暗 / 主题色 / 字号"
+      @click="toggleThemePanel"
+    >
+      <span aria-hidden="true">{{ themeLabel === '深色' ? '☾' : '☀' }}</span>
+      <span class="theme-btn-label">主题</span>
+    </button>
     <Teleport to="body">
       <div
         v-if="themeOpen && box"
@@ -318,6 +317,20 @@ function onPrefilterInput(ev: Event): void {
           >
             {{ themeLabel === '深色' ? '☾ 深色' : '☀ 浅色' }}
           </button>
+          <!-- 深/浅两档各自一个按钮：比单个「翻转」按钮少一次歧义（用户可能在面板里连点），
+               也让「明暗」这一行与下面的主题色、字号两行视觉对齐。 -->
+          <div class="theme-modes" data-testid="theme-mode-group">
+            <button
+              v-for="m in MODES"
+              :key="m.id"
+              type="button"
+              class="btn btn-sm btn-ghost theme-mode-btn"
+              :class="{ 'is-active': (themeLabel === '深色' ? 'dark' : 'light') === m.id }"
+              :data-testid="`theme-mode-${m.id}`"
+              :aria-pressed="(themeLabel === '深色' ? 'dark' : 'light') === m.id"
+              @click="emit('pick-theme-mode', m.id)"
+            >{{ m.label }}</button>
+          </div>
         </div>
         <div class="theme-row">
           <span class="theme-row-label">主题色</span>

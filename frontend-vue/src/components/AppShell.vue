@@ -76,9 +76,13 @@ useGlassSupport();
       <div class="tb-embed" data-testid="topbar-tail-mount" />
 
       <!-- 主题按钮的落位槽（用户裁决：靠最右、紧贴「最小化」左侧）。
-          概览页的 `TopbarTail` 把按钮 teleport 到这里；宽度为 0 的空盒，
-          只在有内容时由 CSS 让出 8px 间距，其余页面不留空白。 -->
-      <div class="theme-mount" data-testid="theme-btn-mount" />
+           按钮由概览的 `TopbarTail` 原生渲染（`#theme-mount` 插槽），不用 Teleport：
+           早先的 `.theme-mount` 类名同时命中了聊天栏的 `.rail-panel`（二者并在
+           `frontend-vue/styles/layout.css` 的同一组背景规则里，类名粘连所致），
+           而 Teleport 目标解析到 DOM 中第一个匹配项，于是按钮被搬进聊天栏
+           并继承了那里的 layout 样式（用户 m03059 的错位截图）。
+           插槽只在概览页存在，因此 `#theme-mount` 是全局唯一的落位点。 -->
+      <div class="theme-mount" id="theme-mount" data-testid="theme-btn-mount" />
 
       <!-- 窗口控件（无边框窗口）：最右侧 最小化 / 最大化 / 关闭。
            图标是内联 SVG（stroke = currentColor），不用 `_` `□` `×` 字符：

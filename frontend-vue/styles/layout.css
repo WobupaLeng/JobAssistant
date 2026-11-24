@@ -20,16 +20,18 @@
   gap: 0;
   /* M3：应用四角圆角 + 桌面磨砂。窗口本身透明，圆角在外壳上绘制；
    * 磨砂由令牌 --glass-0 / --blur-0 提供，不另写颜色字面量。 */
-  /* 四周退开一圈透明缝：DWM 给窗口画圆角，它的弧落在窗口边缘，外壳贴边会被再裁一次
-   * （边线在四角断掉）。内缩量与圆角一起定义角弧，见 tokens.css 的 --win-corner-cut。 */
-  /* 用 margin 内缩而不是 padding：margin 不参与盒高，`height: 100%` 再叠加
-   * `margin: 2px` 会让边界盒比窗口高 4px —— 最窄窗口下底部就冒出滚动条
-   * （用户 m03014）。改成 `height: calc(100% - 2 * cut)` 后总高恰好等于视口，
-   * `#app` 上的 `overflow: hidden` 再兜一层，绝不再出现滚动条。 */
-  margin: var(--win-corner-cut);
-  height: calc(100% - var(--win-corner-cut) * 2);
-  /* 圆角 = 系统弧半径 − 内缩量，两者同心；外壳与卡片的角弧仍共用一套令牌 */
-  border-radius: calc(var(--radius) - var(--win-corner-cut));
+  /* 内容区铺满整个窗口（用户 m03129「先把内容区占满整个窗口，保持顶部无间距」）：
+   * 外壳不再四周内缩，`margin: 0` + `height: 100%`，顶部第一个元素是 46px 顶栏，
+   * 页面内容紧贴它下沿。
+   *
+   * 代价与规避：DWM 的系统弧画在窗口边缘，外壳贴边时四角会被系统弧再裁一次。
+   * `overflow: hidden` 让外壳先按 `--radius` 自裁圆角，系统的 1px 边线在弧段上被
+   * 裁掉、在直边段照常显示，不会出现「边线在四角断开」的断口；角弧仍由
+   * `var(--radius)` 一处令牌定义。`height: 100%` 也不再叠加 margin，最窄窗口
+   * 不会多出 4px（用户 m03014 的滚动条）。 */
+  margin: 0;
+  height: 100%;
+  border-radius: var(--radius);
   background: var(--glass-0);
   -webkit-backdrop-filter: blur(var(--blur-0)) saturate(var(--saturate-0));
   backdrop-filter: blur(var(--blur-0)) saturate(var(--saturate-0));

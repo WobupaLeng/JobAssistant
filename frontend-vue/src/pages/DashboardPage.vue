@@ -232,6 +232,24 @@ applyPalette(paletteId.value, currentTheme());
 const fontScaleId = ref<FontScaleId>(readFontScale());
 applyFontScale(fontScaleId.value);
 
+/**
+ * 主题下拉面板的开合（用户裁决：主题 / 主题色 / 字号收成一枚按钮）。
+ *
+ * 开关住在 `components/TopbarTail.vue`（它是面板与按钮的共同父级），这里只做转发：
+ * 面板点外部关闭时它会 emit 一次 false，页面状态跟着回写，避免两边各记一份。
+ */
+const themePanelOpen = ref(false);
+function onToggleThemePanelHandler(next: boolean): void {
+  themePanelOpen.value = next;
+}
+/** 面板里点「深色 / 浅色」：直接指定主题，不翻转（用户可能在面板里连点两次）。 */
+function onPickThemeMode(mode: 'dark' | 'light'): void {
+  const t = flipTheme(mode);
+  applyTheme(t);
+  themeLabel.value = t === 'dark' ? '深色' : '浅色';
+  applyPalette(paletteId.value, t);
+}
+
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let logTimer: ReturnType<typeof setTimeout> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1240,6 +1258,8 @@ watch(
             applyPalette(paletteId, t);
           }
         "
+        @pick-theme-mode="onPickThemeMode"
+        @toggle-theme-panel="onToggleThemePanelHandler"
       />
     </Teleport>
 

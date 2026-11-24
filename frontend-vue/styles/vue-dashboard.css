@@ -1014,7 +1014,10 @@
  * 纵向仍锁死（各列自己滚）。tokens.css 不动，此为 Vue 侧覆盖；
  * index.html 的防首帧闪白内联规则只匹配挂载前，不受影响。 */
 body {
-  overflow-x: auto;
+  /* 别再放开横向滚动（用户 m03014）：窗口 minWidth 1200，`body` 拿到 1200 宽
+   * 之后自己再滚，等于给整窗加了一条横向滚动条，右侧内容被推到视口外还看不全。
+   * 横向裁切交给外壳的 overflow:hidden，各列按 min-width 自己在列内处置。 */
+  overflow-x: hidden;
   overflow-y: hidden;
 }
 
@@ -1157,6 +1160,18 @@ body {
 }
 
 .theme-panel .font-scale-btn.is-active {
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
+/* 明暗两档并排（用户 m03059）：与下面的主题色圆点、字号按钮同一行内节奏。 */
+.theme-modes {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.theme-panel .theme-mode-btn.is-active,
+.theme-panel .theme-mode.is-active {
   color: var(--primary);
   background: var(--primary-soft);
 }
