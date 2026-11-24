@@ -113,7 +113,7 @@ defineExpose({
   <Teleport to="body">
     <div v-if="open" class="sensitive-backdrop" data-testid="sensitive-backdrop" @click="emit('close')"></div>
     <aside
-      class="sensitive-panel glass-l2"
+      class="sensitive-panel glass-l2 hl-surface"
       :class="{ 'is-open': open }"
       data-testid="sensitive-panel"
       :aria-hidden="!open"
@@ -189,7 +189,7 @@ defineExpose({
           <article
             v-for="r in visible"
             :key="r.id"
-            class="sensitive-card"
+            class="sensitive-card hl-surface"
             :data-testid="`sensitive-card-${r.id}`"
           >
             <input

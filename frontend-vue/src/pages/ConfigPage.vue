@@ -19,6 +19,11 @@ import {
   isEmptyPatch,
   keyMaskText,
   keyPlaceholder,
+  TEMPERATURE_DEFAULT_GREET,
+  TEMPERATURE_DEFAULT_SCORE,
+  TEMPERATURE_MAX,
+  TEMPERATURE_MIN,
+  temperatureError,
   type ConfigDraft,
 } from '../features/config/model';
 import ConfigSection from '../components/config/ConfigSection.vue';
@@ -47,6 +52,10 @@ const skillOpen = ref(true);
 const maskText = computed(() => keyMaskText(config.value));
 const keyPh = computed(() => keyPlaceholder(config.value));
 
+/* 温度即时校验：输入过程中就给提示，保存时非法值本来也进不了 patch。 */
+const scoreTempError = computed(() => temperatureError(draft.value.temperature));
+const greetTempError = computed(() => temperatureError(draft.value.greet_temperature));
+
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -73,6 +82,11 @@ async function load(): Promise<void> {
 async function save(): Promise<void> {
   if (saving.value) return;
   note.value = '';
+  // 先挡非法温度：静默跳过会让用户以为「保存成功但没生效」
+  if (scoreTempError.value !== null || greetTempError.value !== null) {
+    note.value = `保存失败：${scoreTempError.value ?? greetTempError.value}`;
+    return;
+  }
   const patch = buildPatch(draft.value, stored.value);
   if (isEmptyPatch(patch)) {
     note.value = '没有需要保存的改动';
@@ -157,7 +171,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
             section-test-id="config-llm-section"
             toggle-test-id="config-llm-toggle"
           >
-            <div class="cfg-grid">
+            <div class="cfg-row-llm">
               <label class="cfg-field">
                 <span class="label">API Key</span>
                 <input
@@ -185,6 +199,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
                 />
                 <span class="field-hint">OpenAI 兼容接口的根地址</span>
               </label>
+            </div>
+
+            <!-- 第二行：模型 + 两档温度（温度调的就是这个模型的发散程度） -->
+            <div class="cfg-row-llm">
               <label class="cfg-field">
                 <span class="label">模型</span>
                 <input
@@ -195,6 +213,55 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
                   aria-label="模型"
                   data-testid="config-model"
                 />
+                <span class="field-hint">打分与话术共用这一个模型</span>
+              </label>
+              <label class="cfg-field">
+                <span class="label">打分温度</span>
+                <input
+                  v-model="draft.temperature"
+                  class="input"
+                  type="number"
+                  :min="TEMPERATURE_MIN"
+                  :max="TEMPERATURE_MAX"
+                  step="0.1"
+                  inputmode="decimal"
+                  :placeholder="String(TEMPERATURE_DEFAULT_SCORE)"
+                  aria-label="打分温度"
+                  :aria-invalid="scoreTempError !== null"
+                  data-testid="config-temperature"
+                />
+                <span class="field-hint" :class="{ 'is-bad': scoreTempError !== null }">
+                  <template v-if="scoreTempError">{{ scoreTempError }}</template>
+                  <template v-else
+                    >给岗位打分用，{{ TEMPERATURE_MIN }}~{{ TEMPERATURE_MAX }}，出厂
+                    {{ TEMPERATURE_DEFAULT_SCORE }}。调高分数会不稳定（同一条岗位每次得分可能不同），
+                    建议 {{ TEMPERATURE_MIN }}~0.4</template
+                  >
+                </span>
+              </label>
+              <label class="cfg-field">
+                <span class="label">话术温度</span>
+                <input
+                  v-model="draft.greet_temperature"
+                  class="input"
+                  type="number"
+                  :min="TEMPERATURE_MIN"
+                  :max="TEMPERATURE_MAX"
+                  step="0.1"
+                  inputmode="decimal"
+                  :placeholder="String(TEMPERATURE_DEFAULT_GREET)"
+                  aria-label="话术温度"
+                  :aria-invalid="greetTempError !== null"
+                  data-testid="config-greet-temperature"
+                />
+                <span class="field-hint" :class="{ 'is-bad': greetTempError !== null }">
+                  <template v-if="greetTempError">{{ greetTempError }}</template>
+                  <template v-else
+                    >写招呼语 / 回复用，{{ TEMPERATURE_MIN }}~{{ TEMPERATURE_MAX }}，出厂
+                    {{ TEMPERATURE_DEFAULT_GREET }}。越低越稳定规整，越高越有变化；
+                    超过 1.2 容易跑题或编造经历</template
+                  >
+                </span>
               </label>
             </div>
           </ConfigSection>

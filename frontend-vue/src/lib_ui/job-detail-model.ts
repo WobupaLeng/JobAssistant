@@ -197,13 +197,64 @@ export function needsJdFetch(job: Job): boolean {
  * 点了没反应的按钮（Leptos 卡片上的 `mark_label` 同口径）。
  */
 export type DetailAction = 'reject' | 'allow' | 'deliver';
+/**
+ * 追溯型动作：`undo-deliver` 把「已投递」放回待投递（`unmark_delivered`）。
+ *
+ * 它与 `deliver` 成对出现在「已投递」页签上，语义是撤回而不是新增一种状态，
+ * 所以单独列进 `DetailAction`，让按钮与页签一一对应。
+ */
+export type DetailAct = DetailAction | 'undo-deliver';
 
 export interface DetailActionMeta {
-  readonly action: DetailAction;
+  readonly action: DetailAct;
   readonly testId: string;
   readonly label: string;
   readonly btnClass: string;
   readonly disabled: boolean;
+}
+
+/**
+ * 底部两颗动作按钮：**页签决定可做哪些事**（与列表批量条同一口径
+ * `job-list-model.batchOps`）。
+ *
+ * - 未投递（pending）：不投递 / 标记已投递
+ * - 不投递（rejected）：撤销否决（不出现投递类按钮）
+ * - 已投递（delivered）：取消投递 /（不出现不投递）
+ *
+ * 之所以要按页签裁，是因为抽屉里原本两张按钮恒在：在不投递页签点「标记已投递」
+ * 会把一个被否决的岗位标成已投递，在已投递页签点「不投递」会让同一行既是
+ * rejected 又是 delivered，列表与抽屉各显示一套状态。按钮跟随页签后，
+ * 抽屉里能点的动作与当前列表能做的动作永远一致。
+ *
+ * 页签是第一判据；只有没给页签（单测直接调）时才退回看 `job.status`。
+ */
+export function detailActions(job: Job, tab?: string): readonly DetailActionMeta[] {
+  const delivered = job.status === 'delivered';
+  if (tab === 'rejected') {
+    return [
+      {
+        action: 'allow',
+        testId: 'job-detail-allow-btn',
+        // 与列表批量条同口径：这一页签上是「撤销否决」回未投递，
+        // 写「允许投递」会让人以为是给这个岗位再投一次。
+        label: '撤销否决',
+        btnClass: 'btn btn-sm btn-ghost',
+        disabled: false,
+      },
+    ];
+  }
+  if (tab === 'delivered' || (tab === undefined && delivered && job.rejected === 0)) {
+    return [
+      {
+        action: 'undo-deliver',
+        testId: 'job-detail-undeliver-btn',
+        label: '取消投递',
+        btnClass: 'btn btn-sm btn-ghost',
+        disabled: false,
+      },
+    ];
+  }
+  return [rejectAction(job), deliverAction(job)];
 }
 
 export function rejectAction(job: Job): DetailActionMeta {
@@ -238,7 +289,7 @@ export function deliverAction(job: Job): DetailActionMeta {
 }
 
 /** 动作执行后回给用户的提示（逐字，与列表侧同一口径）。 */
-export function actionNote(action: DetailAction, hit: number): string {
+export function actionNote(action: DetailAct, hit: number): string {
   switch (action) {
     case 'reject':
       return `已标为不投递：影响 ${hit} 条`;
@@ -246,11 +297,13 @@ export function actionNote(action: DetailAction, hit: number): string {
       return `已恢复投递：影响 ${hit} 条`;
     case 'deliver':
       return '已标记投递';
+    case 'undo-deliver':
+      return `已取消投递：影响 ${hit} 条`;
   }
 }
 
 /** 动作失败前缀。 */
-export function actionFailPrefix(action: DetailAction): string {
+export function actionFailPrefix(action: DetailAct): string {
   switch (action) {
     case 'reject':
       return '标记不投递失败：';
@@ -258,6 +311,8 @@ export function actionFailPrefix(action: DetailAction): string {
       return '恢复投递失败：';
     case 'deliver':
       return '标记投递失败：';
+    case 'undo-deliver':
+      return '取消投递失败：';
   }
 }
 

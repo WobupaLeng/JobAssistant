@@ -18,11 +18,16 @@
 
 .sensitive-backdrop {
   position: fixed;
-  inset: 0;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(calc(1120px * var(--ui-scale)), calc(100vw - 40px));
+  height: min(calc(720px * var(--ui-scale)), calc(100vh - 56px));
+  border-radius: var(--radius-lg);
   z-index: 50;
-  background: rgba(0, 0, 0, 0.32);
-  -webkit-backdrop-filter: blur(2px);
-  backdrop-filter: blur(2px);
+  background: var(--popup-surface);
+  -webkit-backdrop-filter: blur(calc(var(--blur-pop) * 2.4));
+  backdrop-filter: blur(calc(var(--blur-pop) * 2.4));
   opacity: 1;
   transition: opacity 220ms var(--ease-glass);
 }
@@ -50,7 +55,7 @@
   flex-direction: column;
   min-height: 0;
   border-radius: var(--radius-lg);
-  background: var(--glass-3);
+  background: var(--popup-surface);
   border: 1px solid var(--hairline-strong);
   box-shadow: var(--shadow-pop);
   -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-2));
@@ -179,6 +184,8 @@
 
 /* 卡片：比抽屉亮一档（--glass-2），让「卡片」与「面板」有层级差。 */
 .sensitive-card {
+  /* 光斑层 .hl-light 是绝对定位，宿主必须是它的包含块。 */
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 5px;

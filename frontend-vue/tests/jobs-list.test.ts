@@ -14,6 +14,7 @@ import {
   addrFirstLine,
   allVisibleChecked,
   batchLabel,
+  batchOps,
   cardView,
   emptyTabCounts,
   headCount,
@@ -151,15 +152,24 @@ describe('计数', () => {
 });
 
 describe('批量操作', () => {
-  it('勾选 ≥ 2 才出现批量按钮（裁决 Q）', () => {
+  it('勾选 ≥ 1 就出现批量按钮（用户裁决：单选也要能操作）', () => {
     expect(showBatchActions(0)).toBe(false);
-    expect(showBatchActions(1)).toBe(false);
+    expect(showBatchActions(1)).toBe(true);
     expect(showBatchActions(2)).toBe(true);
   });
 
   it('按钮文案带条数', () => {
     expect(batchLabel('reject', 3)).toBe('不投递（3）');
-    expect(batchLabel('allow', 2)).toBe('允许投递（2）');
+    expect(batchLabel('deliver', 3)).toBe('已投递（3）');
+    // `allow` 落在两个页签上含义不同：不投递 → 撤销否决，已投递 → 取消投递。
+    expect(batchLabel('allow', 2, 'rejected')).toBe('撤销否决（2）');
+    expect(batchLabel('allow', 2, 'delivered')).toBe('取消投递（2）');
+  });
+
+  it('批量动作跟页签走', () => {
+    expect(batchOps('pending')).toEqual(['reject', 'deliver']);
+    expect(batchOps('rejected')).toEqual(['allow']);
+    expect(batchOps('delivered')).toEqual(['allow']);
   });
 
   it('勾选集合保序且可反选', () => {

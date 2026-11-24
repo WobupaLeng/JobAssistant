@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * 抓取条：折叠筛选 + 三态按钮 + 限额 + 一句话进度（C9 文案）。
+ * 抓取条：三态按钮 + 限额 + 条件筛选入口 + 一句话进度（C9 文案）。
  *
- * 所有文案与禁用规则来自 `features/scrape/panel-model.ts`，组件只画。
+ * 所有按钮文案与禁用规则来自 `lib_ui/scrape-panel-model.ts`，组件只画。
  * `scrape_start` 由父级发（它要包一层 `{args}`，并且要处理返回值），
  * 这里只 emit 意图。
  */
@@ -23,22 +23,23 @@ const props = withDefaults(
     progress: ScrapeProgressLike;
     state: ScrapeButtonState;
     starting?: boolean;
-    filterOpen?: boolean;
     maxJd?: number;
     minScore?: number;
     /** 满分来自 `get_scoring_spec`；未取到前门槛输入框不设上限。 */
     scoreMax?: number | null;
     scrapedTotal?: number;
+    /** 条件筛选抽屉是否已展开（只驱动 `aria-expanded`，抽屉本体在父级）。 */
+    filterOpen?: boolean;
   }>(),
-  { starting: false, filterOpen: false, maxJd: 0, minScore: 0, scoreMax: null, scrapedTotal: 0 },
+  { starting: false, maxJd: 0, minScore: 0, scoreMax: null, scrapedTotal: 0, filterOpen: false },
 );
 
 const emit = defineEmits<{
-  (e: 'toggle-filter'): void;
   (e: 'start'): void;
   (e: 'stop'): void;
   (e: 'update:maxJd', v: number): void;
   (e: 'update:minScore', v: number): void;
+  (e: 'toggle-filter'): void;
 }>();
 
 const brief = computed(() => progressText(props.progress));
@@ -67,15 +68,6 @@ function onMain(): void {
 <template>
   <div class="card scrape-card">
     <div class="scrape-bar">
-      <button
-        class="chip as-btn scrape-toggle"
-        :aria-expanded="filterOpen"
-        type="button"
-        data-testid="scrape-filter-toggle-btn"
-        @click="emit('toggle-filter')"
-      >
-        {{ filterOpen ? '收起筛选 ▲' : '筛选条件 ▼' }}
-      </button>
       <button
         :class="cls"
         type="button"
@@ -121,6 +113,37 @@ function onMain(): void {
           @change="onMinScore"
         />
       </label>
+      <!-- 条件筛选的常驻入口（用户裁决：工具栏上必须有，不能只靠列表空态）。
+           抽屉本身挂在 `DashboardPage` 的 `.job-fill` 里，这里只管开关。 -->
+      <!-- 常驻入口。用 .btn（不是 .btn-ghost）：幽灵态在抓取条的玻璃底上完全透明，
+           只剩一行小字，用户会当成「按钮没了」。打开时切到 is-on 显示激活态。 -->
+      <button
+        class="btn btn-sm scrape-filter-btn"
+        :class="{ 'is-on': filterOpen }"
+        type="button"
+        :aria-expanded="filterOpen ? 'true' : 'false'"
+        aria-controls="scrape-filter-bar"
+        title="筛选条件：城市 / 关键词 / 学历 / 薪资等"
+        data-testid="scrape-filter-toggle-btn"
+        @click="emit('toggle-filter')"
+      >
+        <svg
+          class="scrape-filter-ico"
+          viewBox="0 0 16 16"
+          width="13"
+          height="13"
+          aria-hidden="true"
+        >
+          <path
+            d="M2 3.5h12M4.5 8h7M6.5 12.5h3"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+          />
+        </svg>
+        筛选条件
+      </button>
       <span class="scrape-brief" data-testid="scrape-brief">{{ brief }}</span>
       <span class="spacer"></span>
     </div>

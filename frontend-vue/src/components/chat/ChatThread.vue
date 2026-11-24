@@ -32,6 +32,8 @@ const props = withDefaults(
     generating?: boolean;
     sendingGreet?: boolean;
     recalling?: boolean;
+    /** 当前会话存在未撤回的 HR 消息：「生成回复」按钮据此显隐。 */
+    hasHrReply?: boolean;
   }>(),
   {
     loadingMessages: false,
@@ -39,11 +41,13 @@ const props = withDefaults(
     generating: false,
     sendingGreet: false,
     recalling: false,
+    hasHrReply: false,
   },
 );
 
 const emit = defineEmits<{
   (e: 'generate-greet'): void;
+  (e: 'generate-reply'): void;
   (e: 'recall'): void;
   (e: 'send-greet'): void;
   (e: 'greet-to-draft'): void;
@@ -133,12 +137,34 @@ function greetChip(greet: GreetReply): string {
           <span class="section-label">打招呼草稿</span>
           <span :class="greetTone(props.greet)">{{ greetChip(props.greet) }}</span>
           <span class="spacer" />
+          <!-- 重新生成：同一份入参再跑一次（模型给不同措辞）。 -->
+          <button
+            class="btn btn-sm btn-ghost"
+            type="button"
+            data-testid="chat-greet-regen"
+            :disabled="props.generating"
+            @click="emit('generate-greet')"
+          >{{ props.generating ? '生成中…' : '重新生成' }}</button>
+          <!-- 生成回复：只有对方说过话才出现（没有可接的话就没意义）。 -->
+          <button
+            v-if="props.hasHrReply"
+            class="btn btn-sm btn-ghost"
+            type="button"
+            data-testid="chat-greet-reply"
+            :disabled="props.generating"
+            @click="emit('generate-reply')"
+          >生成回复</button>
           <button class="btn btn-sm btn-ghost" type="button" data-testid="chat-greet-discard" @click="emit('discard-greet')">
             丢弃
           </button>
         </div>
         <div class="greet-text" data-testid="chat-greet-text">{{ props.greet.text }}</div>
         <div v-if="props.greet.note !== ''" class="cfg-hint">{{ props.greet.note }}</div>
+        <div class="greet-hint" data-testid="chat-greet-source">
+          {{ props.greet.reply_used ? '依据：HR 回复 + 我的技能' : '依据：岗位信息 + 我的技能' }}<template
+            v-if="props.greet.jd_used"
+          >（已用完整 JD）</template><template v-else>（未拿到 JD，只用公司名与岗位名）</template>
+        </div>
         <div class="greet-actions">
           <button
             class="btn btn-sm btn-primary"

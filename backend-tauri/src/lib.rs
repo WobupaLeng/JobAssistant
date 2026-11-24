@@ -141,6 +141,11 @@ const DWMWA_SYSTEMBACKDROP_TYPE: u32 = 38;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 const DWMSBT_TRANSIENTWINDOW: i32 = 3;
 
+/// `DWMWA_WINDOW_CORNER_PREFERENCE` 的属性号与「不圆角」取值（Win11 22H2+）。
+/// 顺序有讲究：它在 `apply_round_corners` 之前定义，那里只给值起名、常量在这里。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+
 /// 用未文档化的 `SetWindowCompositionAttribute` 写入 `WCA_ACCENT_POLICY`。
 /// `accent_state` 取 `ACCENT_ENABLE_BLURBEHIND` 或 `ACCENT_ENABLE_ACRYLICBLURBEHIND`。
 ///
@@ -247,6 +252,45 @@ fn apply_material_backdrop(window: &tauri::WebviewWindow) -> bool {
     }
 }
 
+/// Win11 的 DWM 圆角偏好：直角 / 圆角。
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DWMWCP_DONOTROUND: i32 = 1;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const DWMWCP_ROUND: i32 = 2;
+
+/// `DWMWA_WINDOW_CORNER_PREFERENCE`（Win11 22H2+）：本窗口的四个角交给 DWM 画成圆角。
+///
+/// **为什么改成圆角**：窗口是 `decorations: false` + `transparent: true`，桌面磨砂与阴影
+/// 由 DWM 沿**自己的**外框裁；外框若是直角，磨砂就在四个直角处铺进方形边界，而可见内容
+/// 已被前端 `.app-shell` 的圆角裁过一圈 —— 两者错位，角上会露出系统磨砂的方角。
+/// 让 DWM 画圆角后，系统磨砂、阴影与前端圆角三者终于对齐。
+///
+/// **代价（前端必须同时改）**：DWM 的圆角落在窗口边缘上，外壳因此必须退开
+/// `--win-corner-cut` 的透明内边距，否则外壳自己的圆角被 DWM 的弧裁掉两次。
+/// Win10 没有这个属性，调用返回非 0，忽略即可：那时外壳的内边距只留出一圈透明缝。
+fn apply_round_corners(window: &tauri::WebviewWindow) {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
+
+        let Ok(hwnd) = window.hwnd() else {
+            return;
+        };
+        let pref = DWMWCP_ROUND;
+        let _ = unsafe {
+            DwmSetWindowAttribute(
+                hwnd.0,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                &pref as *const i32 as *const std::ffi::c_void,
+                std::mem::size_of::<i32>() as u32,
+            )
+        };
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+    }
+}
 /// 验证脚本用的临时诊断开关：设 `AJA_DIAG_WINDOW=1` 时启动即打印窗口样式位与特效调用结果。
 /// 它不改变任何业务行为，只输出读数，所以可以长期留在代码里。
 fn window_diag(window: &tauri::WebviewWindow) {
@@ -596,6 +640,9 @@ pub fn run() {
             if let Some(win) = app.get_webview_window("main") {
                 window_diag(&win);
                 apply_blur(&win);
+                // 窗口四角由 DWM 画成直角，圆角只由前端 .app-shell 的 --radius 决定，
+                // 否则方形系统外框与应用圆角之间会多出四个直角三角。
+                apply_round_corners(&win);
             }
 
             // 打开数据库：失败不阻断启动，否则用户连界面都看不到。
@@ -611,8 +658,8 @@ pub fn run() {
                             // 应用继续以纯规则打分运行
                             match store.config_pairs() {
                                 Ok(pairs) => {
-                                    let (key, base, model) = commands_db::pick_llm_config(pairs);
-                                    match commands_db::build_llm_client(key, base, model) {
+                                    // 密钥、模型、两份温度一次读完再构造：温度要在启动时就生效
+                                    match commands_db::build_llm_client_with_temperature(&pairs) {
                                         Some(client) => {
                                             if let Ok(mut g) = app.state::<LlmState>().0.lock() {
                                                 *g = Some(client);
@@ -624,17 +671,26 @@ pub fn run() {
                                         }
                                     }
                                 }
-                                Err(e) => eprintln!("[startup] 读取配置失败（使用规则打分）：{e}"),
+                                Err(e) => {
+                                    eprintln!("[startup] 读取配置失败（使用规则打分）：{e}");
+                                    commands_logs::push("warn", format!("读取配置失败（使用规则打分）：{e}"));
+                                }
                             }
                             if let Ok(mut guard) = app.state::<StoreState>().0.lock() {
                                 *guard = Some(store);
                             }
                             eprintln!("[startup] 数据库已打开：{}", db_path.display());
                         }
-                        Err(e) => eprintln!("[startup] 打开数据库失败（应用继续运行）：{e}"),
+                        Err(e) => {
+                            eprintln!("[startup] 打开数据库失败（应用继续运行）：{e}");
+                            commands_logs::push("error", format!("打开数据库失败（应用继续运行）：{e}"));
+                        }
                     }
                 }
-                Err(e) => eprintln!("[startup] 无法解析数据目录（应用继续运行）：{e}"),
+                Err(e) => {
+                    eprintln!("[startup] 无法解析数据目录（应用继续运行）：{e}");
+                    commands_logs::push("error", format!("无法解析数据目录（应用继续运行）：{e}"));
+                }
             }
             // 登录态推送：sidecar → progress → watcher → WebView（契约见
             // LoginStatePayload）。放在 setup 末尾：此时 ScrapeState 已 manage。
@@ -660,6 +716,7 @@ pub fn run() {
             commands_db::reject_jobs,
             commands_db::allow_jobs,
             commands_db::mark_delivered,
+            commands_db::unmark_delivered,
             commands_db::list_decisions,
         commands_db::count_decisions,
         commands_db::decision_counts,
@@ -688,6 +745,8 @@ pub fn run() {
             commands_logs::clear_logs,
             commands_chat::chat_friends,
             commands_chat::chat_messages,
+            commands_chat::chat_friends_local,
+            commands_chat::chat_messages_local,
             commands_chat::chat_send,
             commands_chat::chat_resumes,
             commands_chat::chat_send_resume,

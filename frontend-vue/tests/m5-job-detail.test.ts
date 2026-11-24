@@ -5,6 +5,7 @@ import {
   closeDetail,
   dash,
   detailChips,
+  detailActions,
   detailCompany,
   detailJdText,
   detailKv,
@@ -233,6 +234,19 @@ describe('job-detail-model / 动作口径', () => {
     expect(actionFailPrefix('reject')).toBe('标记不投递失败：');
     expect(actionFailPrefix('allow')).toBe('恢复投递失败：');
     expect(actionFailPrefix('deliver')).toBe('标记投递失败：');
+  });
+
+  it('抽屉底部按钮跟页签走（与列表批量条同口径）', () => {
+    const pending = detailActions(job(), 'pending');
+    expect(pending.map((a) => a.action)).toEqual(['reject', 'deliver']);
+    const rejected = detailActions(job({ rejected: 1 }), 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].action).toBe('allow');
+    expect(rejected[0].label).toBe('撤销否决');
+    const delivered = detailActions(job({ status: 'delivered' }), 'delivered');
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].action).toBe('undo-deliver');
+    expect(delivered[0].label).toBe('取消投递');
   });
 });
 

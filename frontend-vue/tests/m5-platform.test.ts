@@ -49,6 +49,24 @@ describe('platform-model / 卡片视图', () => {
     expect(idle.loginDisabled).toBe(false);
   });
 
+  // 用户 m02848：「已登录时 登录按钮变成已登录不可再点击」——登录态是权威查询结论，
+  // 已登录还留一个可点的「登录」会诱导用户重复扫码。换账号走「退出登录」。
+  it('已登录时按钮文案变「已登录」且恒不可点（不因 busy 放开）', () => {
+    for (const busy of [false, true]) {
+      const boss = platformCards('boss', busy, true).find((c) => c.id === 'boss')!;
+      expect(boss.loginLabel).toBe('已登录');
+      expect(boss.loginDisabled).toBe(true);
+      expect(boss.loginTitle).toContain('退出登录');
+    }
+  });
+
+  it('未登录仍显示「登录」且只在 busy 时禁用（不被本轮改动波及）', () => {
+    const idle = platformCards('boss', false, false).find((c) => c.id === 'boss')!;
+    expect(idle.loginLabel).toBe('登录');
+    expect(idle.loginDisabled).toBe(false);
+    expect(idle.loginTitle).toBe('打开 Boss 登录窗口扫码');
+  });
+
 });
 
 describe('platform-model / pickPlatform', () => {

@@ -166,9 +166,38 @@ export function tabCount(counts: JobTabCounts, tab: ListTab): number {
 
 // ---------------------------------------------------------------- 批量
 
-/** 批量按钮 `hidden` 的唯一判据：已选 ≥ 2（SPEC §15.2 裁决 Q）。 */
+/**
+ * 批量按钮 `hidden` 的唯一判据：已选 ≥ 1。
+ *
+ * 原来的 ≥ 2（SPEC §15.2 裁决 Q）改成 ≥ 1：用户裁决「单选或多选后」都要出按钮，
+ * 单选时点一下就改这一条，比再长按一次进多选要快。0 条仍然不出（无事可做）。
+ */
 export function showBatchActions(selectedCount: number): boolean {
-  return selectedCount >= 2;
+  return selectedCount >= 1;
+}
+
+/** 批量条上允许的操作。与后端命令一一对应，故不接受其它值。 */
+export type BatchOp = 'reject' | 'deliver' | 'allow';
+
+/**
+ * 页签决定「这一屏允许做哪几个批量动作」：
+ * - 待投递（未投递）：不投递 / 已投递
+ * - 不投递：待投递（= 取消否决，走 allow_jobs）
+ * - 已投递：待投递（= 取消投递，走 unmark_delivered）
+ * 三个页签互斥的语义决定了不会出现「在不投递里标已投递」这种自相矛盾的组合。
+ *
+ * 「待投递」在数据库侧对应 `JobStatus::Pending`，但用户在界面上只会看到
+ * 「未投递」这颗页签——两者是同一个集合，文案以页签为准（`batchLabel`）。
+ */
+export function batchOps(tab: ListTab): readonly BatchOp[] {
+  switch (tab) {
+    case 'rejected':
+      return ['allow'];
+    case 'delivered':
+      return ['allow'];
+    default:
+      return ['reject', 'deliver'];
+  }
 }
 
 /** 全选本页：已选数量等于可见数量且非空。 */
@@ -188,9 +217,18 @@ export function toggleChecked(selected: readonly string[], id: string): string[]
   return [...selected, id];
 }
 
-/** 批量文案：`不投递（3）` / `允许投递（3）`。 */
-export function batchLabel(op: 'reject' | 'allow', n: number): string {
-  return op === 'reject' ? `不投递（${n}）` : `允许投递（${n}）`;
+/**
+ * 批量文案：`不投递（3）` / `已投递（3）` / `待投递（3）`。
+ *
+ * `allow` 在后端只有一条命令（`allow_jobs`），但它落在两个页面上的含义不同：
+ * - 不投递页签：撤销否决 → 回「未投递」；
+ * - 已投递页签：撤销投递标记 → 回「未投递」。
+ * 两处都写「待投递」会和页面上的页签名（未投递）对不上，所以拆开写。
+ */
+export function batchLabel(op: BatchOp, n: number, tab: ListTab = 'pending'): string {
+  if (op === 'reject') return `不投递（${n}）`;
+  if (op === 'deliver') return `已投递（${n}）`;
+  return `${tab === 'delivered' ? '取消投递' : '撤销否决'}（${n}）`;
 }
 
 // ---------------------------------------------------------------- 卡片派生

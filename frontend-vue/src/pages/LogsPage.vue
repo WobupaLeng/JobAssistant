@@ -268,7 +268,7 @@ onBeforeUnmount(() => {
   <!-- 窗体锚点 decisions-panel 已唯一，页容器不再重复挂 page-logs（SPEC-001 AC9）。 -->
   <section class="page page-logs">
     <div
-      class="decisions-modal is-open"
+      class="decisions-modal hl-surface is-open"
       data-testid="decisions-panel"
       role="dialog"
       aria-modal="true"

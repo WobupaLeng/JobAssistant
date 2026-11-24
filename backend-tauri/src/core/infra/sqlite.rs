@@ -17,8 +17,10 @@
 //! `conn` 字段是 `pub(super)`，各聚合根模块在同一父子树内直接借用它。
 
 pub(crate) mod admin;
+mod chat_store;
 mod jobs;
 mod row;
+pub use chat_store::{ChatFriendRow, ChatMessageRow};
 mod sensitive;
 #[cfg(test)]
 mod tests;
@@ -28,7 +30,7 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 
-use crate::core::domain::schema::{SCHEMA, SCHEMA_INDEXES};
+use crate::core::domain::schema::{CHAT_SCHEMA, CHAT_SCHEMA_INDEXES, SCHEMA, SCHEMA_INDEXES};
 
 /// 列白名单与时间戳的唯一来源。各聚合根模块与 `tests` 都经这条通道取用。
 #[allow(unused_imports)]
@@ -130,6 +132,7 @@ impl SqliteStore {
         // 存在多连接时（比如用户同时开着备份工具）不立即失败，等一会儿
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA)?;
+        conn.execute_batch(CHAT_SCHEMA)?;
         let store = Self {
             conn: Mutex::new(conn),
         };
@@ -141,6 +144,7 @@ impl SqliteStore {
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
+        conn.execute_batch(CHAT_SCHEMA)?;
         let store = Self {
             conn: Mutex::new(conn),
         };
@@ -170,6 +174,7 @@ impl SqliteStore {
         )?;
 
         conn.execute_batch(SCHEMA_INDEXES)?;
+        conn.execute_batch(CHAT_SCHEMA_INDEXES)?;
         // 索引可能与表失去同步（历史上真的发生过：`wrong # of entries in
         // index idx_job_queue_score` 让所有查询直接失败）。`REINDEX` 会按主库
         // 现有数据重建全部索引，代价是启动时扫一遍表——表很小，可接受。

@@ -5,5 +5,8 @@
 pub mod llm;
 pub mod sqlite;
 
-pub use llm::{HttpLlmClient, DEFAULT_MODEL};
+pub use llm::{
+    HttpLlmClient, GREET_TEMPERATURE, SCORE_TEMPERATURE, TEMPERATURE_MAX, TEMPERATURE_MIN,
+    DEFAULT_MODEL,
+};
 pub use sqlite::{SqliteStore, StoreError};

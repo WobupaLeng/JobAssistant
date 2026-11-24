@@ -9,8 +9,8 @@
 //! 不足以泄漏密钥——即便 WebView 被调试工具接管也一样。
 
 use crate::commands_db::{
-    build_llm_client, store_err, store_handle, with_store, CmdResult, LlmState, StoreState,
-    CFG_API_KEY, CFG_BASE_URL, CFG_MODEL,
+    build_llm_client_with_temperature, store_err, store_handle, with_store, CmdResult, LlmState,
+    StoreState,
 };
 use crate::core::domain::app_config::{
     collect_scrape_defaults, mask_api_key, resolve_limit, scrape_default_key, scrape_value_to_text,
@@ -18,7 +18,8 @@ use crate::core::domain::app_config::{
     DEFAULT_MAX_JD, DEFAULT_MODEL, DEFAULT_SCORE_MODE, DEFAULT_THEME, KEY_API_KEY, KEY_BASE_URL,
     KEY_DATA_DIR, KEY_EXCLUDE_KEYWORDS, KEY_EXCLUDE_RULES, KEY_GREET_PROMPT, KEY_LAST_FILTER,
     KEY_LLM_PREFILTER, KEY_MAX_JD, KEY_MIN_SCORE, KEY_MODEL, KEY_RESUME_PATH, KEY_SCORE_MODE,
-    KEY_SKILLS, KEY_THEME, KEY_TOKENS_GREET, KEY_TOKENS_SCORE, KEY_TOKENS_TOTAL, WRITABLE_KEYS,
+    KEY_SKILLS, KEY_TEMPERATURE, KEY_GREET_TEMPERATURE, KEY_THEME, KEY_TOKENS_GREET,
+    KEY_TOKENS_SCORE, KEY_TOKENS_TOTAL, WRITABLE_KEYS,
 };
 use crate::core::domain::greeting::DEFAULT_PROMPT;
 use crate::core::scoring::SCORE_MAX;
@@ -37,6 +38,10 @@ type Cfg = dyn ConfigStore<Error = StoreError>;
 pub struct AppConfigReply {
     pub base_url: String,
     pub model: String,
+    /// 打分温度（0~2）。前端直接显示这个值，不让它自己猜默认值。
+    pub temperature: f32,
+    /// 话术温度（0~2）
+    pub greet_temperature: f32,
     /// `****abcd` 形式的掩码；未配置时为空串
     pub api_key_hint: String,
     pub has_key: bool,
@@ -90,6 +95,20 @@ pub fn read_config(store: &Cfg, data_dir: &str) -> Result<AppConfigReply, String
     Ok(AppConfigReply {
         base_url: get(KEY_BASE_URL, DEFAULT_BASE_URL),
         model: get(KEY_MODEL, DEFAULT_MODEL),
+        temperature: crate::core::infra::llm::resolve_temperature(
+            pairs
+                .iter()
+                .find(|(k, _)| k == KEY_TEMPERATURE)
+                .map(|(_, v)| v.as_str()),
+            crate::core::infra::SCORE_TEMPERATURE,
+        ),
+        greet_temperature: crate::core::infra::llm::resolve_temperature(
+            pairs
+                .iter()
+                .find(|(k, _)| k == KEY_GREET_TEMPERATURE)
+                .map(|(_, v)| v.as_str()),
+            crate::core::infra::GREET_TEMPERATURE,
+        ),
         api_key_hint: mask_api_key(&raw_key),
         has_key: !raw_key.trim().is_empty(),
         theme: get(KEY_THEME, DEFAULT_THEME),
@@ -212,10 +231,6 @@ pub fn apply_patch(store: &Cfg, patch: &serde_json::Value) -> Result<usize, Stri
     Ok(written)
 }
 
-fn non_blank(v: Option<&String>) -> Option<String> {
-    v.filter(|s| !s.trim().is_empty()).cloned()
-}
-
 /// 保存配置 diff。
 ///
 /// 保存后**立即重建大模型客户端**：密钥或模型可能变了，不重建的话用户
@@ -229,13 +244,8 @@ pub fn set_app_config(
     let updated = with_store(&state, |s| apply_patch(s, &patch))?;
     let store = store_handle(&state)?;
     let pairs = store.config_pairs().map_err(store_err)?;
-    let pick = |want: &str| -> Option<String> {
-        pairs
-            .iter()
-            .find(|(k, _)| k == want)
-            .and_then(|(_, v)| non_blank(Some(v)))
-    };
-    let client = build_llm_client(pick(CFG_API_KEY), pick(CFG_BASE_URL), pick(CFG_MODEL));
+    // 温度必须跟着一起重建，否则「保存了温度但要重启才生效」。
+    let client = build_llm_client_with_temperature(&pairs);
     let enabled = client.is_some();
     if let Ok(mut guard) = llm.0.lock() {
         *guard = client;

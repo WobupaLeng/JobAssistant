@@ -21,6 +21,34 @@
   flex: 0 0 auto;
 }
 
+/* 条件筛选常驻入口：抓取条上的实体按钮（不是幽灵态），打开时用主题色点亮。
+ * 颜色只经令牌（红线 8）。 */
+.scrape-filter-btn {
+  flex: 0 0 auto;
+  gap: 5px;
+  white-space: nowrap;
+  color: var(--text-2);
+  background: var(--glass-3);
+  border-color: var(--hairline);
+}
+
+.scrape-filter-btn:hover:not(:disabled) {
+  color: var(--text-1);
+  border-color: var(--hairline-strong);
+  background: var(--glass-input);
+}
+
+.scrape-filter-btn.is-on {
+  color: var(--primary-text);
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+}
+
+.scrape-filter-ico {
+  flex: 0 0 auto;
+  display: block;
+}
+
 .scrape-brief {
   /* 先让两个上限输入和「已入库」站住，进度摘要吃剩下的宽度。
    * basis 降到 120px：与自动投递的状态胶囊同排时，200px 会把输入挤到第二行。 */
@@ -188,7 +216,7 @@
   border-radius: var(--radius-sm);
   border: 1px solid var(--hairline);
   background: var(--glass-input);
-  box-shadow: inset 0 1px 0 var(--spec-top);
+  box-shadow: none;
   font-size: var(--fs-xs);
   color: var(--text-2);
   line-height: 1.6;

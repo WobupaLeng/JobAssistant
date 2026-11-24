@@ -28,7 +28,7 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 
 <template>
   <div
-    class="chat-detach"
+    class="chat-detach hl-surface"
     :class="{ 'is-open': props.open }"
     data-testid="chat-detach"
     role="dialog"

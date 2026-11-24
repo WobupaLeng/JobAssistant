@@ -106,6 +106,18 @@ function toggleVeto(name: string): void {
   });
 }
 
+/** 学历否决是**多选**：下拉框只是 chips 的快捷入口，清空 = 不限。 */
+function onVetoPick(value: string): void {
+  patch({ veto_degrees: value === '' ? [] : [...DEGREE_VETO_OPTIONS.filter((x) => x === value)] });
+}
+
+/** 「已选 N 项」摘要：空选回落到「不限」。 */
+const vetoSummary = computed(() => {
+  const list = props.draft.veto_degrees;
+  if (list.length === 0) return '不限';
+  return list.length === 1 ? list[0] : `已选 ${list.length} 项：${list.join(' / ')}`;
+});
+
 /** 关键词入口：写 `keywords`，**绝不写 `draft.exclude`**。 */
 function addKeywords(raw: string): void {
   if (raw.trim() === '') return;
@@ -175,8 +187,18 @@ function salaryCodeLabel(code: string): string {
       <button class="btn btn-sm btn-ghost" type="button" data-testid="filter-reset-btn" @click="emit('reset')">
         重置
       </button>
-      <button class="btn btn-sm btn-ghost" type="button" data-testid="filter-close-btn" @click="emit('cancel')">
-        收起
+      <!-- 「收起」按钮与右上角 × 重复，用户裁决移除：× 是唯一出口。 -->
+      <button
+        class="f-x"
+        type="button"
+        data-testid="filter-close-btn"
+        aria-label="关闭筛选条件"
+        title="关闭"
+        @click="emit('cancel')"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+        </svg>
       </button>
     </div>
 
@@ -187,24 +209,22 @@ function salaryCodeLabel(code: string): string {
         <span class="f-glabel-sub">{{ kwNote || '回车添加；可空格或逗号一次填多个' }}</span>
         <div class="f-gbody">
           <div class="f-chips" data-testid="filter-pos-chips">
-            <span
+            <!-- 关键词不再挂 × 按钮：点 chip 本身即移除（仍留可访问名与 testid，
+                 测试锚点 scrape-filter-kw-del-* 原样保留在 chip 上）。 -->
+            <button
               v-for="kw in keywords"
               :key="kw"
               class="f-chip is-on"
               data-testid="scrape-filter-kw-chip"
+              :data-del-testid="`scrape-filter-kw-del-${tidSafe(kw)}`"
+              type="button"
               :title="kw"
+              :aria-label="`移除关键词 ${kw}`"
+              :aria-pressed="true"
+              @click="removeKeyword(kw)"
             >
               {{ kw }}
-              <button
-                class="f-chip-x"
-                type="button"
-                :data-testid="`scrape-filter-kw-del-${tidSafe(kw)}`"
-                :aria-label="`删除关键词 ${kw}`"
-                @click="removeKeyword(kw)"
-              >
-                ×
-              </button>
-            </span>
+            </button>
             <span v-if="keywords.length === 0" class="f-emptychip" data-testid="filter-kw-empty">
               还没有关键词，回车添加或点下面的推荐
             </span>
@@ -293,15 +313,20 @@ function salaryCodeLabel(code: string): string {
             </label>
             <label class="f-cell">
               <span class="f-cell-label">工作类型</span>
-              <select
-                class="input f-select"
-                :value="draft.job_type"
-                data-testid="filter-job-type-select"
-                @change="patch({ job_type: ($event.target as HTMLSelectElement).value })"
-              >
-                <option value="">不限</option>
-                <option v-for="[code, name] in JOB_TYPE_OPTIONS" :key="code" :value="code">{{ name }}</option>
-              </select>
+              <span class="f-select-wrap">
+                <select
+                  class="input f-select"
+                  :value="draft.job_type"
+                  data-testid="filter-job-type-select"
+                  @change="patch({ job_type: ($event.target as HTMLSelectElement).value })"
+                >
+                  <option value="">不限</option>
+                  <option v-for="[code, name] in JOB_TYPE_OPTIONS" :key="code" :value="code">{{ name }}</option>
+                </select>
+                <svg class="f-select-caret" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                  <path d="M4 6.4 8 10.4l4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </span>
             </label>
             <label class="f-cell">
               <span class="f-cell-label">最多翻页</span>
@@ -522,43 +547,55 @@ function salaryCodeLabel(code: string): string {
         <div class="f-gbody f-grid2">
           <label class="f-cell">
             <span class="f-cell-label">HR 活跃度</span>
-            <select
-              class="input f-select"
-              :value="draft.hr_active"
-              data-testid="filter-hr-active-select"
-              @change="patch({ hr_active: ($event.target as HTMLSelectElement).value })"
-            >
-              <option v-for="o in HR_ACTIVE_OPTIONS" :key="o.value" :value="o.value" :title="o.hint">{{ o.name }}</option>
-            </select>
+            <span class="f-select-wrap">
+              <select
+                class="input f-select"
+                :value="draft.hr_active"
+                data-testid="filter-hr-active-select"
+                @change="patch({ hr_active: ($event.target as HTMLSelectElement).value })"
+              >
+                <option v-for="o in HR_ACTIVE_OPTIONS" :key="o.value" :value="o.value" :title="o.hint">{{ o.name }}</option>
+              </select>
+              <svg class="f-select-caret" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path d="M4 6.4 8 10.4l4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
           </label>
           <label class="f-cell">
             <span class="f-cell-label">休息制度</span>
-            <select
-              class="input f-select"
-              :value="draft.weekend"
-              data-testid="filter-schedule-select"
-              @change="patch({ weekend: ($event.target as HTMLSelectElement).value })"
-            >
-              <option v-for="o in WEEKEND_OPTIONS" :key="o.value" :value="o.value" :title="o.hint">{{ o.name }}</option>
-            </select>
+            <span class="f-select-wrap">
+              <select
+                class="input f-select"
+                :value="draft.weekend"
+                data-testid="filter-schedule-select"
+                @change="patch({ weekend: ($event.target as HTMLSelectElement).value })"
+              >
+                <option v-for="o in WEEKEND_OPTIONS" :key="o.value" :value="o.value" :title="o.hint">{{ o.name }}</option>
+              </select>
+              <svg class="f-select-caret" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path d="M4 6.4 8 10.4l4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
           </label>
           <label class="f-cell">
             <span class="f-cell-label">JD 学历要求否决</span>
-            <select
-              class="input f-select"
-              :value="draft.veto_degrees[0] ?? ''"
-              data-testid="filter-jd-edu-select"
-              @change="
-                patch({
-                  veto_degrees: ($event.target as HTMLSelectElement).value
-                    ? [($event.target as HTMLSelectElement).value]
-                    : [],
-                })
-              "
-            >
-              <option value="">不限</option>
-              <option v-for="name in DEGREE_VETO_OPTIONS" :key="name" :value="name">{{ name }}</option>
-            </select>
+            <!-- 多选：下拉框只是快捷入口，选中即并入 chips；框内显示当前已选（不止第一项）。 -->
+            <span class="f-select-wrap">
+              <select
+                class="input f-select"
+                :value="''"
+                data-testid="filter-jd-edu-select"
+                :title="vetoSummary"
+                aria-label="JD 学历要求否决（多选，可在此追加一档）"
+                @change="onVetoPick(($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">{{ vetoSummary }}</option>
+                <option v-for="name in DEGREE_VETO_OPTIONS" :key="name" :value="name">{{ name }}</option>
+              </select>
+              <svg class="f-select-caret" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path d="M4 6.4 8 10.4l4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
           </label>
           <label class="f-cell">
             <span class="f-cell-label">公司成立年限（起）</span>
@@ -573,11 +610,15 @@ function salaryCodeLabel(code: string): string {
             />
           </label>
         </div>
-        <div class="f-chips">
+        <div class="f-veto-line">
+          <span class="f-glabel-inline">可多选，点一下即否决</span>
+          <span class="f-veto-count" :data-testid="'filter-veto-count'">{{ draft.veto_degrees.length }} / {{ DEGREE_VETO_OPTIONS.length }}</span>
+        </div>
+        <div class="f-chips" data-testid="filter-group-veto">
           <button
             v-for="name in DEGREE_VETO_OPTIONS"
             :key="name"
-            class="f-chip"
+            class="f-chip f-chip-veto"
             :class="{ 'is-on': draft.veto_degrees.includes(name) }"
             type="button"
             :aria-pressed="draft.veto_degrees.includes(name)"

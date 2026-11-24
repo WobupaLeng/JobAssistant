@@ -151,14 +151,6 @@ fn exe_dir() -> Option<std::path::PathBuf> {
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
 }
 
-/// 供其它命令模块（自动投递）复用同一套 sidecar 目录解析。
-///
-/// 自动投递要自己拉浏览器，如果它另写一份路径逻辑，打包态就会出现
-/// 「抓取能起、自动投递起不来」这种只在发布版复现的差异。
-pub(crate) fn sidecar_script_dir() -> CmdResult<std::path::PathBuf> {
-    resolve_script_dir(exe_dir())
-}
-
 // ---------- 前端结构（契约真源，见 AGENTS.md 3.1） ----------
 
 /// `scrape_start` 的入参。
@@ -268,7 +260,12 @@ pub fn to_update_reply(u: SessionUpdate) -> UpdateReply {
                 score,
             }
         }
-        SessionUpdate::Log { level, msg } => UpdateReply::Log { level, msg },
+        SessionUpdate::Log { level, msg } => {
+            // sidecar 的日志此前只返回给界面而被丢弃，这里同步进全局环形缓冲，
+            // 让日志页与仪表盘能看到抓取/登录/聊天过程中的运行信息。
+            crate::commands_logs::push(&level, &msg);
+            UpdateReply::Log { level, msg }
+        }
         SessionUpdate::Login { state, msg } => UpdateReply::Login { state, msg },
         SessionUpdate::Risk { platform, reason, url } => {
             UpdateReply::Risk { platform, reason, url }

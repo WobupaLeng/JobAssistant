@@ -43,7 +43,8 @@ const EXPECTED_COMMANDS = [
   'job_tab_counts',
   'reject_jobs',
   'allow_jobs',
-  'mark_delivered',
+'mark_delivered',
+    'unmark_delivered',
   'list_decisions',
   'count_decisions',
   'decision_counts',
@@ -70,7 +71,9 @@ const EXPECTED_COMMANDS = [
   'session_open',
   'list_logs',
   'clear_logs',
-  'chat_friends',
+'chat_friends',
+    'chat_friends_local',
+    'chat_messages_local',
   'chat_messages',
   'chat_send',
   'chat_resumes',
@@ -116,7 +119,7 @@ afterEach(() => {
  * 直接读源文件做文本扫描，不做 AST：48 条命令名都在同一行。
  */
 describe('命令名覆盖：与 generate_handler! 逐条对齐（C1）', () => {
-  it('53 条命令恰好覆盖一次，不多不少', () => {
+  it('56 条命令恰好覆盖一次，不多不少', () => {
     const dir = fileURLToPath(new URL('../src/api/commands/', import.meta.url));
     const used = new Set<string>();
     for (const name of readdirSync(dir).filter((f: string) => f.endsWith('.ts'))) {
@@ -130,7 +133,7 @@ describe('命令名覆盖：与 generate_handler! 逐条对齐（C1）', () => {
         used.add(m[1]!);
       }
     }
-    expect(used.size).toBe(53);
+    expect(used.size).toBe(56);
     expect(EXPECTED_COMMANDS.filter((c) => !used.has(c))).toEqual([]);
     const known: readonly string[] = EXPECTED_COMMANDS;
     expect([...used].filter((c) => !known.includes(c))).toEqual([]);
@@ -477,7 +480,7 @@ describe('commands_logs', () => {
 });
 
 describe('commands_greet', () => {
-  it('greet_draft：包 args，useLlm 恒 true', async () => {
+  it('greet_draft：包 args，useLlm 恒 true，缺省补空串', async () => {
     await greet.greetDraft({
       jobId: 'j1',
       title: '后端',
@@ -496,10 +499,29 @@ describe('commands_greet', () => {
           salary: '20-30K',
           experience: '3-5年',
           jd: 'JD',
+          findByCompany: '',
+          reply: '',
           useLlm: true,
         },
       },
     });
+  });
+
+  it('greet_draft：聊天页带 findByCompany 与 reply（重新生成 / 生成回复）', async () => {
+    await greet.greetDraft({
+      jobId: '',
+      title: '',
+      company: '星瀚科技',
+      salary: '',
+      experience: '',
+      jd: '',
+      findByCompany: '星瀚科技',
+      reply: '你的 Redis 经验说一下',
+    });
+    const args = (last().payload as { args: Record<string, unknown> }).args;
+    expect(args.findByCompany).toBe('星瀚科技');
+    expect(args.reply).toBe('你的 Redis 经验说一下');
+    expect(args.useLlm).toBe(true);
   });
 
   it('greet_one：平铺 { uid, text }', async () => {

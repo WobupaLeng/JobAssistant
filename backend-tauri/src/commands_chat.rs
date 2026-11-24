@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use crate::core::sidecar::process::SidecarHandle;
 use crate::core::sidecar::protocol::{ChatMessage, Command, Expectation, Friend, ResumeItem};
+use crate::core::infra::sqlite::{ChatFriendRow, ChatMessageRow};
 use serde::{Deserialize, Serialize};
 
 use crate::commands_scrape::ScrapeState;
@@ -93,6 +94,7 @@ pub(crate) fn request_chat(
         // （哪条命令、sidecar 死前说了什么）。历史上 sidecar 静默崩溃，
         // 界面上只剩「stdin 已关闭」，谁也接不上话。
         eprintln!("[sidecar] {cmd:?} 失败：{e}");
+        crate::commands_logs::push("warn", format!("聊天命令失败：{e}"));
         format!("{e}")
     })
 }
@@ -121,18 +123,91 @@ fn items_of<T: for<'de> Deserialize<'de>>(data: &serde_json::Value) -> CmdResult
 #[tauri::command]
 pub fn chat_friends(
     state: tauri::State<'_, ScrapeState>,
+    store: tauri::State<'_, crate::commands_db::StoreState>,
 ) -> CmdResult<FriendsReply> {
     let handle = handle_of(&state)?;
     let data = request_chat(&handle, &Command::ChatFriends)?;
+    let items: Vec<Friend> = items_of(&data)?;
+    // 远程成功后才落库；落库失败不影响本次结果（缓存是增强，不是前置条件）
+    let rows: Vec<ChatFriendRow> = items.iter().map(friend_to_row).collect();
+    if let Err(e) = with_store(&store, |s| s.upsert_chat_friends(BOSS, &rows).map_err(store_err)) {
+        eprintln!("[chat] 会话列表写库失败：{e}");
+        crate::commands_logs::push("warn", format!("会话列表写库失败：{e}"));
+    }
+    Ok(FriendsReply { items })
+}
+
+/// 读本地缓存的会话列表（不触发浏览器，供界面先展示）。
+#[tauri::command]
+pub fn chat_friends_local(
+    store: tauri::State<'_, crate::commands_db::StoreState>,
+) -> CmdResult<FriendsReply> {
+    let rows = with_store(&store, |s| s.list_chat_friends(BOSS).map_err(store_err))?;
     Ok(FriendsReply {
-        items: items_of(&data)?,
+        items: rows.iter().map(row_to_friend).collect(),
     })
+}
+
+/// 读本地缓存的某会话消息（不触发浏览器）。
+#[tauri::command]
+pub fn chat_messages_local(
+    store: tauri::State<'_, crate::commands_db::StoreState>,
+    uid: String,
+) -> CmdResult<MessagesReply> {
+    let uid = uid.trim().to_string();
+    if uid.is_empty() {
+        return Ok(MessagesReply::default());
+    }
+    let rows = with_store(&store, |s| s.list_chat_messages(BOSS, &uid).map_err(store_err))?;
+    Ok(MessagesReply {
+        items: rows.iter().map(row_to_message).collect(),
+    })
+}
+
+/// 平台标识：当前聊天命令只服务 Boss。
+const BOSS: &str = "boss";
+
+fn friend_to_row(f: &Friend) -> ChatFriendRow {
+    ChatFriendRow {
+        uid: f.uid.clone(),
+        name: f.name.clone(),
+        company: f.company.clone(),
+        title: f.title.clone(),
+        last_msg: f.last_msg.clone(),
+        last_time: f.last_time.clone(),
+        unread: f.unread.unwrap_or(0),
+        avatar: f.avatar.clone(),
+    }
+}
+
+fn row_to_friend(r: &ChatFriendRow) -> Friend {
+    Friend {
+        uid: r.uid.clone(),
+        name: r.name.clone(),
+        company: r.company.clone(),
+        title: r.title.clone(),
+        last_msg: r.last_msg.clone(),
+        last_time: r.last_time.clone(),
+        unread: Some(r.unread),
+        avatar: r.avatar.clone(),
+    }
+}
+
+fn row_to_message(r: &ChatMessageRow) -> ChatMessage {
+    ChatMessage {
+        sender: r.sender.clone(),
+        content: r.content.clone(),
+        time: r.time.clone(),
+        msg_id: Some(r.msg_id.clone()),
+        recalled: Some(r.recalled),
+    }
 }
 
 /// 与某个 HR 的历史消息。
 #[tauri::command]
 pub fn chat_messages(
     state: tauri::State<'_, ScrapeState>,
+    store: tauri::State<'_, crate::commands_db::StoreState>,
     uid: String,
 ) -> CmdResult<MessagesReply> {
     let uid = uid.trim().to_string();
@@ -140,9 +215,28 @@ pub fn chat_messages(
         return Err("缺少 uid：请先在左侧选择一位 HR".to_string());
     }
     let handle = handle_of(&state)?;
-    let data = request_chat(&handle, &Command::ChatMessages { uid })?;
-    Ok(MessagesReply {
-        items: items_of(&data)?,
+    let data = request_chat(&handle, &Command::ChatMessages { uid: uid.clone() })?;
+    let items: Vec<ChatMessage> = items_of(&data)?;
+    // 增量追加：按 msg_id 去重写入，已有消息不重复
+    let rows: Vec<ChatMessageRow> = items.iter().filter_map(message_to_row).collect();
+    if let Err(e) = with_store(&store, |s| {
+        s.upsert_chat_messages(BOSS, &uid, &rows).map_err(store_err)
+    }) {
+        eprintln!("[chat] 消息写库失败：{e}");
+        crate::commands_logs::push("warn", format!("消息写库失败：{e}"));
+    }
+    Ok(MessagesReply { items })
+}
+
+fn message_to_row(m: &ChatMessage) -> Option<ChatMessageRow> {
+    // 无 msg_id 的消息无法去重，跳过落库（仍照常返回给界面）
+    let msg_id = m.msg_id.clone()?;
+    Some(ChatMessageRow {
+        msg_id,
+        sender: m.sender.clone(),
+        content: m.content.clone(),
+        time: m.time.clone(),
+        recalled: m.recalled.unwrap_or(false),
     })
 }
 
@@ -184,6 +278,7 @@ pub fn chat_send(
             Err(e) => {
                 // 不冒泡：消息已发出，把「标记失败」当成错误会让用户以为没发出去
                 eprintln!("[chat] 标记已投递失败：{e}");
+                crate::commands_logs::push("warn", format!("标记已投递失败：{e}"));
             }
         }
     }

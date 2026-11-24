@@ -75,11 +75,30 @@ useGlassSupport();
            让这个空盒不产生新的 flex 容器：teleport 进来的元素是 `.topbar` 的直接 flex 子项。 -->
       <div class="tb-embed" data-testid="topbar-tail-mount" />
 
-      <!-- 窗口控件（无边框窗口）：最右侧 _ □ × -->
+      <!-- 主题按钮的落位槽（用户裁决：靠最右、紧贴「最小化」左侧）。
+          概览页的 `TopbarTail` 把按钮 teleport 到这里；宽度为 0 的空盒，
+          只在有内容时由 CSS 让出 8px 间距，其余页面不留空白。 -->
+      <div class="theme-mount" data-testid="theme-btn-mount" />
+
+      <!-- 窗口控件（无边框窗口）：最右侧 最小化 / 最大化 / 关闭。
+           图标是内联 SVG（stroke = currentColor），不用 `_` `□` `×` 字符：
+           字符会随字体缩放且粗细不可控，放大后发虚。 -->
       <div class="win-ctrl" data-testid="win-controls">
-        <button class="win-btn" type="button" aria-label="最小化" data-testid="win-minimize-btn" @click="onMinimize">_</button>
-        <button class="win-btn" type="button" aria-label="最大化" data-testid="win-maximize-btn" @click="onMaximize">□</button>
-        <button class="win-btn win-close" type="button" aria-label="关闭" data-testid="win-close-btn" @click="onClose">×</button>
+        <button class="win-btn" type="button" aria-label="最小化" title="最小化" data-testid="win-minimize-btn" @click="onMinimize">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <path d="M3.5 8.5h9" />
+          </svg>
+        </button>
+        <button class="win-btn" type="button" aria-label="最大化" title="最大化" data-testid="win-maximize-btn" @click="onMaximize">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+            <rect x="3.5" y="3.5" width="9" height="9" rx="1.6" />
+          </svg>
+        </button>
+        <button class="win-btn win-close" type="button" aria-label="关闭" title="关闭" data-testid="win-close-btn" @click="onClose">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
+          </svg>
+        </button>
       </div>
     </header>
 

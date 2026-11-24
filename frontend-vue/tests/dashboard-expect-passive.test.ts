@@ -52,9 +52,11 @@ import DashboardPage from '../src/pages/DashboardPage.vue';
 const LOGGED_IN = { platform: 'boss', state: 'logged_in', running: false, message: '', saved: true };
 const NO_LOGIN = { platform: 'boss', state: 'no_login', running: false, message: '', saved: false };
 
-/** 找到「读取期望」入口：按 data-testid 的 expect 相关控件。 */
+/** 找到「读取期望」入口：按 data-testid 的 expect 相关控件。
+ *  工具栏上的「筛选条件」按钮已移除，抽屉改由列表现有入口打开；
+ *  这里直接点列表内的「筛选条件」按钮（空态/工具栏共有入口）。 */
 async function openFilterAndFindReadExpect(wrapper: ReturnType<typeof mount>) {
-  await wrapper.find('[data-testid="scrape-filter-toggle-btn"]').trigger('click');
+  await wrapper.find('[data-testid="job-empty-filter-btn"]').trigger('click');
   await flushPromises();
   const btn = wrapper.find('[data-testid="scrape-filter-expect-btn"]');
   expect(btn.exists()).toBe(true);

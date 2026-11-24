@@ -4,11 +4,17 @@
  * 本文件由 main.ts 在 styles/index.css 之后引入，所以这里的规则一定压在上面。 */
 
 /* tokens.css 的高度重置只认 #root，Vue 的挂载点是 #app，这里补一条。
- * 不设 body 底色（C5）：窗口的亚克力必须透上来。 */
+ * 不设 body 底色（C5）：窗口的亚克力必须透上来。
+ *
+ * `overflow: hidden` 是硬要求（用户 m03014「最窄窗口大小底部出现了滚动条」）：
+ * `.app-shell` 有 `margin: var(--win-corner-cut)` 的内缩，无论用 margin 还是 calc，
+ * 只要某个后代多出 1px（圆角、投影、子元素的最小内容高度）就会把视口撑出滚动条。
+ * 本应用是固定骨架、各列自己滚，整页滚动一次都不该出现。 */
 html,
 body,
 #app {
   height: 100%;
+  overflow: hidden;
 }
 
 /* 同屏三兄弟的容器（SPEC §2.1 / §2.4 / A15，ADR-004 目标编排）。
@@ -41,9 +47,11 @@ body,
 /* ----------------------------------------------
  * 城市选择器（省 → 市 + 搜索）
  *
- * 定位：.city-picker 只做 position: relative 的锚，面板用 position: absolute
- * 挂在触发按钮下方，不参与文档流 —— 顶栏高度不受影响，投递列表也不会被挤压。
- * 面板宽度 min(420px, 100%) 且 max-height 内部滚动，窄屏时收窄而不是撑开。
+ * 定位：面板被 Teleport 到 body（筛选抽屉的 .f-body 是滚动容器、外层又有
+ * backdrop-filter，留在原地会被裁成一条），所以这里用 position: fixed，
+ * 具体 top / left / width / max-height 由 CityPicker.vue 按触发按钮实时量出来后
+ * 走行内样式给出。顶栏高度不受影响，投递列表也不会被挤压。
+ * 窄屏时收窄而不是撑开。
  *
  * 字号口径：本仓库 styles/tokens.css 目前没有字号变量族（那是 prototypes/ui-v1
  * 原型的口径），所以这里沿用本文件已有写法直接给 px，不新增颜色、不新增变量，
@@ -80,12 +88,8 @@ body,
 }
 
 .city-picker-panel {
-  position: absolute;
-  z-index: 40;
-  top: calc(100% + 6px);
-  left: 0;
-  width: min(420px, 100%);
-  max-height: 320px;
+  position: fixed;
+  z-index: 60;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -93,9 +97,7 @@ body,
   overflow-y: auto;
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius);
-  background: var(--glass-3);
-  backdrop-filter: blur(var(--blur-pop));
-  -webkit-backdrop-filter: blur(var(--blur-pop));
+  background: var(--popup-surface);
   box-shadow: var(--shadow-pop);
 }
 
@@ -109,6 +111,8 @@ body,
   grid-template-columns: minmax(96px, 1fr) minmax(0, 1.4fr);
   gap: 8px;
   min-height: 0;
+  /* 面板高度由行内 max-height 决定，两列吃掉剩余空间各自滚动 */
+  flex: 1 1 auto;
 }
 
 .city-picker-col {
@@ -116,9 +120,15 @@ body,
   padding: 4px;
   list-style: none;
   overflow-y: auto;
-  max-height: 220px;
+  overscroll-behavior: contain;
+  max-height: 100%;
   border-radius: var(--radius-sm);
   background: var(--glass-1);
+}
+
+.city-picker-results {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .city-picker-col.is-focus {
@@ -203,6 +213,63 @@ body,
   flex-direction: column;
   padding: 0;
   overflow: hidden;
+}
+
+/* 筛选抽屉「浮动」态：展开时改成窗口级 fixed 抽屉，左 12px 贴住窗口边。 */
+.scrape-filter-bar.is-floating {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  right: auto;
+  bottom: 12px;
+  width: min(560px, calc(100vw - 24px));
+  height: auto;
+  z-index: 45;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--hairline-strong);
+  background: var(--popup-surface);
+  box-shadow: var(--shadow-pop);
+  animation: scrape-filter-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.scrape-filter-bar.is-floating > .filter-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.scrape-filter-bar.is-floating .f-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* 筛选抽屉遮罩：与抽屉同位同尺寸，只压住抽屉那一列；点它即收起。
+ * 刻意不继承 .drawer-backdrop——那条规则是「右锚 + z-index 40」的 JD 遮罩。 */
+.filter-backdrop {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  right: auto;
+  bottom: 12px;
+  width: min(560px, calc(100vw - 24px));
+  z-index: 44;
+  border-radius: var(--radius-lg);
+  background: transparent;
+}
+
+@keyframes scrape-filter-in {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .job-fill > .scrape-filter-bar > .filter-panel {

@@ -78,7 +78,8 @@ describe('顶栏与对话框', () => {
         .split('\n')
         .map((line, i) => ({ file, line: line.trim(), no: i + 1 }))
         // 只看**属性**，不看注释正文（注释里提到这个选择器是正常的说明）。
-        .filter((x) => x.line.includes('class="chat-rail" data-testid="chat-rail"')),
+        // 类名可能追加别的表面修饰（如 `chat-rail hl-surface`），所以不按整串相等匹配。
+        .filter((x) => /class="[^"]*\bchat-rail\b[^"]*"\s+data-testid="chat-rail"/.test(x.line)),
     );
     expect(hits).toHaveLength(1);
     expect(hits[0]?.file).toBe('frontend-vue/src/pages/ChatPage.vue');
@@ -145,7 +146,7 @@ describe('撤导航后的锚点净口径（用户裁决 5 / SPEC-001 AC9）', ()
     expect(tail).not.toMatch(/\}\}\s*tokens/);
   });
 
-  it('分项 token 读数接线（原型 L1402-1403/L1406）：模型打分/打招呼 + chip 全量 title + 1360–1599 隐藏分项', () => {
+  it('分项 token 读数接线（原型 L1402-1403/L1406）：模型打分/打招呼 + chip 全量 title + 分项常驻显示', () => {
     const tail = read('frontend-vue/src/components/TopbarTail.vue');
     expect(tail).toContain('模型打分 <b>{{ tokenText(tokensScore) }}</b>');
     expect(tail).toContain('打招呼 <b>{{ tokenText(tokensGreet) }}</b>');
@@ -154,7 +155,9 @@ describe('撤导航后的锚点净口径（用户裁决 5 / SPEC-001 AC9）', ()
     expect(tail).toContain('· 打招呼');
     const css = readFileSync(join(ROOT, 'frontend-vue', 'styles', 'vue-dashboard.css'), 'utf8');
     expect(css).toContain('.tb-tokens .rail-stat');
-    expect(css).toContain('@media (min-width: 1360px) and (max-width: 1599px)');
+    // 用户裁决（m02692）：打招呼的 token 数量必须一直看得见。默认窗口 1440 正好落在
+    // 原型 L1335-1337 的 1360–1599 隐藏区间里，分项等于永远不显示，故该断点已撤。
+    expect(css).not.toContain('@media (min-width: 1360px) and (max-width: 1599px)');
   });
 
   it('主题开关全站恰好一处（顶栏合并后壳不再自带）', () => {

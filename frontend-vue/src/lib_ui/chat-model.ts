@@ -33,8 +33,13 @@ export const RAIL_NARROW_BELOW = 1280;
 export const PENDING_UID_PREFIX = 'g';
 /** 未读数封顶显示。 */
 export const UNREAD_CAP = 99;
-/** 自动投递轮询间隔（ms）；WebView 挂起时 setTimeout 不触发，循环自然停。 */
-export const AUTO_TICK_MS = 1_000;
+/**
+ * 自动投递轮询间隔：**已废弃**，恒为 undefined。
+ *
+ * 保留这个导出只是为了让契约测试能断言「前端不再有轮询间隔」；状态请求现在
+ * 全由 60~90 秒随机心跳与用户操作驱动（见 `auto-heartbeat.ts`）。
+ */
+export const AUTO_TICK_MS = undefined;
 
 /**
  * 对话框宽度公式（SPEC §2.2 / §16.6，A49）。

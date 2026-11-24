@@ -53,9 +53,9 @@
   flex-direction: column;
   border-radius: var(--radius-lg);
   border: 1px solid var(--hairline-strong);
-  background: var(--glass-3);
-  backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-1));
-  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-1));
+  background: var(--popup-surface);
+  backdrop-filter: blur(calc(var(--blur-pop) * 2.4));
+  -webkit-backdrop-filter: blur(calc(var(--blur-pop) * 2.4));
   box-shadow: var(--shadow-pop), var(--inner-light);
   opacity: 0;
   transition:
@@ -100,7 +100,7 @@
 .config-modal .config-card {
   flex: 0 0 auto;
   min-width: 0;
-  background: var(--glass-0);
+  background: var(--popup-surface);
 }
 .config-modal .config-head:hover {
   background: var(--glass-input);
@@ -129,9 +129,17 @@
   color: var(--text-3);
   line-height: 1.5;
 }
+/* 校验失败的那一行提示：只在值非法时出现，用错误色但保持 hint 的尺寸 */
+.config-modal .cfg-field > .field-hint.is-bad {
+  color: var(--bad);
+}
 
 /* ---- M4 决策记录弹窗：固定窗 ---- */
+/* overflow 必须裁：光斑层 .hl-light 覆盖整块面板，不裁的话 1px 亮环的直角会
+ * 从圆角外侧露出黑角。
+ */
 .decisions-modal {
+  overflow: hidden;
   position: fixed;
   z-index: 40;
   top: 50%;
@@ -143,9 +151,9 @@
   flex-direction: column;
   border-radius: var(--radius-lg);
   border: 1px solid var(--hairline-strong);
-  background: var(--glass-3);
-  backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-1));
-  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-1));
+  background: var(--popup-surface);
+  backdrop-filter: blur(calc(var(--blur-pop) * 2.4));
+  -webkit-backdrop-filter: blur(calc(var(--blur-pop) * 2.4));
   box-shadow: var(--shadow-pop), var(--inner-light);
   opacity: 0;
   transition:

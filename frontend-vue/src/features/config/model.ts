@@ -10,6 +10,9 @@
  * - **空串写 ''，不是 null**：null 在后端是「删除该键 = 恢复出厂」，与「清空值」不同。
  * - **API Key 掩码不回写**：留空 = 不改；以 **** 开头的掩码值一律丢弃。
  * - 本页无门槛 / 上限控件，故只走 set_app_config，不触发 set_limit。
+ *
+ * 温度（`temperature` / `greet_temperature`）与文本字段共用 diff，但落库时转成
+ * 数字并夹进 [0, 2]；解析不出的值不进 patch，界面同时给出提示。
  */
 
 import type { AppConfigReply } from '../../api/types';
@@ -22,15 +25,80 @@ export interface ConfigDraft {
   model: string;
   greet_prompt: string;
   skills: string;
+  /** 打分温度，'0'~'2' 的文本 */
+  temperature: string;
+  /** 话术温度，'0'~'2' 的文本 */
+  greet_temperature: string;
 }
 
-/** 走 diff 比较的文本字段（api_key 单独处理）。 */
-export const TEXT_FIELDS = ['base_url', 'model', 'greet_prompt', 'skills'] as const;
+/** 输入框控件类型：文本 / 数字。密钥用 password，单独处理。 */
+export type DraftKind = 'text' | 'number';
+
+/**
+ * 参与编辑与 diff 的字段全集：六项文本 + 两个温度。
+ *
+ * 温度**以字符串承载**（和文本字段同一套 diff 逻辑）：数字类型的草稿一碰
+ * `v-model.number` 就会把「0.」变成 0，用户还没打完就被改写。落库前再夹区间。
+ */
+export const TEXT_FIELDS = [
+  'base_url',
+  'model',
+  'greet_prompt',
+  'skills',
+  'temperature',
+  'greet_temperature',
+] as const;
 export type TextField = (typeof TEXT_FIELDS)[number];
+
+/** 落库是数字的字段：只在 buildPatch 里转成 number。 */
+export const NUMBER_FIELDS: readonly TextField[] = ['temperature', 'greet_temperature'];
+
+/** 温度的合法区间与出厂默认值，与后端 `infra::llm` 同源。 */
+export const TEMPERATURE_MIN = 0;
+export const TEMPERATURE_MAX = 2;
+export const TEMPERATURE_DEFAULT_SCORE = 0.2;
+export const TEMPERATURE_DEFAULT_GREET = 0.8;
 
 /** 空草稿（加载前 / 独立 mount 时的初值）。 */
 export function emptyDraft(): ConfigDraft {
-  return { api_key: '', base_url: '', model: '', greet_prompt: '', skills: '' };
+  return {
+    api_key: '',
+    base_url: '',
+    model: '',
+    greet_prompt: '',
+    skills: '',
+    temperature: '',
+    greet_temperature: '',
+  };
+}
+
+/** 温度显示成文本：0.2 → '0.2'，1 → '1'（不补零，避免每次读回都被"改写"）。 */
+export function temperatureText(v: number | null | undefined, dflt: number): string {
+  const n = typeof v === 'number' && Number.isFinite(v) ? v : dflt;
+  return String(Number(n.toFixed(2)));
+}
+
+/**
+ * 解析用户填的温度。
+ *
+ * - 空串 → `null`（空 = 不改，**不能**回落成出厂值，否则「清空保存」会凭空写一次库）
+ * - 非数字 → `null`（调用方据此提示错误，绝不猜测）
+ * - 越界 → 夹进 [0, 2]；两位小数，与后端归一化一致
+ */
+export function parseTemperature(raw: string, _dflt: number): number | null {
+  const t = (raw ?? '').trim();
+  if (t === '') return null;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return null;
+  const c = Math.min(TEMPERATURE_MAX, Math.max(TEMPERATURE_MIN, n));
+  return Math.round(c * 100) / 100;
+}
+
+/** 温度字段的即时校验文案：`null` 表示合法（合法时不弹提示）。 */
+export function temperatureError(raw: string): string | null {
+  if ((raw ?? '').trim() === '') return null;
+  if (parseTemperature(raw, TEMPERATURE_DEFAULT_SCORE) !== null) return null;
+  return `温度必须是 ${TEMPERATURE_MIN}~${TEMPERATURE_MAX} 之间的数字`;
 }
 
 /**
@@ -44,6 +112,8 @@ export function draftFromReply(cfg: AppConfigReply): ConfigDraft {
     model: (cfg.model ?? '').trim(),
     greet_prompt: cfg.greet_prompt ?? '',
     skills: (cfg.skills ?? '').trim(),
+    temperature: temperatureText(cfg.temperature, TEMPERATURE_DEFAULT_SCORE),
+    greet_temperature: temperatureText(cfg.greet_temperature, TEMPERATURE_DEFAULT_GREET),
   };
 }
 
@@ -59,7 +129,21 @@ export function buildPatch(draft: ConfigDraft, stored: ConfigDraft): Record<stri
   for (const k of TEXT_FIELDS) {
     const cur = (draft[k] ?? '').trim();
     const base = (stored[k] ?? '').trim();
-    if (cur !== base) patch[k] = cur;
+    if (cur === base) continue;
+    if (NUMBER_FIELDS.includes(k)) {
+      // 温度是数值键：后端 `set_app_config` 会把非字符串按 JSON 原样写库，
+      // 写成字符串 '0.8' 也能读，但让库里全是数字更干净、也更好比对。
+      // 清空 ≠ 恢复出厂：清空就是「不改」（返回 null），否则「把输入框全选删掉再保存」
+      // 会把出厂值当成一次改动重新写库，语义上属于凭空捏造一次写入。
+      // 要回出厂值请填数字；解析不出来的**绝不进 patch**，宁可少写一个键也不写 NaN。
+      const dflt =
+        k === 'temperature' ? TEMPERATURE_DEFAULT_SCORE : TEMPERATURE_DEFAULT_GREET;
+      const n = parseTemperature(cur, dflt);
+      if (n === null) continue;
+      patch[k] = n;
+      continue;
+    }
+    patch[k] = cur;
   }
   const key = (draft.api_key ?? '').trim();
   if (key !== '' && !key.startsWith('****')) patch.api_key = key;

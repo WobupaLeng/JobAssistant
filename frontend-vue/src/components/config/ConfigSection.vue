@@ -19,7 +19,7 @@ const emit = defineEmits<{ (e: 'update:open', value: boolean): void }>();
 </script>
 
 <template>
-  <div class="config-card" :data-testid="sectionTestId">
+  <div class="config-card hl-surface" :data-testid="sectionTestId">
     <button
       type="button"
       class="config-head"

@@ -13,6 +13,7 @@ import {
   LIST_TABS,
   SORT_FIELDS,
   batchLabel,
+  batchOps,
   cardView,
   headCount,
   keepaliveRows,
@@ -22,6 +23,7 @@ import {
   tabCount,
   tabMeta,
   visibleJobs,
+  type BatchOp,
   type ListTab,
   type SortField,
 } from '../lib_ui/job-list-model';
@@ -82,7 +84,7 @@ const emit = defineEmits<{
   (e: 'refresh'): void;
   (e: 'toggle', jobId: string): void;
   (e: 'checkAll', checked: boolean): void;
-  (e: 'batch', op: 'reject' | 'allow'): void;
+  (e: 'batch', op: BatchOp): void;
   (e: 'greet', jobId: string): void;
   (e: 'open', jobId: string): void;
   /** 空态里的两个入口：展开筛选 / 直接开始抓取（原型 `job-empty-*-btn`）。 */
@@ -98,6 +100,19 @@ const selectedCount = computed(() => props.selection.checked.length);
 const selectedHere = computed(() => props.selection.checked.filter((id) => visibleIds.value.includes(id)));
 const total = computed(() => headCount(props.counts, props.tab, props.showAll));
 const batchVisible = computed(() => showBatchActions(selectedCount.value));
+/** 当前页签允许的批量动作（未投递两颗、不投递/已投递各一颗）。 */
+const ops = computed(() => batchOps(props.tab));
+
+/** 批量按钮配色：危险动作用 danger，正向动作用 primary，撤销类用 ghost。 */
+function opClass(op: BatchOp): string {
+  if (op === 'reject') return 'btn btn-sm btn-danger';
+  return op === 'deliver' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-ghost';
+}
+
+/** 测试锚点按动作区分；`allow` 沿用历史的 `job-batch-allow-btn` 不变。 */
+function opTestId(op: BatchOp): string {
+  return `job-batch-${op}-btn`;
+}
 
 /* 列表状态播报（原型 L2193 逐字「列表状态 {mode} · 共 {total} 条 · 已选 {n} 条」）。
  * mode 用四态词 loading / error / empty / default，与右栏 rail-state 同一套口径；
@@ -192,11 +207,17 @@ function onSort(field: SortField): void {
       <span class="batch-count" data-testid="job-selected-count">已选 {{ selectedCount }} 条</span>
       <span class="batch-total" data-testid="job-visible-total">列表共 {{ visible.length }} 条</span>
       <span class="batch-actions" :hidden="!batchVisible" data-testid="job-batch-actions">
-        <button class="btn btn-sm btn-danger" type="button" data-testid="job-batch-reject-btn" @click="emit('batch', 'reject')">
-          {{ batchLabel('reject', selectedCount) }}
-        </button>
-        <button class="btn btn-sm btn-ghost" type="button" data-testid="job-batch-allow-btn" @click="emit('batch', 'allow')">
-          {{ batchLabel('allow', selectedCount) }}
+        <!-- 页签决定动作集合（`batchOps(tab)`）：未投递 → 不投递/已投递；
+             不投递 → 撤销否决；已投递 → 取消投递。三页签互斥，不会同时出现四颗。 -->
+        <button
+          v-for="op in ops"
+          :key="op"
+          :class="opClass(op)"
+          type="button"
+          :data-testid="opTestId(op)"
+          @click="emit('batch', op)"
+        >
+          {{ batchLabel(op, selectedCount, tab) }}
         </button>
       </span>
     </div>

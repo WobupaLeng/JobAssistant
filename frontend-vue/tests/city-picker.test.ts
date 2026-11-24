@@ -26,6 +26,41 @@ import {
 const tid = (id: string) => `[data-testid="${id}"]`;
 
 /**
+ * 面板查询走 `document.body`，不走 wrapper。
+ *
+ * 面板是 `<Teleport to="body">` + `position: fixed`（`CityPicker.vue:229`）：
+ * 它为了躲开筛选抽屉这个滚动容器（`overflow-y: auto` 会裁掉绝对定位浮层，
+ * 且抽屉的 `backdrop-filter` 会新建包含块）被搬出了组件子树。
+ * Teleport 之后 wrapper 的 `find/get/findAll` 只在组件自己那棵树里找，
+ * 面板元素一个都看不见——判据变成 `document.body`。
+ * 触发按钮仍在原地（`scrape-filter-city` 是面板外的 `<button>`），继续用 wrapper。
+ */
+const panel = () => document.body.querySelector(tid('city-picker-panel'));
+const panelAll = (prefix: string) =>
+  document.body.querySelectorAll(`[data-testid^="${prefix}"]`);
+
+/** 面板内的元素必须存在：拿到才允许 `dispatchEvent` / 读属性。 */
+function inPanel(id: string): HTMLElement {
+  const el = document.body.querySelector<HTMLElement>(tid(id));
+  expect(el, `面板里找不到 ${id}（Teleport 后的 DOM 里有吗）`).not.toBeNull();
+  return el!;
+}
+
+/** 点面板内的元素：`@vue/test-utils` 的 `trigger` 只认 wrapper，这里直接派发冒泡事件。 */
+async function clickInPanel(id: string): Promise<void> {
+  inPanel(id).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  await flush();
+}
+
+/** 给面板内的输入框赋值并派发 `input`（Vue 的 v-model 监听它）。 */
+async function typeInPanel(id: string, value: string): Promise<void> {
+  const el = inPanel(id) as HTMLInputElement;
+  el.value = value;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  await flush();
+}
+
+/**
  * 挂载并把容器挂到 `document.body` 下面。
  *
  * **必须 attachTo**：不挂载时 `w.get(...)` 的元素不在文档里，
@@ -106,8 +141,8 @@ describe('城市选择器 · 组件', () => {
     await w.get(tid('scrape-filter-city')).trigger('click');
     await flush();
     expect(w.get(tid('scrape-filter-city')).attributes('aria-expanded')).toBe('true');
-    expect(w.find(tid('city-picker-panel')).exists()).toBe(true);
-    expect(w.findAll('[data-testid^="city-picker-province-"]').length).toBe(PROVINCES.length);
+    expect(panel()).not.toBeNull();
+    expect(panelAll('city-picker-province-').length).toBe(PROVINCES.length);
     expect(document.activeElement?.getAttribute('data-testid')).toBe('city-picker-search');
     w.unmount();
   });
@@ -115,9 +150,10 @@ describe('城市选择器 · 组件', () => {
   it('点省 → 右列 = 该省 cities.length', async () => {
     const w = mountPicker();
     await w.get(tid('scrape-filter-city')).trigger('click');
+    await flush();
     const target = PROVINCES[3];
-    await w.get(tid(`city-picker-province-${target.code}`)).trigger('click');
-    expect(w.findAll('[data-testid^="city-picker-city-"]').length).toBe(target.cities.length);
+    await clickInPanel(`city-picker-province-${target.code}`);
+    expect(panelAll('city-picker-city-').length).toBe(target.cities.length);
     w.unmount();
   });
 
@@ -127,15 +163,15 @@ describe('城市选择器 · 组件', () => {
     await flush();
     const p = PROVINCES[0];
     const c = p.cities[0];
-    await w.get(tid(`city-picker-province-${p.code}`)).trigger('click');
-    await w.get(tid(`city-picker-city-${c.code}`)).trigger('click');
+    await clickInPanel(`city-picker-province-${p.code}`);
+    await clickInPanel(`city-picker-city-${c.code}`);
     expect(w.emitted('update:modelValue')?.[0]).toEqual([c.code]);
-    expect(w.find(tid('city-picker-panel')).exists()).toBe(false);
+    expect(panel()).toBeNull();
     expect(w.get(tid('scrape-filter-city')).attributes('aria-expanded')).toBe('false');
     // 面板已卸载，搜索框 DOM 不存在：重开一次确认搜索词被清空（状态机 closePicker 的契约）
     await w.get(tid('scrape-filter-city')).trigger('click');
     await flush();
-    expect((w.get(tid('city-picker-search')).element as HTMLInputElement).value).toBe('');
+    expect((inPanel('city-picker-search') as HTMLInputElement).value).toBe('');
     w.unmount();
   });
 
@@ -143,12 +179,13 @@ describe('城市选择器 · 组件', () => {
     for (const q of ['深圳', 'shenzhen', 'sz', '101280600']) {
       const w = mountPicker();
       await w.get(tid('scrape-filter-city')).trigger('click');
-      await w.get(tid('city-picker-search')).setValue(q);
-      const hit = w.find(tid('city-picker-result-101280600'));
-      expect(hit.exists(), `查询「${q}」未命中深圳`).toBe(true);
-      expect(hit.text()).toContain('深圳');
-      expect(w.find(tid('city-picker-province')).exists()).toBe(false);
-      await w.get(tid('city-picker-result-101280600')).trigger('click');
+      await flush();
+      await typeInPanel('city-picker-search', q);
+      const hit = document.body.querySelector(tid('city-picker-result-101280600'));
+      expect(hit, `查询「${q}」未命中深圳`).not.toBeNull();
+      expect(hit!.textContent).toContain('深圳');
+      expect(panelAll('city-picker-province').length).toBe(0);
+      await clickInPanel('city-picker-result-101280600');
       expect(w.emitted('update:modelValue')?.[0]).toEqual(['101280600']);
       w.unmount();
     }
@@ -157,9 +194,10 @@ describe('城市选择器 · 组件', () => {
   it('无结果时显示「没有匹配的城市」', async () => {
     const w = mountPicker();
     await w.get(tid('scrape-filter-city')).trigger('click');
-    await w.get(tid('city-picker-search')).setValue('zzzzzzzz');
-    expect(w.findAll('[data-testid^="city-picker-result-"]').length).toBe(0);
-    expect(w.get(tid('city-picker-empty')).text()).toBe('没有匹配的城市');
+    await flush();
+    await typeInPanel('city-picker-search', 'zzzzzzzz');
+    expect(panelAll('city-picker-result-').length).toBe(0);
+    expect(inPanel('city-picker-empty').textContent?.trim()).toBe('没有匹配的城市');
     w.unmount();
   });
 
@@ -173,11 +211,11 @@ describe('城市选择器 · 组件', () => {
     const w = mountPicker();
     await w.get(tid('scrape-filter-city')).trigger('click');
     await flush();
-    expect(w.find(tid('city-picker-panel')).exists()).toBe(true);
+    expect(panel()).not.toBeNull();
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await w.vm.$nextTick();
     await flush();
-    expect(w.find(tid('city-picker-panel')).exists()).toBe(false);
+    expect(panel()).toBeNull();
     expect(document.activeElement?.getAttribute('data-testid')).toBe('scrape-filter-city');
     w.unmount();
   });

@@ -29,6 +29,18 @@ import {
   type PickerState,
 } from '../lib_ui/city-picker';
 
+/** 面板浮层定位：面板被 Teleport 到 body，用 fixed 贴着触发按钮下方展开。 */
+interface PanelBox {
+  top: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+}
+
+const PANEL_MIN_WIDTH = 260;
+const PANEL_MAX_HEIGHT = 320;
+const VIEW_GAP = 8;
+
 const props = defineProps<{
   /** 当前选中的城市编码（9 位）。未知编码由 `cityName` 原样回显。 */
   modelValue: string;
@@ -44,6 +56,8 @@ const state = ref<PickerState>(initialPickerState());
 const rootEl = ref<HTMLElement | null>(null);
 const triggerEl = ref<HTMLButtonElement | null>(null);
 const searchEl = ref<HTMLInputElement | null>(null);
+const panelEl = ref<HTMLElement | null>(null);
+const box = ref<PanelBox | null>(null);
 
 const label = computed(() => props.label ?? '城市');
 const display = computed(() => cityName(props.modelValue));
@@ -63,6 +77,33 @@ function commit(code: string): void {
 
 function toggle(): void {
   state.value = state.value.open ? closePicker(state.value) : openPicker(state.value);
+}
+
+/**
+ * 量触发按钮的位置，把面板钉在它下面。
+ *
+ * 面板必须 Teleport 到 body：筛选抽屉 `.f-body` 是滚动容器（`overflow-y: auto`），
+ * 抽屉外层还带 backdrop-filter（会新建包含块），留在原地时面板被裁成抽屉里的一条。
+ */
+function placePanel(): void {
+  const anchor = triggerEl.value;
+  if (!anchor) return;
+  const r = anchor.getBoundingClientRect();
+  const viewW = window.innerWidth;
+  const viewH = window.innerHeight;
+  const width = Math.min(Math.max(r.width, PANEL_MIN_WIDTH), Math.max(160, viewW - VIEW_GAP * 2));
+  const left = Math.min(Math.max(VIEW_GAP, r.left), Math.max(VIEW_GAP, viewW - width - VIEW_GAP));
+  const below = viewH - r.bottom - VIEW_GAP * 2;
+  const above = r.top - VIEW_GAP * 2;
+  // 下面放得下就往下展，否则翻到上面（空间取大的那边）
+  const openUp = below < 160 && above > below;
+  const maxHeight = Math.max(120, Math.min(PANEL_MAX_HEIGHT, openUp ? above : below));
+  box.value = {
+    top: openUp ? Math.max(VIEW_GAP, r.top - VIEW_GAP - maxHeight) : r.bottom + VIEW_GAP,
+    left,
+    width,
+    maxHeight,
+  };
 }
 
 function close(): void {
@@ -122,6 +163,7 @@ function onOutsidePointer(ev: PointerEvent): void {
   if (!state.value.open) return;
   const root = rootEl.value;
   if (root && ev.target instanceof Node && root.contains(ev.target)) return;
+  if (panelEl.value && ev.target instanceof Node && panelEl.value.contains(ev.target)) return;
   close();
 }
 
@@ -137,18 +179,32 @@ function onDocumentKeydown(ev: KeyboardEvent): void {
 watch(
   () => state.value.open,
   (open) => {
-    if (open) void nextTick(() => searchEl.value?.focus());
+    if (!open) return;
+    // nextTick 之前面板还没被渲染成 DOM，所以先量锚点、再聚焦搜索框
+    placePanel();
+    void nextTick(() => searchEl.value?.focus());
   },
 );
+
+watch(box, () => {
+  if (!state.value.open) return;
+  void nextTick(() => {
+    if (searchEl.value && document.activeElement !== searchEl.value) searchEl.value.focus();
+  });
+});
 
 if (typeof document !== 'undefined') {
   document.addEventListener('pointerdown', onOutsidePointer, true);
   document.addEventListener('keydown', onDocumentKeydown, true);
+  window.addEventListener('resize', placePanel);
+  window.addEventListener('scroll', placePanel, true);
 }
 onBeforeUnmount(() => {
   if (typeof document !== 'undefined') {
     document.removeEventListener('pointerdown', onOutsidePointer, true);
     document.removeEventListener('keydown', onDocumentKeydown, true);
+    window.removeEventListener('resize', placePanel);
+    window.removeEventListener('scroll', placePanel, true);
   }
 });
 </script>
@@ -170,12 +226,21 @@ onBeforeUnmount(() => {
       <span class="city-picker-caret" aria-hidden="true">▾</span>
     </button>
 
-    <div
-      v-if="state.open"
-      id="city-picker-panel"
-      class="city-picker-panel"
-      data-testid="city-picker-panel"
-    >
+    <Teleport to="body">
+      <div
+        v-if="state.open && box"
+        id="city-picker-panel"
+        ref="panelEl"
+        class="city-picker-panel"
+        data-testid="city-picker-panel"
+        data-overlay="popover"
+        :style="{
+          top: `${box.top}px`,
+          left: `${box.left}px`,
+          width: `${box.width}px`,
+          maxHeight: `${box.maxHeight}px`,
+        }"
+      >
       <input
         ref="searchEl"
         class="input city-picker-search"
@@ -259,6 +324,7 @@ onBeforeUnmount(() => {
           没有匹配的城市
         </li>
       </ul>
-    </div>
+      </div>
+    </Teleport>
   </div>
 </template>

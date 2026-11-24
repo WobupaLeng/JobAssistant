@@ -48,6 +48,16 @@
   --fs-md: calc(15px * var(--ui-scale));
   --fs-lg: calc(20px * var(--ui-scale));
 
+  /* 字号档位（用户裁决 M1）：小 / 标准 / 大，由 lib_ui/palette.ts 写进 <html> 行内
+   * style 并持久化到 localStorage。**必须在上面 5 档之后定义**——这行写在前面的话，
+   * 上面那些 calc 会读到旧值，切换字号对正文毫无反应。 */
+  --font-scale: 1;
+  --fs-2xs: calc(11px * var(--ui-scale) * var(--font-scale));
+  --fs-xs: calc(12px * var(--ui-scale) * var(--font-scale));
+  --fs-sm: calc(13px * var(--ui-scale) * var(--font-scale));
+  --fs-md: calc(15px * var(--ui-scale) * var(--font-scale));
+  --fs-lg: calc(20px * var(--ui-scale) * var(--font-scale));
+
   /* ---------- 玻璃底色 ----------
    * 越靠前的层越亮（surface-0 是页面底板，最暗最透）。
    * alpha 全部 < 0.8，否则亚克力透不出来，窗口会变成一块死色。 */
@@ -56,6 +66,12 @@
   --glass-2: rgba(30, 39, 58, 0.58);
   --glass-3: rgba(42, 53, 76, 0.70);
   --glass-input: rgba(8, 12, 20, 0.40);
+
+  /* 弹层实底：抽屉 / 敏感库 / 配置卡 / 决策记录 / 筛选条共用。
+   * 这些面板要盖在内容之上、又要看得清字，用玻璃层会「透到背后」——
+   * 用户裁决（m00586 之后）统一改成这层不透明实底。**必须有定义**，
+   * 否则 `background: var(--popup-surface)` 会算成 unset，面板直接变透明。 */
+  --popup-surface: #0b1220;
 
   /* ---------- 模糊强度 ----------
    * 分层递减：底板要糊得狠一点才藏得住桌面细节，越靠上的层越清晰（有层次）。
@@ -87,6 +103,11 @@
   --spec-bottom: rgba(255, 255, 255, 0.04);
   --spec-side: rgba(255, 255, 255, 0.08);
   --spec-strength: 1;
+  /* 高光峰值：默认对角弧与指针光斑的起点色。必须是纯白，
+   * 不能复用 --spec-top（0.22 只是描边的亮度，画高光会发灰）。 */
+  --spec-peak: #ffffff;
+  /* 进卡 / 离卡补间时长（main.ts 的 HL_RESTORE_MS 必须与之同值，改一处须同改另一处）。 */
+  --hl-restore-ms: 220ms;
 
   /* ---------- 材质散射色 ----------
    * 光穿过主色玻璃后的染色。极淡的青绿，让玻璃「有材质」而不是纯灰。 */
@@ -151,6 +172,12 @@
   --radius: 16px;
   --radius-lg: 22px;
   --radius-pill: 999px;
+  /* 窗口圆角切割：DWM 给窗口画圆角（lib.rs 的 apply_round_corners），它的弧线落在
+   * 窗口**边缘**上；外壳若贴边，自己 16px 的角会被系统弧再裁一次，边线在四角断掉。
+   * 因此外壳四周退开这一圈透明内边距，让系统弧与外壳弧同心：
+   * 外壳圆角 = DWM 弧半径 - 内缩量。DWM 弧半径约 8px，故内缩取 2px。
+   * 改这个值必须同步看 `.app-shell` 的 padding（layout.css）。 */
+  --win-corner-cut: 2px;
 
   /* ---------- 投影 ----------
    * 两层：贴身的窄影定形（near），远处的宽影分层（far）。
@@ -208,6 +235,8 @@
   --glass-2: rgba(255, 255, 255, 0.74);
   --glass-3: rgba(255, 255, 255, 0.86);
   --glass-input: rgba(255, 255, 255, 0.70);
+  /* 浅色弹层实底：与深色同一条规则（不透明、盖住背后内容），只是提亮。 */
+  --popup-surface: #f4f7fb;
 
   /* 浅底更刺眼：模糊与饱和度都要更狠 */
   --blur-0: 24px;
@@ -228,6 +257,8 @@
   --spec-bottom: rgba(15, 23, 42, 0.04);
   --spec-side: rgba(15, 23, 42, 0.05);
   --spec-strength: 0.7;
+  /* 峰值色两档同值：浅底上高光靠 --spec-strength 压到 0.7 就够，不需要换色。 */
+  --spec-peak: #ffffff;
 
   --glass-tint: rgba(16, 185, 129, 0.04);
   --glass-tint-strong: rgba(16, 185, 129, 0.08);

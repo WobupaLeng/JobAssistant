@@ -12,13 +12,18 @@
 .drawer-backdrop,
 .drawer-mask {
   position: fixed;
-  inset: 0;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: min(560px, calc(100vw - 24px));
+  border-radius: var(--radius-lg);
   z-index: 40;
-  background: rgba(0, 0, 0, 0.35);
-  -webkit-backdrop-filter: blur(2px);
-  backdrop-filter: blur(2px);
+  background: var(--popup-surface);
+  -webkit-backdrop-filter: blur(calc(var(--blur-pop) * 2.4));
+  backdrop-filter: blur(calc(var(--blur-pop) * 2.4));
   /* 遮罩本身不播进场：旧版 0.18s 的淡入在压暗列表时几乎不可见，
    * 而多一条动画就要多一条 reduced-motion 分支。面板滑入已经足够交代层级。 */
+  background: var(--popup-surface);
 }
 
 @keyframes drawer-fade-in {
@@ -45,7 +50,7 @@
   flex-direction: column;
   min-height: 0;
   border-radius: var(--radius-lg);
-  background: var(--glass-3);
+  background: var(--popup-surface);
   border: 1px solid var(--hairline-strong);
   box-shadow: var(--shadow-pop);
   -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-2));
@@ -193,4 +198,39 @@
     bottom: 8px;
     width: calc(100vw - 16px);
   }
+}
+
+/* 条件筛选左侧抽屉的遮罩：点击空白处收起；只覆盖抽屉所在的左侧列，与抽屉同位同尺寸。 */
+.filter-backdrop {
+  top: 12px;
+  left: 12px;
+  right: auto;
+  bottom: 12px;
+  width: min(560px, calc(100vw - 24px));
+  background: transparent;
+  cursor: default;
+}
+
+.scrape-filter-bar.glass-l2 {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  bottom: 12px;
+  width: min(560px, calc(100vw - 24px));
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: var(--radius-lg);
+  background: var(--popup-surface);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: var(--shadow-pop);
+  opacity: 1;
+  transform: none;
+  animation: scrape-filter-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes scrape-filter-in {
+  from { opacity: 0; transform: translateX(-24px); }
+  to   { opacity: 1; transform: none; }
 }

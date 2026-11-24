@@ -12,11 +12,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Job } from '../api/types';
 import { getJob } from '../api/commands/db';
 import { hasHigherOverlay } from '../lib_ui/overlay-stack';
+import { emptyJob } from '../lib_ui/job';
 import {
   DASH,
   actionFailPrefix,
   closeDetail,
-  deliverAction,
+  detailActions,
   detailChips,
   detailCompany,
   detailHeadChips,
@@ -31,7 +32,7 @@ import {
   detailWhen,
   needsJdFetch,
   openDetail,
-  rejectAction,
+  type DetailAct,
   type DetailAction,
   EMPTY_DETAIL,
 } from '../lib_ui/job-detail-model';
@@ -46,13 +47,15 @@ const props = withDefaults(
     minScore?: number | null;
     /** 满分，来自 `get_scoring_spec`（C10）。 */
     scoreMax?: number | null;
+    /** 当前列表页签：决定底部动作按钮（`pending` / `delivered` / `rejected`）。 */
+    tab?: string;
   }>(),
-  { job: null, minScore: null, scoreMax: null },
+  { job: null, minScore: null, scoreMax: null, tab: 'pending' },
 );
 
 const emit = defineEmits<{
   (e: 'close'): void;
-  (e: 'act', action: DetailAction): void;
+  (e: 'act', action: DetailAct): void;
   (e: 'chat', jobId: string): void;
 }>();
 
@@ -121,11 +124,29 @@ function onKeydown(ev: KeyboardEvent): void {
   close();
 }
 
-onMounted(() => window.addEventListener('keydown', onKeydown));
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown);
+  document.addEventListener('pointerdown', onDocPointerDown, true);
+});
 onBeforeUnmount(() => {
   alive = false;
   window.removeEventListener('keydown', onKeydown);
+  document.removeEventListener('pointerdown', onDocPointerDown, true);
 });
+
+/** 点击抽屉以外的任意位置关闭（捕获阶段）：遮罩只覆盖右侧一列，
+ *  页面其余区域的点击不会冒泡到遮罩上，必须挂在 document 层判定。
+ *  规则同 Esc：上层（决策记录 / 配置）开着时这层不出手。 */
+function onDocPointerDown(ev: PointerEvent): void {
+  if (!props.job) return;
+  if (hasHigherOverlay('drawer')) return;
+  const el = ev.target as HTMLElement | null;
+  if (el === null) return;
+  if (el.closest('[data-testid="job-detail-drawer"]') !== null) return;
+  // 抽屉的触发点（岗位卡）不参与关闭，否则「点开」会立刻被同一次点击关掉。
+  if (el.closest('[data-testid="job-detail-close-btn"]') !== null) return;
+  close();
+}
 
 const j = computed<Job | null>(() => full.value);
 const isOpen = computed(() => j.value !== null);
@@ -146,18 +167,12 @@ const kv = computed(() => (j.value ? detailKv(j.value) : []));
 const link = computed(() => (j.value ? detailLink(j.value) : null));
 const when = computed(() => (j.value ? detailWhen(j.value) : DASH));
 const rejected = computed(() => (j.value ? j.value.rejected !== 0 : false));
-const rejectMeta = computed(() =>
-  j.value
-    ? rejectAction(j.value)
-    : { action: 'reject' as DetailAction, testId: 'job-detail-reject-btn', label: '不投递', btnClass: 'btn btn-sm btn-danger', disabled: false },
-);
-const deliverMeta = computed(() =>
-  j.value
-    ? deliverAction(j.value)
-    : { action: 'deliver' as DetailAction, testId: 'job-detail-deliver-btn', label: '标记已投递', btnClass: 'btn btn-sm btn-primary', disabled: false },
+/** 底部动作按钮：由当前页签裁（见 `detailActions` 的注释）；未加载出岗位时按页签给占位。 */
+const footActions = computed(() =>
+  j.value ? detailActions(j.value, props.tab) : detailActions(emptyJob(), props.tab),
 );
 
-function act(a: DetailAction): void {
+function act(a: DetailAct): void {
   if (!j.value) return;
   emit('act', a);
 }
@@ -188,7 +203,7 @@ defineExpose({ patch, closeDetail, jdLoading, jdError });
   <aside
     ref="panel"
     v-show="isOpen"
-    class="drawer glass-l2"
+    class="drawer glass-l2 hl-surface"
     :class="{ 'is-open': isOpen }"
     data-testid="job-detail-drawer"
     role="dialog"
@@ -290,20 +305,14 @@ defineExpose({ patch, closeDetail, jdLoading, jdError });
 
     <div class="drawer-foot" data-testid="job-detail-foot">
       <button
-        :class="rejectMeta.btnClass"
-        :data-testid="rejectMeta.testId"
-        :disabled="rejectMeta.disabled"
-        @click="act(rejectMeta.action)"
+        v-for="meta in footActions"
+        :key="meta.action"
+        :class="meta.btnClass"
+        :data-testid="meta.testId"
+        :disabled="meta.disabled"
+        @click="act(meta.action)"
       >
-        {{ rejectMeta.label }}
-      </button>
-      <button
-        :class="deliverMeta.btnClass"
-        :data-testid="deliverMeta.testId"
-        :disabled="deliverMeta.disabled"
-        @click="act(deliverMeta.action)"
-      >
-        {{ deliverMeta.label }}
+        {{ meta.label }}
       </button>
       <button class="btn btn-ghost" data-testid="job-detail-chat" @click="chatWithBoss">去跟 Boss 聊</button>
       <span class="spacer" />

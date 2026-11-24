@@ -6,6 +6,8 @@ import {
   isEmptyPatch,
   keyMaskText,
   keyPlaceholder,
+  parseTemperature,
+  temperatureError,
   type ConfigDraft,
 } from '../src/features/config/model';
 import type { AppConfigReply } from '../src/api/types';
@@ -16,6 +18,8 @@ function cfg(over: Partial<AppConfigReply> = {}): AppConfigReply {
     api_key_hint: '****9f3c',
     has_key: true,
     model: 'deepseek-chat',
+    temperature: 0.2,
+    greet_temperature: 0.8,
     score_mode: 'rule',
     theme: 'dark',
     llm_prefilter: 50,
@@ -114,11 +118,17 @@ describe('buildPatch — 绝不产出 null / 禁键', () => {
       model: '',
       greet_prompt: '',
       skills: '',
+      // 温度留空 = 回落到出厂值，与基线相同 ⇒ 不进 patch
+      temperature: '',
+      greet_temperature: '',
     };
     const patch = buildPatch(draft, stored);
     for (const v of Object.values(patch)) expect(v).not.toBeNull();
     expect(Object.keys(patch)).not.toContain('min_score');
     expect(Object.keys(patch)).not.toContain('api_key_hint');
+    // 温度清空 = 不改：不能把出厂值当成一次改动重新写库
+    expect(Object.keys(patch)).not.toContain('temperature');
+    expect(Object.keys(patch)).not.toContain('greet_temperature');
     expect(patch).toEqual({ base_url: '', model: '', greet_prompt: '', skills: '' });
   });
 });
@@ -144,5 +154,55 @@ describe('掩码回显 / placeholder / 恢复默认', () => {
   it('defaultPrompt 取出厂模板', () => {
     expect(defaultPrompt(cfg({ greet_prompt_default: '出厂模板' }))).toBe('出厂模板');
     expect(defaultPrompt(null)).toBe('');
+  });
+});
+
+describe('温度：草稿 / 校验 / 落库类型', () => {
+  const stored = draftFromReply(cfg());
+
+  it('回执里的数字读成文本，不补零', () => {
+    const d = draftFromReply(cfg({ temperature: 0.2, greet_temperature: 1 }));
+    expect(d.temperature).toBe('0.2');
+    expect(d.greet_temperature).toBe('1');
+  });
+
+  it('后端没给温度 → 回落到出厂默认值', () => {
+    const { temperature: _t, greet_temperature: _g, ...rest } = cfg();
+    const d = draftFromReply(rest as AppConfigReply);
+    expect(d.temperature).toBe('0.2');
+    expect(d.greet_temperature).toBe('0.8');
+  });
+
+  it('只改温度时 patch 里是数字，不是字符串', () => {
+    const draft: ConfigDraft = { ...stored, greet_temperature: '1.1' };
+    const patch = buildPatch(draft, stored);
+    expect(patch).toEqual({ greet_temperature: 1.1 });
+    expect(typeof patch.greet_temperature).toBe('number');
+  });
+
+  it('越界输入夹进 0~2 再落库', () => {
+    expect(buildPatch({ ...stored, temperature: '5' }, stored)).toEqual({ temperature: 2 });
+    expect(buildPatch({ ...stored, temperature: '-1' }, stored)).toEqual({ temperature: 0 });
+  });
+
+  it('非法输入进不了 patch，并给出提示文案', () => {
+    const draft: ConfigDraft = { ...stored, temperature: 'abc' };
+    expect(buildPatch(draft, stored)).toEqual({});
+    expect(temperatureError('abc')).toContain('0~2');
+    expect(temperatureError('0.9')).toBeNull();
+    expect(temperatureError('')).toBeNull();
+  });
+
+  it('清空温度框 = 不改，不是"恢复出厂"', () => {
+    const patch = buildPatch({ ...stored, temperature: '', greet_temperature: '  ' }, stored);
+    expect(patch).toEqual({});
+  });
+
+  it('parseTemperature：空串 = 不改（null）、非数字给 null、越界夹住、两位小数', () => {
+    expect(parseTemperature('', 0.8)).toBeNull();
+    expect(parseTemperature('   ', 0.8)).toBeNull();
+    expect(parseTemperature('abc', 0.8)).toBeNull();
+    expect(parseTemperature('0.333', 0.8)).toBe(0.33);
+    expect(parseTemperature('2.5', 0.8)).toBe(2);
   });
 });

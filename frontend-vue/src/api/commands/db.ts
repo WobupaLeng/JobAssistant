@@ -172,6 +172,16 @@ export function markDelivered(jobIds: readonly string[]): Promise<number> {
 }
 
 /**
+ * 从「已投递」放回待投递（`status` 写回 `pending`）。
+ *
+ * 后端 `set_delivered(&ids, false)` 早已实现（`sqlite/admin.rs`），只差一条命令壳，
+ * 与 `allow_jobs` 对称。
+ */
+export function unmarkDelivered(jobIds: readonly string[]): Promise<number> {
+  return setJobFlag('unmark_delivered', jobIds);
+}
+
+/**
  * 读决策记录（新 → 旧）。
  *
  * 载荷结构：`{ args: { limit?, afterId?, beforeId? } }`——驼峰**是** `afterId` / `beforeId`，

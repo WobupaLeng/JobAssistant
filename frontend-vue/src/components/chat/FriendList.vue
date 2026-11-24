@@ -95,7 +95,7 @@ defineExpose({ listEl });
 </script>
 
 <template>
-  <div class="rail-panel" :data-prefix="props.prefix">
+<div class="rail-panel" :data-prefix="props.prefix">
     <div class="rail-head">
       <span class="rail-title">{{ props.title }}</span>
       <span class="chip" :data-testid="ids.count">{{ props.friends.length }}</span>
@@ -196,7 +196,7 @@ defineExpose({ listEl });
           :key="f.uid"
           type="button"
           role="option"
-          class="friend"
+          class="friend hl-surface"
           :class="{ 'is-active': f.uid === props.activeUid }"
           :aria-selected="f.uid === props.activeUid ? 'true' : 'false'"
           :data-testid="`friend-${f.uid}`"

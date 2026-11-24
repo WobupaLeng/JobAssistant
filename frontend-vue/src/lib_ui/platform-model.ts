@@ -50,11 +50,17 @@ export function platformPrefix(id: string): string {
  *
  * `checked`：只有选中的平台打勾；未接入的平台恒不勾（原型里它们的 checkbox 是 disabled）。
  * 登录按钮只在「已接入且被选中」时出现——没选中的平台点了登录也没意义。
+ *
+ * **已登录时登录按钮变成不可点的「已登录」**（用户 m02848）：登录态是权威查询结果，
+ * 已登录还留着可点的「登录」会让用户以为要重复扫码。这里把 `loggedIn` 作为入参，
+ * 由调用方从 `LoginStatus.state` 取（口径 `login-model.isLoggedIn`），本函数只做视图。
+ * 「退出登录 / 保存登录」是另一个按钮，仍由 `login-model` 派生，不受此影响。
  */
 export function platformCardView(
   p: PlatformOpt,
   selectedId: string,
   loginBusy: boolean,
+  loggedIn = false,
 ): PlatformCardView {
   const ready = p.ready;
   const checked = ready && p.id === selectedId;
@@ -71,15 +77,24 @@ export function platformCardView(
     title: ready ? p.name : '未接入',
     checked,
     loginVisible: ready && checked,
-    loginLabel: loginBusy ? '登录中…' : '登录',
-    loginDisabled: loginBusy,
-    loginTitle: ready ? '打开 Boss 登录窗口扫码' : '未接入',
+    loginLabel: loggedIn ? '已登录' : loginBusy ? '登录中…' : '登录',
+    // 已登录恒禁用（不因 busy 与否放开）；未登录时只有 busy 禁用。
+    loginDisabled: loggedIn || loginBusy,
+    loginTitle: loggedIn
+      ? '当前已登录；需要换账号请先点「退出登录」'
+      : ready
+        ? '打开 Boss 登录窗口扫码'
+        : '未接入',
   };
 }
 
 /** 三张卡。 */
-export function platformCards(selectedId: string, loginBusy: boolean): PlatformCardView[] {
-  return PLATFORMS.map((p) => platformCardView(p, selectedId, loginBusy));
+export function platformCards(
+  selectedId: string,
+  loginBusy: boolean,
+  loggedIn = false,
+): PlatformCardView[] {
+  return PLATFORMS.map((p) => platformCardView(p, selectedId, loginBusy, loggedIn));
 }
 
 /** 点勾选：只有已接入的平台能被选中，且不允许取消成"无平台"。 */

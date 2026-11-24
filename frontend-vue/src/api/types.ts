@@ -196,6 +196,12 @@ export interface GreetReply {
   tokens: number;
   source: string;
   note: string;
+  /** 本次用掉的库内岗位 id；空表示只按标题/公司写。 */
+  job_id?: string;
+  /** 提示词里是否真的带上了 JD 正文（聊天页据此提示「这句是拿整段 JD 写的」）。 */
+  jd_used?: boolean;
+  /** 是否用了 HR 的回复（「生成回复」路径）。 */
+  reply_used?: boolean;
 }
 
 /** 期望职位（`list_expectations`）的一行。 */
@@ -272,6 +278,10 @@ export interface AppConfigReply {
   api_key_hint: string;
   has_key: boolean;
   model: string;
+  /** 打分温度（0~2，缺省 0.2）：低 = 同一条 JD 每次分数稳定 */
+  temperature: number;
+  /** 话术温度（0~2，缺省 0.8）：高 = 招呼语更有变化 */
+  greet_temperature: number;
   score_mode: string;
   theme: string;
   llm_prefilter: number;

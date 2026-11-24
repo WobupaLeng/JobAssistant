@@ -55,6 +55,30 @@ pub fn build_llm_client(
     Some(HttpLlmClient::new(key, base, name))
 }
 
+/// 从配置键值对里取一个原文（去空白，空串视为没配）。
+fn cfg_text<K: AsRef<str>, V: AsRef<str>>(pairs: &[(K, V)], want: &str) -> Option<String> {
+    pairs
+        .iter()
+        .find(|(k, _)| k.as_ref() == want)
+        .map(|(_, v)| v.as_ref().trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// 连同温度一起构造客户端（启动与保存两条路径都用它）。
+///
+/// 温度必须跟密钥、模型在**同一次**读取里拿到，否则「保存了温度但要重启才
+/// 生效」会变成只有用户能发现的问题。
+pub fn build_llm_client_with_temperature<K: AsRef<str>, V: AsRef<str>>(
+    pairs: &[(K, V)],
+) -> Option<HttpLlmClient> {
+    let (key, base, model) = pick_llm_config(pairs.iter().map(|(k, v)| (k, v)));
+    let client = build_llm_client(key, base, model)?;
+    Some(client.with_temperature_text(
+        cfg_text(pairs, CFG_TEMPERATURE).as_deref(),
+        cfg_text(pairs, CFG_GREET_TEMPERATURE).as_deref(),
+    ))
+}
+
 /// 把内部错误转成前端字符串。
 ///
 /// Tauri 命令的 `Err` 类型必须是 `Serialize`；用 `String` 最直接，
@@ -242,6 +266,16 @@ pub fn mark_delivered(state: tauri::State<'_, StoreState>, args: JobIdsArgs) -> 
         return Ok(0);
     }
     with_store(&state, |s| s.set_delivered(&ids, true).map_err(store_err))
+}
+
+/// 批量取消「已投递」（放回待投递）。与 `allow_jobs` 同一层壳，领域逻辑在 store。
+#[tauri::command]
+pub fn unmark_delivered(state: tauri::State<'_, StoreState>, args: JobIdsArgs) -> CmdResult<usize> {
+    let ids = args.clean();
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    with_store(&state, |s| s.set_delivered(&ids, false).map_err(store_err))
 }
 
 // ---------- 决策记录 ----------
@@ -662,6 +696,10 @@ pub fn open_store(db_path: PathBuf) -> Result<Arc<SqliteStore>, String> {
 pub const CFG_API_KEY: &str = "api_key";
 pub const CFG_BASE_URL: &str = "base_url";
 pub const CFG_MODEL: &str = "model";
+/// 打分温度
+pub const CFG_TEMPERATURE: &str = "temperature";
+/// 话术温度
+pub const CFG_GREET_TEMPERATURE: &str = "greet_temperature";
 
 /// 从 `app_config` 的键值对里挑出大模型需要的三项。
 ///
@@ -968,6 +1006,29 @@ mod tests {
         assert!(build_llm_client(None, None, None).is_none());
         assert!(build_llm_client(Some("   ".into()), None, None).is_none());
         assert!(build_llm_client(Some("sk-test".into()), None, None).is_some());
+    }
+
+    #[test]
+    fn client_from_pairs_reads_both_temperatures() {
+        let pairs = vec![
+            (CFG_API_KEY, "sk-test"),
+            (CFG_MODEL, "deepseek-chat"),
+            (CFG_TEMPERATURE, "0.35"),
+            (CFG_GREET_TEMPERATURE, "1.1"),
+        ];
+        let c = build_llm_client_with_temperature(&pairs).expect("有密钥就该建出客户端");
+        assert_eq!(c.score_temperature(), 0.35);
+        assert_eq!(c.greet_temperature(), 1.1);
+    }
+
+    #[test]
+    fn client_from_pairs_without_temperature_uses_defaults() {
+        let pairs = vec![(CFG_API_KEY, "sk-test"), (CFG_TEMPERATURE, "  ")];
+        let c = build_llm_client_with_temperature(&pairs).unwrap();
+        assert_eq!(c.score_temperature(), crate::core::infra::SCORE_TEMPERATURE);
+        assert_eq!(c.greet_temperature(), crate::core::infra::GREET_TEMPERATURE);
+        // 没密钥就没有客户端：温度不能凭空造出一个
+        assert!(build_llm_client_with_temperature(&[(CFG_TEMPERATURE, "1.0")]).is_none());
     }
 
     #[test]

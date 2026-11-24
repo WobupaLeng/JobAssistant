@@ -13,6 +13,10 @@ use serde::{Deserialize, Serialize};
 pub const KEY_API_KEY: &str = "api_key";
 pub const KEY_BASE_URL: &str = "base_url";
 pub const KEY_MODEL: &str = "model";
+/// 打分温度（0~2，缺省 0.2）
+pub const KEY_TEMPERATURE: &str = "temperature";
+/// 话术温度（0~2，缺省 0.8）
+pub const KEY_GREET_TEMPERATURE: &str = "greet_temperature";
 pub const KEY_THEME: &str = "theme";
 pub const KEY_MAX_JD: &str = "max_jd";
 pub const KEY_SCORE_MODE: &str = "score_mode";
@@ -75,6 +79,8 @@ pub const WRITABLE_KEYS: &[&str] = &[
     KEY_API_KEY,
     KEY_BASE_URL,
     KEY_MODEL,
+    KEY_TEMPERATURE,
+    KEY_GREET_TEMPERATURE,
     KEY_THEME,
     KEY_MAX_JD,
     KEY_SCORE_MODE,

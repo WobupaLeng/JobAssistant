@@ -35,12 +35,14 @@ pub fn make_sink(store: Arc<SqliteStore>) -> impl IngestPort {
                 job_url: job.job_url.as_deref(),
             }) {
                 eprintln!("[scrape] 写入敏感库失败（stored）：{e}");
+                crate::commands_logs::push("warn", format!("写入敏感库失败（stored）：{e}"));
             }
             Ok(inserted)
         },
         remember: move |entry: &SensitiveEntry<'_>| {
             if let Err(e) = remember_store.add_sensitive(entry) {
                 eprintln!("[scrape] 写入敏感库失败（rejected）：{e}");
+                crate::commands_logs::push("warn", format!("写入敏感库失败（rejected）：{e}"));
             }
         },
         // 决策日志写失败不打断抓取：它是审计线索，不是主数据。但失败必须出声，
@@ -55,6 +57,7 @@ pub fn make_sink(store: Arc<SqliteStore>) -> impl IngestPort {
                 note.new_score,
             ) {
                 eprintln!("[scrape] 写决策日志失败（{}）：{e}", note.decision);
+                crate::commands_logs::push("warn", format!("写决策日志失败（{}）：{e}", note.decision));
             }
         },
     }

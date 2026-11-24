@@ -7,8 +7,8 @@
 import { describe, expect, it } from 'vitest';
 
 import type { AutoNextReply, AutoStatusReply } from '../src/api/types';
+import { AUTO_TICK_MS } from '../src/lib_ui/auto-model';
 import {
-  AUTO_TICK_MS,
   autoPhase,
   barMode,
   emptyStatus,
@@ -156,8 +156,8 @@ describe('should_send：发不发只看后端到期没', () => {
     expect(shouldSend(now, st, true)).toBe(false);
   });
 
-  it('轮询间隔是 1 秒（节奏仍由后端 next_at_ms 决定）', () => {
-    expect(AUTO_TICK_MS).toBe(1_000);
+  it('前端不再有轮询间隔常量（状态请求全由心跳 60~90 秒与用户操作触发）', () => {
+    expect(AUTO_TICK_MS).toBeUndefined();
   });
 });
 

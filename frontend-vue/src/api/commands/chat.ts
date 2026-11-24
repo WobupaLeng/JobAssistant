@@ -20,6 +20,16 @@ export function chatFriends(): Promise<FriendsReply> {
   return invokeNone<FriendsReply>('chat_friends');
 }
 
+/** 本地缓存的好友列表（不触发浏览器，供先展示）。 */
+export function chatFriendsLocal(): Promise<FriendsReply> {
+  return invokeNone<FriendsReply>('chat_friends_local');
+}
+
+/** 本地缓存的某会话消息（不触发浏览器，供先展示）。 */
+export function chatMessagesLocal(uid: string): Promise<MessagesReply> {
+  return invokeFlat<MessagesReply>('chat_messages_local', { uid });
+}
+
 /** 与某个 HR 的消息记录。平铺 `{ uid }`。 */
 export function chatMessages(uid: string): Promise<MessagesReply> {
   return invokeFlat<MessagesReply>('chat_messages', { uid });

@@ -27,6 +27,7 @@ import {
   listJobs,
   markDelivered,
   rejectJobs,
+  unmarkDelivered,
 } from '../api/commands/db';
 import { listLogs } from '../api/commands/logs';
 import { getScoringSpec } from '../api/commands/shell';
@@ -57,6 +58,7 @@ import {
   tabIncludeRejected,
   tabQuery,
   toggleChecked,
+  type BatchOp,
   type ListTab,
   type SortField,
 } from '../lib_ui/job-list-model';
@@ -101,16 +103,27 @@ import { loadDraft, saveDraft } from '../features/scrape/filter';
 import { parseLogLevel } from '../lib_ui/logfmt';
 import { readInitialTheme, flipTheme, applyTheme } from '../lib_ui/theme';
 import {
+  FONT_SCALES,
+  PALETTES,
+  applyFontScale,
+  applyPalette,
+  readFontScale,
+  readPalette,
+  type FontScaleId,
+  type PaletteId,
+} from '../lib_ui/palette';
+import {
   EMPTY_DETAIL,
   actionFailPrefix,
   actionNote,
   closeDetail,
   detailTitle,
   openDetail,
-  type DetailAction,
+  type DetailAct,
   type DetailState,
 } from '../lib_ui/job-detail-model';
 import { PRIMARY_PLATFORM, pickPlatform } from '../lib_ui/platform-model';
+import { PLATFORMS } from '../lib_ui/options';
 import { mergeLoginState } from '../lib_ui/login-model';
 import { CHAT_ACTIVE_COMPANY_EVENT, CHAT_ACTIVE_COMPANY_KEY } from '../lib_ui/chat-model';
 import {
@@ -210,6 +223,14 @@ let unlistenLogin: UnlistenFn | null = null;
 let disposed = false;
 
 const themeLabel = ref(readInitialTheme() === 'dark' ? '深色' : '浅色');
+const paletteId = ref<PaletteId>(readPalette());
+/** 当前主题（深/浅），供调色板按主题取色。 */
+function currentTheme(): 'dark' | 'light' {
+  return themeLabel.value === '深色' ? 'dark' : 'light';
+}
+applyPalette(paletteId.value, currentTheme());
+const fontScaleId = ref<FontScaleId>(readFontScale());
+applyFontScale(fontScaleId.value);
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let logTimer: ReturnType<typeof setTimeout> | null = null;
@@ -503,14 +524,60 @@ async function persistDraft(): Promise<void> {
   }
 }
 
-function applyNow(): void {
+/**
+ * 筛选面板的「应用」= 保存条件 **并立刻开始抓取**（用户裁决 m02737）。
+ *
+ * 顺序不能反：先把草稿落库（`set_scrape_defaults`），再抓取。反过来的话抓取读到的是
+ * 上一版条件，用户会以为「我刚改的城市没生效」。保存失败也不拦抓取 —— 条件是本地
+ * 兜底写过的，提示归提示，抓取照走。
+ *
+ * 登录把关交给 `ensureLogin()`：未登录先问一句，确认后拉起浏览器扫码。
+ */
+async function applyNow(): Promise<void> {
   if (saveTimer !== null) clearTimeout(saveTimer);
-  void persistDraft();
+  await persistDraft();
+  filterOpen.value = false;
+  if (!(await ensureLogin())) return;
+  await onStart();
 }
 
+/** 「应用」入口把关闭抽屉的时机交给这里：先关，用户才看得到抓取条上的进度。 */
+function onApplyFilter(): void {
+  void applyNow();
+}
+
+/**
+ * 抓取前的登录把关。
+ *
+ * 返回 true 表示「可以继续抓取」。三种情形：
+ * 1. 已登录 → 直接放行；
+ * 2. 未登录且用户确认 → 拉起浏览器扫码（`loginStart`），**不**继续抓取：
+ *    扫码是异步的，此刻 profile 里还没有 cookie，硬起抓取只会立刻失败；
+ * 3. 未登录且用户取消 → 返回 false，只提示，不起任何进程。
+ *
+ * 用 `window.confirm` 而不是自绘弹窗：这是一次「要不要现在去登录」的是/否询问，
+ * 不承载数据也不承载样式，原生确认框在 WebView 里同样可用，少一层遮罩状态。
+ */
+async function ensureLogin(): Promise<boolean> {
+  await refreshLogin();
+  if (isLoggedIn()) return true;
+
+  const label = PLATFORMS.find((p) => p.id === platform.value)?.name ?? platform.value;
+  const go = window.confirm(`${label} 尚未登录。\n\n抓取需要先登录：点「确定」打开浏览器扫码，登录完成后再回来点「开始抓取」。`);
+  if (!go) {
+    filterNote.value = '未登录：已取消，未开始抓取';
+    return false;
+  }
+  await onLogin(platform.value);
+  filterNote.value = '请在弹出的浏览器里扫码登录，完成后回到这里点「开始抓取」';
+  return false;
+}
+
+/** 「恢复默认」只重置并保存，不连锁抓取（用户点的是重置，不是开始）。 */
 function resetFilter(): void {
   onDraft(createDraft());
-  applyNow();
+  if (saveTimer !== null) clearTimeout(saveTimer);
+  void persistDraft();
 }
 
 /** 用户主动点「读取期望」入口。未登录只给提示，不发起请求（求职期望是被动能力）。 */
@@ -565,16 +632,61 @@ function onShowAll(next: boolean): void {
   void refreshList();
 }
 
-async function batch(op: 'reject' | 'allow'): Promise<void> {
+/** 三类批量动作的落地：不投递（否决）/ 已投递 / 待投递（撤销否决或撤销投递）。 */
+async function applyBatchOp(op: BatchOp, ids: readonly string[]): Promise<number> {
+  if (op === 'reject') return await rejectJobs(ids);
+  if (op === 'deliver') return await markDelivered(ids);
+  // 「待投递」是撤回：不投递来的撤销否决，已投递来的撤销投递标记，两边都回到未投递。
+  const pendingIds = jobs.value.filter((j) => ids.includes(j.job_id) && j.status !== 'delivered').map((j) => j.job_id);
+  const deliveredIds = ids.filter((id) => !pendingIds.includes(id));
+  let hit = 0;
+  if (pendingIds.length > 0) hit += await allowJobs(pendingIds);
+  if (deliveredIds.length > 0) hit += await unmarkDelivered(deliveredIds);
+  return hit;
+}
+
+async function batch(op: BatchOp): Promise<void> {
   const ids = selection.value.checked.slice();
   if (!showBatchActions(ids.length)) return;
   try {
-    const hit = op === 'reject' ? await rejectJobs(ids) : await allowJobs(ids);
-    filterNote.value = `${op === 'reject' ? '不投递' : '允许投递'}：影响 ${hit} 条（勾选 ${ids.length} 条）`;
+    const hit = await applyBatchOp(op, ids);
+    const name = op === 'reject' ? '不投递' : op === 'deliver' ? '已投递' : '待投递';
+    filterNote.value = `${name}：影响 ${hit} 条（勾选 ${ids.length} 条）`;
     selection.value = exitSelecting();
     await refreshList();
   } catch (e) {
-    fail(`批量操作失败：${errText(e)}`, op === 'reject' ? 'reject_jobs' : 'allow_jobs');
+    const code = op === 'reject' ? 'reject_jobs' : op === 'deliver' ? 'mark_delivered' : 'allow_jobs';
+    fail(`批量操作失败：${errText(e)}`, code, { label: '重试', run: () => void batch(op) });
+  }
+}
+
+/** 卡片上的「允许投递」（只在「不投递」页签出现）：恢复后该岗位回到待投递列表。 */
+async function onAllowJob(jobId: string): Promise<void> {
+  try {
+    const hit = await allowJobs([jobId]);
+    filterNote.value = actionNote('allow', hit);
+    selection.value = { ...selection.value, checked: selection.value.checked.filter((id) => id !== jobId) };
+    await refreshList();
+  } catch (e) {
+    fail(`${actionFailPrefix('allow')}${errText(e)}`, 'allow_jobs', {
+      label: '重试',
+      run: () => void onAllowJob(jobId),
+    });
+  }
+}
+
+/** 卡片上的「待投递」（只在「已投递」页签出现）：取消投递标记后回到未投递列表。 */
+async function onUndeliverJob(jobId: string): Promise<void> {
+  try {
+    const hit = await unmarkDelivered([jobId]);
+    filterNote.value = `待投递：影响 ${hit} 条`;
+    selection.value = { ...selection.value, checked: selection.value.checked.filter((id) => id !== jobId) };
+    await refreshList();
+  } catch (e) {
+    fail(`取消投递失败：${errText(e)}`, 'unmark_delivered', {
+      label: '重试',
+      run: () => void onUndeliverJob(jobId),
+    });
   }
 }
 
@@ -596,18 +708,27 @@ function onCloseDetail(): void {
  * `{args:{jobIds}}`），差别只在「影响几条」的文案。动作成功后关抽屉并刷新，
  * 失败进错误队列——**不让抽屉停在半更新状态**。
  */
-async function onDetailAction(action: DetailAction): Promise<void> {
+async function onDetailAction(action: DetailAct): Promise<void> {
   const job = detailJob.value;
   if (!job) return;
   const ids = [job.job_id];
-  const code = action === 'reject' ? 'reject_jobs' : action === 'allow' ? 'allow_jobs' : 'mark_delivered';
+  const code =
+    action === 'reject'
+      ? 'reject_jobs'
+      : action === 'allow'
+        ? 'allow_jobs'
+        : action === 'undo-deliver'
+          ? 'unmark_delivered'
+          : 'mark_delivered';
   try {
     const hit =
       action === 'reject'
         ? await rejectJobs(ids)
         : action === 'allow'
           ? await allowJobs(ids)
-          : (await markDelivered(ids), ids.length);
+          : action === 'undo-deliver'
+            ? await unmarkDelivered(ids)
+            : ((await markDelivered(ids)), ids.length);
     filterNote.value = actionNote(action, hit);
     detail.value = closeDetail();
     await refreshList();
@@ -628,9 +749,30 @@ function onPickPlatform(id: string): void {
 /** 读登录态。失败静默：状态点只是提示，不值得开一条错误。 */
 async function refreshLogin(): Promise<void> {
   try {
-    login.value = await loginStatus(platform.value);
+    const next = await loginStatus(platform.value);
+    /*
+     * `unknown` 是后端的**降级值**（`commands_scrape.rs:540-546/576-582`：
+     * sidecar 不在线、或 `session.open` 回执失败时返回），不是「未登录」的结论。
+     * 用户 m02848「浏览器显示我登录了，但应用说没登录」正是这条：
+     * 浏览器 profile 里有 cookie，但当前没有活着的 sidecar 会话，查询只能给 unknown。
+     *
+     * 规则：降级值不得抹掉已知结论（与 `mergeLoginState` 的同一条原则）。
+     * 上一次查到的 `logged_in` / `no_login` 继续留着，界面不会因为一次查不到就翻脸；
+     * 只有 `saved === true`（用户点过「保存登录」，本机标记在库）时，
+     * 才把 unknown 升格成 `no_login` —— 会话不在了但标记还在，需要重新登录。
+     */
+    if (next.state === 'unknown' && login.value !== null) {
+      const known = login.value.state !== 'unknown';
+      if (known) {
+        // 保留旧 state，只更新 running / message / saved 这些与本次查询相关的字段。
+        login.value = { ...login.value, running: next.running, message: next.message, saved: next.saved };
+        return;
+      }
+    }
+    login.value = next;
   } catch {
-    login.value = null;
+    // 命令本身失败（IPC 异常）：同样不能把已知结论清成「未知」，留旧值。
+    if (login.value === null) login.value = null;
   }
 }
 
@@ -971,11 +1113,29 @@ function onSamePageHighlight(): void {
   highlightCompany.value = readHighlightCompany();
 }
 
+/** 捕获阶段判定点击是否落在筛选抽屉内；不落在里面就收起。
+ *  只关自己的抽屉（JD 抽屉由 JobDetailDrawer 的遮罩自理）。
+ *  注意：工具栏上的「筛选条件」入口按钮已按用户裁决移除（抽屉由列表空态打开），
+ *  所以这里不再需要放行触发按钮。
+ *
+ *  面板类浮层（城市选择器）被 Teleport 到 body，DOM 上已不在抽屉里，所以按
+ *  `data-overlay="popover"` 再放行一次：点面板里的省份 / 城市算「还在抽屉里操作」。
+ *  面板自身负责点外面关闭，这里不能越权替它关抽屉，否则点一下城市就两头一起收。 */
+function onGlobalPointerDown(ev: PointerEvent): void {
+  if (!filterOpen.value) return;
+  const target = ev.target as HTMLElement | null;
+  if (target === null) return;
+  if (target.closest('[data-testid="scrape-filter-bar"]') !== null) return;
+  if (target.closest('[data-overlay="popover"]') !== null) return;
+  filterOpen.value = false;
+}
+
 onMounted(() => {
   tailInTopbar.value = document.querySelector('.tb-embed') !== null;
   highlightCompany.value = readHighlightCompany();
   window.addEventListener('storage', onStorageHighlight);
   window.addEventListener(CHAT_ACTIVE_COMPANY_EVENT, onSamePageHighlight);
+  document.addEventListener('pointerdown', onGlobalPointerDown, true);
   void loadSpecAndConfig();
   void refreshList();
   void refreshProgress();
@@ -994,6 +1154,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   disposed = true;
   document.removeEventListener('visibilitychange', onVisibilityChange);
+  document.removeEventListener('pointerdown', onGlobalPointerDown, true);
   window.removeEventListener('storage', onStorageHighlight);
   window.removeEventListener(CHAT_ACTIVE_COMPANY_EVENT, onSamePageHighlight);
   if (unlistenLogin !== null) {
@@ -1033,14 +1194,10 @@ watch(
         :login="login"
         :login-busy="loginBusy"
         :action-busy="loginActionBusy"
-        :segs="segs"
-        :llm-prefilter="llmPrefilter"
         @pick="onPickPlatform"
         @login="onLogin"
         @save="onSaveLogin"
         @logout="onLogout"
-        @pick-mode="onPickMode"
-        @update:prefilter="onPrefilter"
       />
 
       <TopbarTail
@@ -1051,6 +1208,22 @@ watch(
         :tokens-score="tokensScore"
         :sensitive-open="sensitiveOpen"
         :theme-label="themeLabel"
+        :palette-id="paletteId"
+        :palettes="PALETTES"
+        :font-scale-id="fontScaleId"
+        :font-scales="FONT_SCALES"
+        @pick-font-scale="
+          (id: FontScaleId) => {
+            fontScaleId = id;
+            applyFontScale(id);
+          }
+        "
+        @pick-palette="
+          (id: PaletteId) => {
+            paletteId = id;
+            applyPalette(id, currentTheme());
+          }
+        "
         @toggle-sensitive="
           () => {
             sensitiveOpen = !sensitiveOpen;
@@ -1064,6 +1237,7 @@ watch(
             const t = flipTheme(themeLabel === '深色' ? 'dark' : 'light');
             applyTheme(t);
             themeLabel = t === 'dark' ? '深色' : '浅色';
+            applyPalette(paletteId, t);
           }
         "
       />
@@ -1073,16 +1247,16 @@ watch(
       :progress="progress"
       :state="state"
       :starting="starting"
-      :filter-open="filterOpen"
       :max-jd="maxJd"
       :min-score="minScore ?? 0"
       :score-max="scoreMax"
       :scraped-total="progress.inserted"
-      @toggle-filter="filterOpen = !filterOpen"
+      :filter-open="filterOpen"
       @start="onStart"
       @stop="onStop"
       @update:max-jd="onMaxJd"
       @update:min-score="onMinScore"
+      @toggle-filter="filterOpen = !filterOpen"
     />
 
     <div class="job-fill" @pointerdown="onGridPointerDown" @pointermove="onGridPointerMove" @pointerup="cancelPress" @pointerleave="cancelPress" @pointercancel="cancelPress" @click="onGridClick">
@@ -1110,6 +1284,8 @@ watch(
         @check-all="(checked: boolean) => (selection = setChecked(checked ? jobs.map((j) => j.job_id) : []))"
         @batch="batch"
         @greet="onGreet"
+        @allow="onAllowJob"
+        @undeliver="onUndeliverJob"
         @empty-filter="filterOpen = true"
         @empty-start="onStart"
       />
@@ -1117,12 +1293,16 @@ watch(
            不再把列表和日志卡往下顶，页面外层也就不出现滚动条。 -->
       <div
         v-if="filterOpen"
-        class="card scrape-filter-bar"
+        class="filter-backdrop"
+        data-testid="scrape-filter-backdrop"
+        @click="filterOpen = false"
+      ></div>
+      <div
+        v-if="filterOpen"
+        id="scrape-filter-bar"
+        class="drawer glass-l2 scrape-filter-bar is-floating"
         data-testid="scrape-filter-bar"
         @click.stop
-        @pointerdown.stop
-        @pointermove.stop
-        @pointerup.stop
       >
         <FilterPanel
           :draft="draft"
@@ -1132,7 +1312,7 @@ watch(
           :note="filterNote"
           @update:draft="onDraft"
           @update:keywords="keywords = $event"
-          @apply="applyNow"
+          @apply="onApplyFilter"
           @cancel="filterOpen = false"
           @reset="resetFilter"
           @read-expect="onReadExpect"
@@ -1150,10 +1330,18 @@ watch(
       @open-decisions="emit('navigate', 'logs')"
     />
 
+  </section>
+
+  <!-- 岗位详情抽屉与敏感库走 fixed 浮层：它们是全窗弹层，绝不能挂进
+       `.page-dashboard`——那里 `overflow: hidden` 且带 transform/backdrop-filter，
+       会把子元素裁在本列内（表现为「点遮罩关不掉、遮罩也不压住页面」）。
+       放在 section 之后：二者自身都是 position: fixed，不参与页面流。 -->
+  <div>
     <JobDetailDrawer
       :job="detailJob"
       :min-score="minScore"
       :score-max="scoreMax"
+      :tab="tab"
       @close="onCloseDetail"
       @act="onDetailAction"
       @chat="onDetailChat"
@@ -1168,5 +1356,5 @@ watch(
       @reload="loadSensitive"
       @remove="removeSensitive"
     />
-  </section>
+  </div>
 </template>

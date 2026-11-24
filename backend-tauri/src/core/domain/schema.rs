@@ -78,6 +78,45 @@ CREATE TABLE IF NOT EXISTS app_config (
 );
 "#;
 
+/// Boss 聊天持久化：会话列表（左侧 HR 列表）。
+///
+/// 主键 `(platform, uid)`：同一平台下 uid 唯一。写入走 UPSERT，远程拉取成功后覆盖。
+/// 与 Python 侧 `scraper/chat.py` 无关——Python 只读接口，不写库（AGENTS 红线 1）。
+pub const CHAT_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS chat_friends (
+    platform    TEXT NOT NULL,
+    uid         TEXT NOT NULL,
+    name        TEXT,
+    company     TEXT,
+    title       TEXT,
+    last_msg    TEXT,
+    last_time   TEXT,
+    unread      INTEGER DEFAULT 0,
+    avatar      TEXT,
+    msg_count   INTEGER DEFAULT 0,
+    synced_at   INTEGER NOT NULL,
+    PRIMARY KEY (platform, uid)
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    platform    TEXT NOT NULL,
+    uid         TEXT NOT NULL,
+    msg_id      TEXT NOT NULL,
+    sender      TEXT NOT NULL,
+    content     TEXT,
+    time        TEXT,
+    recalled    INTEGER DEFAULT 0,
+    synced_at   INTEGER NOT NULL,
+    PRIMARY KEY (platform, uid, msg_id)
+);
+"#;
+
+/// 聊天表索引。主键已覆盖 `(platform, uid)` 与 `(platform, uid, msg_id)` 查询，
+/// 这里只补「按 uid 取会话消息」所需的索引（主键前缀已覆盖，故仅留会话列表排序用）。
+pub const CHAT_SCHEMA_INDEXES: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_chat_friends_platform ON chat_friends(platform, synced_at DESC);
+"#;
+
 /// 建索引语句。**必须在补列之后执行**。
 ///
 /// 与 [`SCHEMA`] 分开的原因是一次真实踩坑：`CREATE INDEX ... ON job_queue(match_score)`

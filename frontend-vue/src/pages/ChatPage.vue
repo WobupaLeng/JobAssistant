@@ -27,18 +27,20 @@
  * ## 数据
  * 好友列表 / 消息 / 简历 / 期望职位都走 `src/api/commands/*`，本层不假设任何后端形状。
  * **层与概览同屏 ⇒ 会话列表在应用启动时就拉一次**（R1 的「不切页就能发现新消息」），
- * 自动投递条的循环也随层起停（`features/auto/queue.ts`）：每秒问一次后端状态，到点才发一条；
- * WebView 挂起时循环自然停（C16）。
+ * 自动投递状态由 `lib_ui/auto-heartbeat.ts` 的心跳驱动：**没有任何轮询**——状态只在
+ * 「60~90 秒随机到期」「每次投递完成」「发完消息」「手动刷新」这几个时刻请求一次。
  *
  * ## 独立 mount
  * 本层不依赖 `App.vue`：测试可以直接 `mount(ChatPage)`（SPEC-001 测试口径「保留独立 mount」）。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
-import { autoGreetPause, autoGreetReset, autoGreetResume, autoGreetStatus } from '../api/commands/auto';
+import { autoGreetNext, autoGreetPause, autoGreetReset, autoGreetResume, autoGreetStatus } from '../api/commands/auto';
 import {
   chatFriends,
+  chatFriendsLocal,
   chatMessages,
+  chatMessagesLocal,
   chatRecall,
 
   chatSend,
@@ -57,7 +59,7 @@ import {
   toggleAction,
   type AutoPhase,
 } from '../lib_ui/auto-model';
-import { startAutoQueue, type AutoQueue } from '../features/auto/queue';
+import { startHeartbeat, type HeartbeatTimer } from '../lib_ui/auto-heartbeat';
 import {
   CHAT_RAIL_TITLE,
   CHAT_STATE_ANNOUNCE_TEXT,
@@ -135,7 +137,13 @@ const autoStatus = ref(emptyStatus());
 const autoSending = ref(false);
 const autoBusy = ref(false);
 const autoNote = ref('');
-let queue: AutoQueue | null = null;
+
+/**
+ * 状态心跳（`lib_ui/auto-heartbeat.ts`）：60~90 秒随机，只受登录限制。
+ * 这是本页**唯一**的 `auto_greet_status` 周期性来源——没有 1 秒轮询。
+ * 投递完成、发完消息、手动刷新都会调 `beat.start()` 立刻主动请求一次。
+ */
+let beat: HeartbeatTimer | null = null;
 
 /* ------------------------------ 窗口宽度（宽度公式） --------------------------
  *
@@ -168,6 +176,15 @@ async function loadFriends(allowOpenSession = false): Promise<void> {
   friendsError.value = '';
   // 先把刷新前持久化的占位放回列表：后端报错（浏览器未连接）时它们也必须可见。
   friends.value = [...loadPendingFriends(), ...friends.value.filter((f) => !isPendingFriend(f))];
+  // 先默认展示持久化的会话列表（不触发浏览器），远程成功后再增量替换。
+  try {
+    const cached = await chatFriendsLocal();
+    if (friends.value.length === 0 && cached.items.length > 0) {
+      friends.value = cached.items;
+    }
+  } catch {
+    /* 本地读取失败不阻断远程加载 */
+  }
   try {
     let reply;
     try {
@@ -205,6 +222,15 @@ async function loadFriends(allowOpenSession = false): Promise<void> {
 
 async function loadMessages(uid: string): Promise<void> {
   loadingMessages.value = true;
+  // 先展示本地持久化消息（不触发浏览器），再用远程结果增量覆盖。
+  try {
+    const local = await chatMessagesLocal(uid);
+    if (ui.value.activeFriendsUid === uid && messages.value.length === 0) {
+      messages.value = local.items;
+    }
+  } catch {
+    /* 本地读取失败不阻断远程加载 */
+  }
   try {
     const reply = await chatMessages(uid);
     if (ui.value.activeFriendsUid !== uid) return;
@@ -296,6 +322,8 @@ async function send(): Promise<void> {
     note.value = '消息已发送';
     // 已用掉这次岗位标记：之后再发给同一 Boss 不得重复标记。
     if (jobId !== null) greetJob.value = null;
+    // 发完消息主动请求一次自动投递状态（不计入 60~90 秒的心跳节拍）。
+    if (beat !== null) void beat.start();
   } catch (e) {
     note.value = SEND_FAIL_PREFIX + errText(e);
   } finally {
@@ -333,24 +361,61 @@ async function sendGreet(): Promise<void> {
   }
 }
 
-async function generateGreet(): Promise<void> {
+/**
+ * 生成打招呼话术。`reply` 非空时走「根据 HR 回复生成」。
+ *
+ * 聊天页拿不到 JD（`Friend` 里没有 `jd_text`），所以这里把公司名交给后端
+ * `findByCompany`：后端按公司名翻库里的岗位，用**整段 JD** 组提示词。
+ * 翻不到时后端会退回按标题/公司写，并在回执 `jd_used=false` 里说清楚——
+ * 界面据此提示，而不是让用户以为模型读了 JD。
+ */
+async function generateGreet(reply = ''): Promise<void> {
   const friend = talkableFriend.value;
   if (friend === null || generating.value) return;
   generating.value = true;
   try {
     greet.value = await greetDraft({
-      jobId: '',
+      jobId: greetJob.value?.uid === friend.uid ? greetJob.value.jobId : '',
       title: friend.title,
       company: friend.company,
       salary: '',
       experience: '',
       jd: '',
+      findByCompany: friend.company,
+      reply,
     });
   } catch (e) {
     note.value = `生成打招呼失败：${errText(e)}`;
   } finally {
     generating.value = false;
   }
+}
+
+/** 「重新生成」：同一份入参再调一次。 */
+function regenerateGreet(): void {
+  void generateGreet();
+}
+
+/** 当前 Boss 最近一条 HR 消息（`sender === 'hr'`）。没有或已撤回返回空串。 */
+const lastHrMessage = computed<string>(() => {
+  for (let i = messages.value.length - 1; i >= 0; i -= 1) {
+    const m = messages.value[i];
+    if (m === undefined) continue;
+    if (m.sender !== 'hr' || m.recalled) continue;
+    const text = m.content.trim();
+    if (text !== '') return text;
+  }
+  return '';
+});
+
+/** 「生成回复」：把 HR 的原话一起交给后端，提示词据此接话。 */
+function generateReply(): void {
+  const reply = lastHrMessage.value;
+  if (reply === '') {
+    note.value = '还没有 HR 的回复可以接，先等对方说话';
+    return;
+  }
+  void generateGreet(reply);
 }
 
 async function recall(): Promise<void> {
@@ -419,22 +484,6 @@ function onAutoNote(text: string): void {
   note.value = text;
 }
 
-function startQueue(): void {
-  if (queue !== null) return;
-  queue = startAutoQueue({
-    onStatus(st) {
-      autoStatus.value = st;
-    },
-    onSending(v) {
-      autoSending.value = v;
-    },
-    onSent() {
-      autoNote.value = '自动投递已发出一条';
-    },
-    onNote: onAutoNote,
-  });
-}
-
 async function onAutoToggle(): Promise<void> {
   if (autoBusy.value) return;
   autoBusy.value = true;
@@ -444,8 +493,7 @@ async function onAutoToggle(): Promise<void> {
     if (action.kind === 'start') {
       // 开始前先确认登录有效：自动投递只往**已有**会话里发消息，未登录时
       // 既发不出去也不该去找浏览器（那正是「窗口无限打开」的来源）。
-      // 后端 `auto_greet_next` 也有同一道闸，这里是让用户当场看到原因，
-      // 而不是等队列空转到第一次投递才失败。
+      // 后端 `auto_greet_next` 也有同一道闸，这里是让用户当场看到原因。
       const st = await loginStatus('boss');
       // `unknown` = 浏览器（sidecar）还没拉起来：单独提示，不与「登录过期」混为一谈。
       if (st.state === 'unknown') {
@@ -459,17 +507,14 @@ async function onAutoToggle(): Promise<void> {
       // 开始前先清零上一轮计数，否则「已发 N 条」会接着上次累加。
       await autoGreetReset();
       await autoGreetResume();
-      // 只在自动投递运行时才轮询状态（每秒一次），关闭时不做无谓的 IPC。
-      startQueue();
     } else if (action.kind === 'pause') {
       await autoGreetPause(action.reason);
-      queue?.stop();
-      queue = null;
     } else {
       await autoGreetResume();
-      startQueue();
     }
-    queue?.kick();
+    // 唯一的状态请求来源：心跳（60~90 秒随机）。开始 / 暂停 / 继续都只是
+    // 「立刻主动请求一次」，读到的快照里 `next_at_ms` 到期就发那一条。
+    await beat?.start();
   } catch (e) {
     onAutoNote(`自动投递操作失败：${errText(e)}`);
   } finally {
@@ -482,9 +527,8 @@ async function onAutoStop(): Promise<void> {
   autoBusy.value = true;
   try {
     await autoGreetReset();
-    // 结束后后端已不在跑：停掉轮询，不再每秒空转一次 status。
-    queue?.stop();
-    queue = null;
+    // 结束后不停表：心跳是登录态心跳，跟投递是否在跑无关，继续刷新状态。
+    await beat?.start();
     autoNote.value = '已结束本轮自动投递';
   } catch (e) {
     onAutoNote(`重置失败：${errText(e)}`);
@@ -520,13 +564,25 @@ onMounted(() => {
     // 挂载是被动加载：不允许自动拉起浏览器（allowOpenSession 缺省 false）。
     await loadFriends();
     consumeGreetDraft();
-    // 挂载时读一次后端状态：若自动投递已在跑，才启动每秒轮询（关闭时不空转）。
-    try {
-      const st = await autoGreetStatus();
-      autoStatus.value = st;
-      if (st.running) startQueue();
-    } catch {
-      /* 状态读不到时不轮询，等用户操作后再启动 */
+    // 心跳只受登录限制：已登录就开表（不论自动投递是否在跑），
+    // 未登录 / 浏览器未连接则不开表，只给一句引导。
+    beat = startHeartbeat({
+      onStatus(st) {
+        autoStatus.value = st;
+      },
+      onSending(v) {
+        autoSending.value = v;
+      },
+      onNote: onAutoNote,
+    });
+    await beat.start();
+    // 后台已在跑的投递必须当场显示「暂停」：心跳开表时已读过一次，只补读状态。
+    if (!autoStatus.value.running) {
+      try {
+        autoStatus.value = await autoGreetStatus();
+      } catch {
+        /* 读不到就保持空态，等心跳或用户操作 */
+      }
     }
     if (pendingDraft !== null && draft.value === '') draft.value = pendingDraft.text;
   })();
@@ -535,8 +591,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize);
   window.removeEventListener('keydown', onKeydown);
-  queue?.stop();
-  queue = null;
+  beat?.stop();
+  beat = null;
 });
 
 // 跨页联动：展开聊天时把该 Boss 的公司名写入共享键，概览页据此高亮同公司岗位；收起即清除。
@@ -597,7 +653,7 @@ defineExpose({
 
 <template>
   <!-- ===== 右栏：Boss 列表（默认常驻，`.app-body` 的直接 flex 子项） ===== -->
-  <aside class="chat-rail" data-testid="chat-rail">
+  <aside class="chat-rail hl-surface" data-testid="chat-rail">
     <AutoApplyBar
       v-if="autoBarLocation === 'rail'"
       :status="autoStatus"
@@ -694,7 +750,9 @@ defineExpose({
       :generating="generating"
       :sending-greet="sendingGreet"
       :recalling="recalling"
-      @generate-greet="generateGreet"
+      :has-hr-reply="lastHrMessage !== ''"
+      @generate-greet="regenerateGreet"
+      @generate-reply="generateReply"
       @recall="recall"
       @send-greet="sendGreet"
       @greet-to-draft="greetToDraft"

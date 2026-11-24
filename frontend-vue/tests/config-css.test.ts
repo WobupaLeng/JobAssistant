@@ -38,8 +38,8 @@ describe('配置弹窗固定窗', () => {
     expect(blockOf('.cfg-head')).toContain('flex: 0 0 auto');
     expect(blockOf('.cfg-foot')).toContain('flex: 0 0 auto');
   });
-  it('弹窗内 config-card 用 glass-0（覆盖 pages.css 的 glass-1）', () => {
-    expect(blockOf('.config-modal .config-card')).toContain('background: var(--glass-0)');
+  it('弹窗内 config-card 用统一弹层底色（覆盖 pages.css 的 glass-1）', () => {
+    expect(blockOf('.config-modal .config-card')).toContain('background: var(--popup-surface)');
   });
 });
 
@@ -51,8 +51,8 @@ describe('CSS 红线', () => {
   it('无硬编码十六进制颜色（一律走 tokens 变量）', () => {
     expect(/#[0-9a-fA-F]{3,8}/.test(css)).toBe(false);
   });
-  it('玻璃背景消费 tokens 变量', () => {
-    expect(css).toContain('var(--glass-3)');
+  it('弹层与分隔线消费 tokens 变量', () => {
+    expect(css).toContain('var(--popup-surface)');
     expect(css).toContain('var(--hairline-strong)');
   });
 });

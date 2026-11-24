@@ -10,10 +10,14 @@
  */
 import { computed } from 'vue';
 import type { CardView } from '../lib_ui/job-list-model';
+import type { ListTab } from '../lib_ui/job-list-model';
 
 const props = withDefaults(
   defineProps<{
     view: CardView;
+    /** 当前列表页签：卡片尺寸/边框与岗位列表完全一致，只有语义色随页签切换
+     *  （待投递=主题色 / 已投递=成功绿 / 不投递=否决红）。 */
+    tab?: ListTab;
     /** 多选态（`.job-grid.is-selecting` 时勾选框才出现，判定在父级）。 */
     selecting?: boolean;
     selected?: boolean;
@@ -22,12 +26,16 @@ const props = withDefaults(
     /** 与当前展开聊天的 Boss 同公司：联动高亮（判定在父级）。 */
     linked?: boolean;
   }>(),
-  { selecting: false, selected: false, showGreet: true, linked: false },
+  { tab: 'pending', selecting: false, selected: false, showGreet: true, linked: false },
 );
 
 const emit = defineEmits<{
   (e: 'toggle', jobId: string): void;
   (e: 'greet', jobId: string): void;
+  /** 不投递列表里的反向动作：恢复成待投递（回到「未投递」列表）。 */
+  (e: 'allow', jobId: string): void;
+  /** 已投递列表里的反向动作：取消投递标记（回到「未投递」列表）。 */
+  (e: 'undeliver', jobId: string): void;
   (e: 'open', jobId: string): void;
 }>();
 
@@ -37,6 +45,14 @@ function onCheck(): void {
 
 function onGreet(): void {
   emit('greet', props.view.jobId);
+}
+
+function onAllow(): void {
+  emit('allow', props.view.jobId);
+}
+
+function onUndeliver(): void {
+  emit('undeliver', props.view.jobId);
 }
 
 /** 流光炫彩强度分三档：分越高越炫（满分 100 口径，见 SPEC 打分）。 */
@@ -55,8 +71,15 @@ function onOpen(): void {
 
 <template>
   <article
-    class="job-card"
-    :class="{ 'is-checked': selected, 'is-delivered': view.delivered, 'is-rejected': view.rejected, 'is-linked': linked }"
+    class="job-card hl-surface"
+    :class="{
+      'is-checked': selected,
+      'is-delivered': view.delivered,
+      'is-rejected': view.rejected,
+      'is-linked': linked,
+      'tone-delivered': tab === 'delivered',
+      'tone-rejected': tab === 'rejected',
+    }"
     :data-testid="`job-card-${view.tid}`"
     :data-card="view.jobId"
     @click="onOpen"
@@ -100,7 +123,29 @@ function onOpen(): void {
           ><span class="score-num">{{ view.score }}</span></span
         >
         <button
-          v-if="showGreet"
+          v-if="showGreet && tab === 'rejected'"
+          class="btn btn-sm btn-ghost job-greet"
+          type="button"
+          :data-allow="view.jobId"
+          :data-testid="`job-allow-${view.tid}`"
+          :aria-label="`允许投递 ${view.title}`"
+          @click.stop="onAllow"
+        >
+          允许投递
+        </button>
+        <button
+          v-else-if="showGreet && tab === 'delivered'"
+          class="btn btn-sm btn-ghost job-greet"
+          type="button"
+          :data-undeliver="view.jobId"
+          :data-testid="`job-undeliver-${view.tid}`"
+          :aria-label="`取消投递 ${view.title}`"
+          @click.stop="onUndeliver"
+        >
+          待投递
+        </button>
+        <button
+          v-else-if="showGreet"
           class="btn btn-primary job-greet"
           type="button"
           :data-greet="view.jobId"
