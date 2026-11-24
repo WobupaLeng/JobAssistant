@@ -75,6 +75,16 @@ fn window_close(window: tauri::WebviewWindow) -> Result<(), String> {
     window.close().map_err(|e| e.to_string())
 }
 
+/// 前端确认「这个登录态我消费了」。
+///
+/// 谁的确认：`platform` + `state` 必须与当前这一轮广播完全一致才算数，
+/// 晚到的旧确认直接丢弃，不会把新一轮广播提前掐掉。
+/// 全员确认后 watcher 停止补发；在此之前每 5 秒重发一次，最多 3 次。
+#[tauri::command]
+fn login_ack(platform: String, state: String) -> Result<usize, String> {
+    Ok(handle_ack(&platform, &state))
+}
+
 /// 应用毛玻璃效果。
 ///
 /// **为什么不用 `window_vibrancy::apply_acrylic`**：
@@ -500,10 +510,156 @@ fn acquire_instance_lock(_app: &tauri::AppHandle) -> Result<InstanceLock, String
 }
 
 /// 登录态快照：`login-state` 事件的去重键。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct LoginSnapshot {
     platform: String,
     state: String,
+}
+
+/// 广播的重发间隔与次数上限（用户 m02416：5 秒一次、最大三次）。
+///
+/// 为什么需要重发：事件是 fire-and-forget 的，WebView 没在听（未挂载 / 后台节流 /
+/// 正在重建）时那一拍就白丢了，界面会停在旧快照上。只重发**状态变化后的那一次**，
+/// 不重发「一直没变」的稳态，所以不会变成常驻轮询。
+pub(crate) const LOGIN_REBROADCAST_MS: u64 = 5_000;
+/// 最多发几次（首次 1 次 + 重发 2 次 = 3）。
+pub(crate) const LOGIN_BROADCAST_MAX: u32 = 3;
+
+/// 一次待播广播：载荷 + 已发次数 + 下一次该发的时刻。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingBroadcast {
+    snap: LoginSnapshot,
+    /// 已经发出去几次（含首次）。
+    sent: u32,
+    /// 下一次重发的最早时刻（毫秒，单调时钟换算后的绝对值）。
+    due_ms: u64,
+}
+
+/// 前端确认消费（`login_ack` 命令）后要汇报的结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AckOutcome {
+    /// 还有成员没确认，继续按 5 秒重发。
+    Pending,
+    /// 全员确认 / 已达上限，这一轮广播结束。
+    Done,
+}
+
+/// 记一笔「某个窗口确认消费了这个登录态」。
+///
+/// 只有**同一次**广播（platform + state 都相同）的确认才算数：晚到的旧确认
+/// 不能把新一轮广播提前掐掉。
+fn apply_ack(
+    pending: &mut Option<PendingBroadcast>,
+    acked: &mut std::collections::HashSet<String>,
+    platform: &str,
+    state: &str,
+) -> AckOutcome {
+    let Some(p) = pending.as_ref() else {
+        return AckOutcome::Done;
+    };
+    if p.snap.platform != platform || p.snap.state != state {
+        return AckOutcome::Done;
+    }
+    acked.insert(platform.to_string());
+    AckOutcome::Pending
+}
+
+/// 成员标识：本应用只有一个 WebView，登录态按平台播，所以成员就是平台。
+fn acked_platform(snap: &LoginSnapshot) -> String {
+    snap.platform.clone()
+}
+
+/// 广播 + 确认的共享状态：watcher 线程按 5 秒重发，`login_ack` 命令在这里记账。
+///
+/// 字段全部由一个 `Mutex` 保护：读改写都是短临界区，不会和抓取/发消息争锁。
+#[derive(Debug, Default)]
+struct LoginBroadcast {
+    /// 当前这一轮待播广播（`None` = 没有正在重发的状态）。
+    pending: Option<PendingBroadcast>,
+    /// 这一轮已经确认消费的成员。
+    acked: std::collections::HashSet<String>,
+}
+
+impl LoginBroadcast {
+    /// 开始新一轮：状态变化时调用，`sent` 记 1（首次已发）。
+    fn begin(&mut self, snap: LoginSnapshot) {
+        self.acked.clear();
+        self.acked.insert(acked_platform(&snap));
+        self.pending = Some(PendingBroadcast {
+            snap,
+            sent: 1,
+            due_ms: now_ms() + LOGIN_REBROADCAST_MS,
+        });
+    }
+
+    /// 是否该补发：有任务、没到上限、且到了时间点。
+    fn due(&self) -> bool {
+        match self.pending.as_ref() {
+            Some(p) => p.sent < LOGIN_BROADCAST_MAX && now_ms() >= p.due_ms,
+            None => false,
+        }
+    }
+
+    /// 补发成功后推进计数与下次时刻。
+    fn mark_sent(&mut self) {
+        if let Some(p) = self.pending.as_mut() {
+            p.sent += 1;
+            p.due_ms = now_ms() + LOGIN_REBROADCAST_MS;
+        }
+    }
+
+    /// 全员确认后收工：清掉这一轮，watcher 不再重发。
+    fn finish(&mut self) {
+        self.pending = None;
+        self.acked.clear();
+    }
+}
+
+/// 单调时钟毫秒：只用来算「离下次重发还有多久」，不受系统改时间影响。
+fn now_ms() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
+}
+
+/// 广播状态的进程级单例：watcher 线程写，`login_ack` 命令读改写。
+///
+/// 用全局而不是 `State`：watcher 在 setup 阶段起线程时还没有可供 `manage` 的
+/// 句柄，而这个状态的生命周期与进程等同，不需要参与 Tauri 的注入体系。
+fn broadcast() -> &'static std::sync::Mutex<LoginBroadcast> {
+    static BROADCAST: std::sync::OnceLock<std::sync::Mutex<LoginBroadcast>> =
+        std::sync::OnceLock::new();
+    BROADCAST.get_or_init(|| std::sync::Mutex::new(LoginBroadcast::default()))
+}
+
+/// 处理一次前端确认：记账，并在「全员已消费」时收工。
+///
+/// 返回还缺几个成员。`0` = 这一轮结束了（全员确认，或这次确认属于旧轮次），
+/// `>0` = 还有人没回话，watcher 继续按 5 秒补发，最多发满 3 次。
+fn handle_ack(platform: &str, state: &str) -> usize {
+    let mut guard = broadcast().lock().unwrap_or_else(|e| e.into_inner());
+    let outcome = {
+        // 拆成两块：`guard` 的两个字段不能同时可变借用。
+        let LoginBroadcast { pending, acked } = &mut *guard;
+        apply_ack(pending, acked, platform, state)
+    };
+    if outcome == AckOutcome::Done {
+        // 旧轮次的迟到确认：不结算新一轮，也不会把它提前掐掉。
+        return 0;
+    }
+    let waiting = member_count().saturating_sub(guard.acked.len());
+    if waiting == 0 {
+        guard.finish();
+    }
+    waiting
+}
+
+/// 成员数：本应用只有一个 WebView，登录态按平台播，所以成员就是平台占位。
+///
+/// 窗口内两个订阅者（`ChatPage` 的 `onLoginState` 与 `DashboardPage` 的
+/// `subscribeLoginState`）共用一个 ack 出口，多窗口同步是后续议题
+/// （当前 `tauri.conf.json` 只有 `main` 一个窗口）。
+fn member_count() -> usize {
+    1
 }
 
 /// `login-state` 事件的载荷（**蛇形命名，冻结契约**）。
@@ -589,9 +745,32 @@ fn spawn_login_state_watcher(app: &tauri::AppHandle) {
                         state: next.state.clone(),
                     };
                     match handle.emit("login-state", &payload) {
-                        Ok(()) => last = Some(next),
+                        Ok(()) => {
+                            last = Some(next.clone());
+                            // 状态真的变了：立刻发第一次，并登记这一轮重发（5 秒一次、最多 3 次）。
+                            broadcast().lock().unwrap_or_else(|e| e.into_inner()).begin(next);
+                        }
                         // emit 失败不推进 last：下一拍重试，状态变化不会丢
                         Err(e) => eprintln!("[login-watch] emit login-state 失败：{e}"),
+                    }
+                    continue;
+                }
+                // 状态没变：到点且没到上限就补发一次（全员确认后 `due()` 恒为 false）。
+                let (due, snap) = {
+                    let guard = broadcast().lock().unwrap_or_else(|e| e.into_inner());
+                    (guard.due(), guard.pending.as_ref().map(|p| p.snap.clone()))
+                };
+                let Some(snap) = snap.filter(|_| due) else { continue };
+                let payload = LoginStatePayload {
+                    logged_in: snap.state == "logged_in",
+                    platform: snap.platform.clone(),
+                    state: snap.state.clone(),
+                };
+                match handle.emit("login-state", &payload) {
+                    Ok(()) => broadcast().lock().unwrap_or_else(|e| e.into_inner()).mark_sent(),
+                    Err(e) => {
+                        // 发失败不计数：5 秒后再来一次，别把次数白扔掉。
+                        eprintln!("[login-watch] 重发 login-state 失败：{e}");
                     }
                 }
             }
@@ -703,6 +882,7 @@ pub fn run() {
             window_minimize,
             window_toggle_maximize,
             window_close,
+            login_ack,
             commands_db::list_jobs,
             commands_db::get_job,
             commands_db::db_overview,
@@ -851,5 +1031,63 @@ mod login_watch_tests {
         assert_eq!(login_emit_decision(Some(&prev), None), Some(closed.clone()));
         assert_eq!(login_emit_decision(Some(&closed), None), None, "closed 不重复播");
         assert_eq!(login_emit_decision(None, None), None, "从未有过会话就不播");
+    }
+
+    /// 一轮广播：首次发 1 次，之后 5 秒一次，发满 3 次就停（用户 m02416）。
+    #[test]
+    fn broadcast_sends_at_most_three_times() {
+        let mut b = LoginBroadcast::default();
+        b.begin(snap("boss", "logged_in"));
+        // 刚发完首次：500ms 的 watcher 拍子还没到 5 秒，不该补发
+        assert!(!b.due(), "刚发完首次不该立刻补发");
+        // 把 due 拨到过去，模拟 5 秒已过
+        b.pending.as_mut().unwrap().due_ms = 0;
+        assert!(b.due());
+        b.mark_sent(); // 2 次
+        b.pending.as_mut().unwrap().due_ms = 0;
+        assert!(b.due());
+        b.mark_sent(); // 3 次
+        b.pending.as_mut().unwrap().due_ms = 0;
+        assert!(!b.due(), "发满 3 次后不再补发");
+    }
+
+    /// 全员确认后立刻收工：不等发满 3 次。
+    #[test]
+    fn ack_from_all_members_stops_broadcast() {
+        let mut b = LoginBroadcast::default();
+        b.begin(snap("boss", "logged_in"));
+        // 首次即已记账（发出方就是唯一成员），但还要等成员确认才算消费完
+        assert_eq!(
+            apply_ack(&mut b.pending, &mut b.acked, "boss", "logged_in"),
+            AckOutcome::Pending
+        );
+        assert_eq!(b.acked.len(), member_count(), "全员确认后该轮应结算");
+        b.finish();
+        assert!(b.pending.is_none(), "结算后不再重发");
+        assert!(b.acked.is_empty());
+    }
+
+    /// 旧轮次的迟到确认不能把新一轮提前掐掉。
+    #[test]
+    fn stale_ack_does_not_end_new_round() {
+        let mut b = LoginBroadcast::default();
+        b.begin(snap("boss", "logged_in"));
+        assert_eq!(
+            apply_ack(&mut b.pending, &mut b.acked, "boss", "waiting"),
+            AckOutcome::Done
+        );
+        assert!(b.pending.is_some(), "旧轮次确认不该清掉新一轮");
+        // 平台对不上同理
+        assert_eq!(
+            apply_ack(&mut b.pending, &mut b.acked, "zhilian", "logged_in"),
+            AckOutcome::Done
+        );
+        assert!(b.pending.is_some());
+        // 没有待播广播时的确认直接 Done，不 panic
+        let mut empty = LoginBroadcast::default();
+        assert_eq!(
+            apply_ack(&mut empty.pending, &mut empty.acked, "boss", "logged_in"),
+            AckOutcome::Done
+        );
     }
 }

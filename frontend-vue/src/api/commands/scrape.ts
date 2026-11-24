@@ -100,6 +100,20 @@ export function logout(platform: string): Promise<LogoutReply> {
 }
 
 /**
+ * 确认消费了一次 `login-state` 广播。
+ *
+ * 后端只在状态**变化**时发事件，然后每 5 秒补发一次、最多 3 次；收到确认且
+ * 全员都回话后立刻停止补发（用户 m02396）。`platform` + `state` 必须是
+ * 收到事件里的原值，对不上说明是旧轮次的迟到确认，后端会直接忽略。
+ *
+ * 返回还缺几个成员回话：`0` = 这一轮已结束。**不抛错**——这是旁路信号，
+ * 确认丢了也只是多补发一两次，不该冒泡到界面。
+ */
+export function loginAck(platform: string, state: string): Promise<number> {
+  return invokeFlat<number>('login_ack', { platform, state }).catch(() => 0);
+}
+
+/**
  * 在已存在的 sidecar 会话里打开某个页面（如切到 `chat`）。
  *
  * 平铺：`page` **有值才发**——发空串会被后端当成「要打开的空页面」。

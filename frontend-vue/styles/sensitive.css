@@ -50,13 +50,21 @@
   flex-direction: column;
   min-height: 0;
   border-radius: var(--radius-lg);
-  background: var(--popup-surface);
+  /* 自身材质归本文件独占（用户口径：不需要透明）。用 --panel-solid 而不是
+   * --popup-surface：后者与弹窗语义耦合，改弹窗底色会把面板一起带透。
+   * 背景继承给反射玻璃（`.glass-clone` 是 background: inherit），所以这里一旦
+   * 透，折射层跟着一起透——「不透明玻璃」只能从这里保证。 */
+  background: var(--panel-solid);
   border: 1px solid var(--hairline-strong);
   box-shadow: var(--shadow-pop);
-  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-2));
-  backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-2));
+  /* 底是实色，磨砂只会把面板边缘外的一圈内容反相折射进来（实测表现为
+   * 「展开时右下角多出一块深色」），所以这一层关掉。 */
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   transform: translate(-50%, -50%) scale(0.98);
   opacity: 0;
+  /* 收起后节点可能仍在 DOM 里（等退场过渡）：不给 auto，否则一块看不见的
+   * 面板会吃掉顶栏「配置 / 敏感库 / 主题」按钮的点击。 */
   pointer-events: none;
   will-change: transform, opacity;
   transition: transform 220ms var(--ease-glass), opacity 220ms var(--ease-glass);

@@ -42,9 +42,16 @@ export const HEARTBEAT_MAX_FAILS = 3;
 export const SEND_ARM_MAX_MS = 60_000;
 
 export const LOGIN_EXPIRED_NOTE = '登录已失效：请重新扫码登录后再自动投递';
-export const NOT_LOGGED_IN_NOTE = '未登录 Boss 直聘：请先点「扫码登录」，登录后再开始投递';
-export const BOSS_UNREACHABLE_NOTE =
-  '浏览器未连接：请先点「开始抓取」或「扫码登录」，连接后再开启自动投递';
+export const NOT_LOGGED_IN_NOTE = '浏览器未连接：请先登录';
+export const BOSS_UNREACHABLE_NOTE = '浏览器未连接：请先登录';
+/**
+ * 库里存着登录标记、但浏览器（sidecar）没起来。
+ *
+ * 与 `BOSS_UNREACHABLE_NOTE` 的区别只在**用户该做什么**：本地标记还在时，
+ * 说「请先登录」会让人去点自己头像旁边那句「已登录」（用户 m01784 正是如此）。
+ * 这时该做的是把浏览器拉起来，所以文案换成这一句。
+ */
+export const BROWSER_DETACHED_NOTE = '浏览器未启动：点一下让浏览器重新连接';
 
 export interface HeartbeatHooks {
   /** 拿到新的后端快照（含 idle 态，计数与倒计时都靠它）。 */
@@ -152,10 +159,11 @@ export function startHeartbeat(hooks: HeartbeatHooks, maxFails = HEARTBEAT_MAX_F
     schedule(heartbeatDelay());
   }
 
-  async function loginState(): Promise<string> {
+  /** 读一次登录态，带上 `saved`（库里是否有登录标记），用来区分「没连上」与「没登录」。 */
+  async function loginState(): Promise<{ state: string; saved: boolean }> {
     // sidecar 没起来时 `login_status` 自己会抛：等价于「浏览器未连接」。
-    const st = await loginStatus('boss').catch(() => ({ state: 'unknown' }));
-    return String(st.state ?? 'unknown');
+    const st = await loginStatus('boss').catch(() => ({ state: 'unknown', saved: false }));
+    return { state: String(st.state ?? 'unknown'), saved: st.saved === true };
   }
 
   /** 已登录 → 开表；未登录 / 浏览器未连接 → 停表并给出引导。 */
@@ -164,9 +172,21 @@ export function startHeartbeat(hooks: HeartbeatHooks, maxFails = HEARTBEAT_MAX_F
    * 所以调用它就是一次**主动刷新**：每次投递完成、发完消息、手动刷新走这里。
    */
   async function start(): Promise<void> {
-    const state = await loginState();
+    // 已在跑时别自己再验一次登录：`beat()` 一拍里已经验过了，
+    // 这里再来一次就是同一毫秒里的第二次 `login_status`（用户 m02245 的「双次」）。
+    if (alive) {
+      schedule(0);
+      return;
+    }
+    const { state, saved } = await loginState();
     if (!isLoggedIn(state)) {
-      hooks.onNote(state === 'unknown' ? BOSS_UNREACHABLE_NOTE : NOT_LOGGED_IN_NOTE);
+      // 「浏览器没起来」和「连上了但没登录」是两件事：本地有标记时说「请先登录」
+      // 会让人去点已经写着「已登录」的按钮（用户 m01784），所以分开给话。
+      if (state === 'unknown') {
+        hooks.onNote(saved ? BROWSER_DETACHED_NOTE : BOSS_UNREACHABLE_NOTE);
+      } else {
+        hooks.onNote(NOT_LOGGED_IN_NOTE);
+      }
       stop();
       return;
     }
@@ -180,10 +200,12 @@ export function startHeartbeat(hooks: HeartbeatHooks, maxFails = HEARTBEAT_MAX_F
     busy = true;
     try {
       // 每一拍都验登录：掉线即停表，重新登录后由用户操作再开。
-      if (!isLoggedIn(await loginState())) {
+      const probe = await loginState();
+      if (!isLoggedIn(probe.state)) {
         if (alive) {
           stop();
-          hooks.onNote(LOGIN_EXPIRED_NOTE);
+          // 浏览器整个没连上 ≠ 登录过期：后者才需要「重新扫码」。
+          hooks.onNote(probe.state === 'unknown' ? BOSS_UNREACHABLE_NOTE : LOGIN_EXPIRED_NOTE);
         }
         return;
       }

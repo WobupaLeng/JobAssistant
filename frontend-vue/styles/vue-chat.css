@@ -32,16 +32,18 @@
  * 这两条只是「JS 还没跑」时的兜底，数值必须与 `lib_ui/canvas.ts` 同一公式；
  * 运行期真实来源永远是 syncCanvas() 写在 <html> 上的行内值（单一来源，REMAINING#3）。 */
 :root {
-  /* 右栏基线宽：≥1280 为 300，1280 以下收窄到 260（原型 --rail-w 的等价物），两者都乘 --ui-scale。 */
-  --rail-w: calc(300px * var(--ui-scale));
+  /* 右栏基线宽：≥1360 为 360，以下收窄到 280（用户 m00933 加宽，原型是 300 / 260），
+   * 两者都乘 --ui-scale。数值与 lib_ui/canvas.ts 的 RAIL_W_WIDE / RAIL_W_NARROW 同源。
+   * 分档点 1360 的理由见 canvas.ts：再窄的窗口里对话框只有 50vw，右栏不能吃光正文区。 */
+  --rail-w: calc(360px * var(--ui-scale));
   /* 对话框宽 = clamp(600px, 50vw, 80vw)，由 syncCanvas() 算好写进行内样式；
    * 兜底 0px 与原型一致（聊天默认收起、不渲染 detach，规格 A36）。**不乘 scale**。 */
   --detach-w: 0px;
 }
 
-@media (max-width: 1279px) {
+@media (max-width: 1359px) {
   :root {
-    --rail-w: calc(260px * var(--ui-scale));
+    --rail-w: calc(280px * var(--ui-scale));
   }
 }
 
@@ -427,10 +429,16 @@
 /* 行内操作列（打招呼 / 简历）：原先在对话区顶部的 chat-head，已按裁决下沉到行内。
  * 默认隐藏，行 hover / 选中 / 键盘聚焦时才浮现——否则每一行都挂两个按钮，
  * 列表会变成一片按钮墙，扫视会话的效率反而下降。 */
+/* 操作列收成**竖排一列**（用户 m00933「这里的间距太大了 缩小间距」）：
+ * 横排时两个药丸（打招呼 / 移除）并排宽度抢得太多，列表里的摘要被压成省略号；
+ * 改成竖排后每个药丸只占自身宽度，行内横向留给「名字 + 摘要」。
+ * 高度不额外撑高行：两个 24px 药丸 + 2px 间隙 = 50px，仍小于头像 28px + 副行
+ * 的两行文字高，所以行的自然高度不变，只是右侧从"横向两坨"变成"一列"。 */
 .friend-acts {
   display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
   flex: 0 0 auto;
   margin-left: auto;
   opacity: 0;
@@ -446,13 +454,14 @@
 .friend-act {
   display: inline-flex;
   align-items: center;
-  height: 28px;
-  padding: 0 12px;
+  justify-content: center;
+  height: 24px;
+  padding: 0 9px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--hairline);
   background: var(--glass-0);
   color: var(--text-2);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
   white-space: nowrap;
   cursor: pointer;
   transition: color var(--dur) var(--ease-glass), border-color var(--dur) var(--ease-glass);
@@ -654,7 +663,14 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid var(--hairline);
+}
+
+/* 左段（Boss 列表）与右段（聊天）之间的分隔线：不再让列表自己画 border-right，
+ * 而是画在聊天流的第一列内边距上（用户 m01063「中间的间距太大了」）。
+ * 原来 border-right 的 1px 是叠在 --rail-w 之外的，等于多占一格；
+ * 现在线贴着聊天区文字起排的位置，列表与分隔线之间不再多出 1px 的空白。 */
+.chat-detach-chat {
+  border-left: 1px solid var(--hairline);
 }
 
 .chat-detach-chat {
@@ -701,6 +717,12 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  /* 长会话的渲染隔离（用户 m01994：消息列表刷新会卡住）。
+   * `content-visibility: auto` 让浏览器跳过视口外气泡的布局与绘制，只保留
+   * `contain-intrinsic-size` 估算的高度占位；滚回去时再按需补算。
+   * 本元素已经有确定的高度（flex 撑满），自动高度不受影响。 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 48px;
   /* 原型 L1113：聊天区内边距 12px 14px（pages.css 那份是契约宿主，不动它，
    * 这里按对话框作用域覆盖，交接表 D 行）。 */
   padding: 12px 14px;

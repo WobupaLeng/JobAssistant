@@ -324,6 +324,18 @@
 .drawer.is-open.drawer-anim {
   animation: none;
   transform: none;
+  /* 基础态在 drawer.css 里写着 `opacity: 0`（为进场关键帧服务），而本段按「只碰 transform」
+   * 的约定不再补透明度。两者相叠的结果是：位移回到 0 了，面板却一直是全透明的——
+   * 遮罩照常出现、Esc 照常可用，但看起来就是「点了没反应」「抽屉里什么都没有」。
+   * 打开态必须把不透明度显式补回 1，否则这条链永远断在这里。 */
+  opacity: 1;
+}
+
+/* `.drawer-anim` 由 `playOpen()` 在展开时补上、`onBeforeUnmount` 之前一直挂着；
+ * 但它也可能根本没被挂上（例如节点已经是打开态才 mount）。所以这里再按「纯打开态」
+ * 补一条兜底，让「.is-open 即可见」成为不依赖动画类的不变量。 */
+.drawer.is-open {
+  opacity: 1;
 }
 
 /* 收起态（关闭后那一帧）：三个抽屉各回各家。
@@ -343,13 +355,6 @@
   transform: translate(-50%, -50%);
 }
 
-/* 收起期间不接收点击：回程那 280ms 里用户已经在点别处了。 */
-.drawer.is-closing,
-.scrape-filter-bar.glass-l2.is-closing,
-.sensitive-panel.is-closing {
-  pointer-events: none;
-}
-
 /* 左抽屉的「打开态」：`.is-open` 由 DashboardPage 的 `filterOpen` 直接驱动，
  * 所以关闭那一帧就摘掉，位移回程立刻开播（不再等 `.is-closing`、不再排队）。
  * 节点由页面层留到 `closePanel()` 的过渡结束再卸，离场这一段看得见。 */
@@ -363,48 +368,27 @@
   transform: none;
 }
 
-/* ---------- 6.1 敏感库：只补间快照，不碰面板自身几何 ----------
- * 用户反馈「被遮挡的部分变透明了」，并要求「我不需要透明」。
+/* ---------- 6.1 敏感库：本段只留补间，不写任何自身几何或材质 ----------
+ * 用户反馈「被遮挡的部分变透明了」，并要求「我不需要透明」。结论落在 sensitive.css
+ * （`.sensitive-panel` 的底色 / 磨砂 / 层级 / pointer-events 都归它一家写），
+ * 本文件只负责「开合怎么动」——transform 的起点、终点与时长。
  *
- * 两个来源：
- *   ① sensitive.css 的基础规则把收起态写成 `opacity: 0`——面板连玻璃底一起淡出，
- *      露出来的是背后那层遮罩，看上去就是「盖住的地方透出来了」。
- *   ② 反射玻璃（`.glass-clone`）是用 `background: inherit` 继承宿主背景的；宿主自己
- *      一旦有透明度，克隆层跟着一起透——玻璃永远做不出「不透明玻璃」。
- *
- * 所以这里把它固定成不透明的实体玻璃：宿主底改为 tokens.css 的 `--panel-solid`
- * （深色 = 该主题的 --popup-surface 原值，浅色同样是原值，两套都是满不透明色），
- * 开合只补间 transform —— 面板始终是一整块实心表面，任何一帧都不会露出背后的东西。
- *
- * 代价（刻意接受）：敏感库不再透出窗内内容的折射。要的正是「一块不透明的面板」，
- * 折射与「不要透明」在物理上无法同时成立。克隆层留在 DOM 里（L2 探针与降级契约
- * 不变），只是它继承到的底不再有透明度。 */
+ * 这条边界是硬约束：同一元素的自身几何与材质只允许一个文件定义，否则同特异性
+ * 覆盖会互相吃掉，改动一处会在完全无关的地方冒出来（本次已多次踩中）。
+ * tests/geometry.test.ts 的 OWNERSHIP 守卫盯着它。 */
 .sensitive-panel.glass-l2 {
-  background: var(--panel-solid);
-  opacity: 1;
   transition: none;
-  /* 面板自己铺实心底，并关掉宿主上的磨砂：layout.css 给 `.sensitive-panel.glass-l2`
-   * 留了 backdrop-filter，它作用在半透明宿主上，远端采样会把面板边缘外的一圈内容
-   * 反相折射进来。底已经是实色的，磨砂既看不出效果又会漏边。 */
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-  /* 收起后仍留在 DOM 里（组件拿不到退场钩子时靠它吃掉点击）：不给 auto，
-   * 否则一块关掉的透明面板会挡住顶栏的配置 / 敏感库 / 主题键。 */
-  pointer-events: none;
 }
 
 /* 打开态：居中原位，不缩放、不淡化。 */
 .sensitive-panel.glass-l2.is-open,
 .sensitive-panel.glass-l2.is-open.is-closing {
   transform: translate(-50%, -50%);
-  opacity: 1;
-  pointer-events: auto;
 }
 
 /* 收起态：向右回 24px 再卸载（与岗位详情抽屉同一个方向、同一距离）。 */
 .sensitive-panel.glass-l2.is-closing {
   transform: translate(-50%, -50%) translateX(24px);
-  opacity: 1;
 }
 
 /* ---------- 7. 减少动态效果：位移 / 缩放全部去掉 ----------

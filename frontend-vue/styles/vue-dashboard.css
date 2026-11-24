@@ -772,6 +772,10 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* 自身材质只在本文件写（原先是 layout.css 跨文件覆盖背景与磨砂）。 */
+  background: var(--popup-surface);
+  -webkit-backdrop-filter: var(--panel-blur);
+  backdrop-filter: var(--panel-blur);
 }
 
 .f-head {

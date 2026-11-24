@@ -157,6 +157,12 @@ export interface Friend {
   last_time: string;
   unread: number;
   avatar: string;
+  /**
+   * 最后聊天时刻（毫秒）。列表排序与「库里是否更新」都只看它。
+   *
+   * DOM 兜底路径取不到时间，这时是 `null`（后端不落库、前端按「无时间」排最后）。
+   */
+  last_ts?: number | null;
 }
 
 export interface ChatMessage {

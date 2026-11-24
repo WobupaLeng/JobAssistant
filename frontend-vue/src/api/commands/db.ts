@@ -11,6 +11,7 @@
  */
 
 import { invokeArgs, invokeFlat, invokeNone } from '../invoke';
+import { normalizeJob } from '../../lib_ui/job';
 import type {
   DbOverview,
   DecisionRecord,
@@ -50,7 +51,7 @@ export function listJobs(args: ListJobsArgs = {}): Promise<Job[]> {
     include_rejected: args.include_rejected === true,
     rejected_only: args.rejected_only === true,
     ascending: args.ascending === true,
-  });
+  }).then((rows) => rows.map((r) => normalizeJob(r)));
 }
 
 /**
@@ -60,7 +61,9 @@ export function listJobs(args: ListJobsArgs = {}): Promise<Job[]> {
  * 所以调用方必须处理 `null`。
  */
 export function getJob(jobId: string): Promise<Job | null> {
-  return invokeFlat<Job | null>('get_job', { jobId });
+  return invokeFlat<Job | null>('get_job', { jobId }).then((r) =>
+    r === null ? null : normalizeJob(r),
+  );
 }
 
 /** 库概览：总数 + 按公司规模分组 + 是否有历史遗留分数。 */

@@ -283,6 +283,7 @@ function createRenderer(gl: WebGL2RenderingContext, canvas: HTMLCanvasElement): 
   /** 读可见卡片几何 + 底色（运行时 computed style，无字面量），填充实例缓冲（每实例 9 float）。 */
   function readCards(): number {
     const cards = document.querySelectorAll<HTMLElement>('.job-card');
+    if (cards.length === 0) return 0;
     let n = 0;
     for (let i = 0; i < cards.length && n < GLASS_L3.maxInstances; i += 1) {
       const c = cards[i];
@@ -385,9 +386,27 @@ export function useGlassL3(canvas: Ref<HTMLCanvasElement | null>): void {
   let running = false;
   let lastSig = '';
   let idleSince = 0;
+  /** 上一帧的绘制时间戳，用于帧率上限（`GLASS_L3.frameMinMs`）。 */
+  let lastDrawAt = 0;
   let moBody: MutationObserver | null = null;
   let moTheme: MutationObserver | null = null;
+  /**
+   * 自己写进 canvas 的 `style.opacity` 值（模块级记忆，不靠读 `el.style`）。
+   *
+   * 读 `el.style.opacity` 比较会触发样式重算，而每一帧、整屏渲染时都要比一次；
+   * 纯字符串比较是零成本的。
+   */
+  let appliedOpacity = '';
   const disposers: Array<() => void> = [];
+  /**
+   * 本模块自己正在写 canvas 的 style（每帧 `setOpacity`）。
+   *
+   * `moBody` 监听的是 `document.body` 子树的 `style` / `class`，canvas 自己的 `style.opacity`
+   * 也在其中：不设这道闸，帧末写 style → 观察器 → `start()` → 下一帧 → 再写 style，
+   * 就成了一条自激循环。静止降频（`running = false`）会被它立刻拉起，rAF 永不停止，
+   * 表现为 WebView 渲染进程 CPU 长期满载、界面发涩直到卡死。
+   */
+  let writingStyle = false;
 
   function off(): void {
     document.documentElement.dataset.l3 = 'off';
@@ -409,13 +428,22 @@ export function useGlassL3(canvas: Ref<HTMLCanvasElement | null>): void {
   function stop(): void {
     running = false;
     if (raf) {
+      // `raf` 里可能存的是 rAF 句柄，也可能是帧率上限用的定时器句柄，两种都要清。
       cancelAnimationFrame(raf);
+      window.clearTimeout(raf);
       raf = 0;
     }
   }
 
   function setOpacity(v: string): void {
-    if (el && el.style.opacity !== v) el.style.opacity = v;
+    if (!el || appliedOpacity === v) return;
+    writingStyle = true;
+    try {
+      el.style.opacity = v;
+      appliedOpacity = v;
+    } finally {
+      writingStyle = false;
+    }
   }
 
   function frame(): void {
@@ -454,7 +482,23 @@ export function useGlassL3(canvas: Ref<HTMLCanvasElement | null>): void {
       running = false; // 静止降频：停 rAF，保留最终 draw（规格 §3.4）
       return;
     }
-    raf = requestAnimationFrame(frame);
+    // 帧率上限：透镜是背景装饰，30fps 足够；60fps 会把主线程整块吃掉。
+    // 排下一帧时按已用时间做一次补偿式延时，避免固定间隔与 vsync 拍频产生抖动。
+    const elapsed = now - lastDrawAt;
+    const wait = Math.max(0, GLASS_L3.frameMinMs - elapsed);
+    lastDrawAt = now;
+    scheduleNext(wait);
+  }
+
+  /** 按需延时后再进下一帧（`wait === 0` 时退化为普通 rAF）。 */
+  function scheduleNext(wait: number): void {
+    if (wait <= 1) {
+      raf = requestAnimationFrame(frame);
+      return;
+    }
+    raf = requestAnimationFrame(() => {
+      raf = window.setTimeout(frame, wait) as unknown as number;
+    });
   }
 
   function start(): void {
@@ -462,6 +506,8 @@ export function useGlassL3(canvas: Ref<HTMLCanvasElement | null>): void {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     running = true;
     idleSince = performance.now();
+    // 让帧率上限重新起算，否则长时间静止后再激活会先白等一个间隔。
+    lastDrawAt = 0;
     lastSig = '';
     raf = requestAnimationFrame(frame);
   }
@@ -491,12 +537,30 @@ export function useGlassL3(canvas: Ref<HTMLCanvasElement | null>): void {
     renderer.resize();
 
     if (typeof MutationObserver !== 'undefined') {
-      moBody = new MutationObserver(() => start());
-      moBody.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+      moBody = new MutationObserver((records) => {
+        // 只由本模块自己写下的那条 style 变更 → 不是「界面变了」，不重启绘制。
+        if (writingStyle) return;
+        // 同一批 records 里可能混着别的改动，逐个确认是否全部落在 canvas 自身。
+        const selfOnly = records.every((r) => r.target === el);
+        if (selfOnly) return;
+        start();
+      });
+      // 只监听 `class` / 子节点增删，不再监听 `style`。
+      //
+      // 站点里大量动画与滚动补偿都在逐帧改 `style`（滚动条占位、动效进度条、
+      // 库内部的行内样式），每改一次就 `start()` 一次，实测能把渲染进程顶到满载，
+      // 表现为「查看消息很卡」。canvas 自身的 `opacity` 写入也只走 `style`，
+      // 去掉这条过滤后连那道自我触发的闸门都不需要了。
+      moBody.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
       moTheme = new MutationObserver(() => start());
       moTheme.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     }
-    const onScroll = (): void => start();
+    // 滚动不重算透镜：透镜矩形跟随的是抽屉，不是列表。原来每次滚动都在 `start()`
+    // 里清空 `lastSig` + 重置 `idleSince`，把静止降频彻底废掉。
+    const onScroll = (): void => {
+      if (activeDrawer() === null) return;
+      start();
+    };
     const onResize = (): void => {
       renderer?.resize();
       start();

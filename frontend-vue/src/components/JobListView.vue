@@ -87,6 +87,10 @@ const emit = defineEmits<{
   (e: 'batch', op: BatchOp): void;
   (e: 'greet', jobId: string): void;
   (e: 'open', jobId: string): void;
+  /** 长按到点（≥500ms）：进入多选。判定在 `lib_ui/longpress.ts`，父级只收结果。 */
+  (e: 'longpress', jobId: string): void;
+  /** 多选态下点了列表空白处：退出多选。 */
+  (e: 'check-blank'): void;
   /** 空态里的两个入口：展开筛选 / 直接开始抓取（原型 `job-empty-*-btn`）。 */
   (e: 'empty-filter'): void;
   (e: 'empty-start'): void;
@@ -177,7 +181,7 @@ function onSort(field: SortField): void {
 </script>
 
 <template>
-  <div class="card job-list" data-testid="job-list-card">
+  <div class="card job-list" data-testid="job-list-card" @click.self="emit('check-blank')">
     <div class="job-tabs-row">
       <div class="job-tabs" role="tablist" aria-label="岗位页签">
         <span class="card-title" data-testid="job-list-title">岗位列表</span>
@@ -256,6 +260,7 @@ function onSort(field: SortField): void {
       :class="{ 'is-selecting': selection.selecting }"
       :data-state="loading ? 'loading' : error ? 'error' : visible.length === 0 ? 'empty' : 'ready'"
       data-testid="job-grid"
+      @click.self="emit('check-blank')"
     >
       <template v-if="loading">
         <div v-for="i in 6" :key="i" class="job-card is-skeleton" aria-hidden="true">
@@ -305,6 +310,7 @@ function onSort(field: SortField): void {
           @toggle="emit('toggle', $event)"
           @greet="emit('greet', $event)"
           @open="emit('open', $event)"
+          @longpress="emit('longpress', $event)"
         />
       </template>
       <!-- 无限滚动哨兵：滚到它时加载下一页；不足一页即不渲染。 -->

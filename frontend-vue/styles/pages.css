@@ -389,6 +389,9 @@
   border-radius: var(--radius);
   background: var(--glass-1);
   overflow: hidden;
+  /* 自身材质只在本文件写（原先是 layout.css 跨文件把底清成 transparent 再补磨砂）。 */
+  -webkit-backdrop-filter: var(--panel-blur);
+  backdrop-filter: var(--panel-blur);
 }
 
 .config-head {

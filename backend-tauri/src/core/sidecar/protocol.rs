@@ -165,6 +165,11 @@ pub struct Friend {
     pub last_time: Option<String>,
     pub unread: Option<u32>,
     pub avatar: Option<String>,
+    /// 最后聊天时刻（毫秒）。会话列表判新旧只看它，不看给人读的 `last_time`。
+    ///
+    /// `chat.friends` 接口路径会给；DOM 兜底路径取不到，留 `None`。
+    #[serde(default)]
+    pub last_ts: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

@@ -76,16 +76,16 @@ describe('computeUiScale：clamp(1, innerWidth / 1920, 1.5)', () => {
 });
 
 describe('右栏宽 / 对话框宽', () => {
-  it('右栏宽乘 scale：2560 → 300×1.333 = 400；3840 → 300×1.5 = 450', () => {
-    expect(computeRailWidth(1440)).toBe(300);
-    expect(computeRailWidth(1920)).toBe(300);
-    expect(computeRailWidth(2560)).toBe(400);
-    expect(computeRailWidth(3840)).toBe(450);
+  it('右栏宽乘 scale：2560 → 360×1.333 = 480；3840 → 360×1.5 = 540', () => {
+    expect(computeRailWidth(1440)).toBe(360);
+    expect(computeRailWidth(1920)).toBe(360);
+    expect(computeRailWidth(2560)).toBe(480);
+    expect(computeRailWidth(3840)).toBe(540);
   });
 
-  it('窄窗右栏基准 260，同样乘 scale', () => {
-    expect(computeRailWidth(RAIL_NARROW_BELOW - 1)).toBe(260);
-    expect(computeRailWidth(1440)).toBe(300);
+  it('窄窗右栏基准 280，同样乘 scale', () => {
+    expect(computeRailWidth(RAIL_NARROW_BELOW - 1)).toBe(280);
+    expect(computeRailWidth(1440)).toBe(360);
   });
 
   it('对话框宽不乘 scale：仍是 clamp(600, 50vw, 80vw)', () => {
@@ -150,6 +150,103 @@ describe('vue 系样式：裸 px 字号归零', () => {
 
   it('app.css 的裸 px 字号也归零', () => {
     expect(stripComments(read('src/app.css'))).not.toMatch(/font-size:\s*[\d.]+px/);
+  });
+});
+
+/**
+ * 归属守卫：**同一元素的自身几何与材质只允许一个样式文件定义**。
+ *
+ * 起因是一次真实回归：`.sensitive-panel` 的底色 / 磨砂 / pointer-events 被
+ * sensitive.css、layout.css、motion.css 三处各写一份，谁改一处都会在别处冒出来，
+ * 表现为「点关闭没反应」「被遮挡的部分变透明」「列表点不动」这类与改动毫不相干的故障。
+ *
+ * 边界：动效文件（motion.css）只许写 transition / animation / transform，
+ * 不许碰 background / backdrop-filter / pointer-events。
+ */
+const PANEL_OWNER: Readonly<Record<string, string>> = {
+  '.sensitive-panel': 'styles/sensitive.css',
+  '.drawer': 'styles/drawer.css',
+  '.config-modal': 'styles/vue-pages.css',
+  '.decisions-modal': 'styles/vue-pages.css',
+};
+
+const MOTION_ONLY = 'styles/motion.css';
+
+const ALL_CSS = [
+  'styles/tokens.css',
+  'styles/layout.css',
+  'styles/controls.css',
+  'styles/jobs.css',
+  'styles/drawer.css',
+  'styles/motion.css',
+  'styles/scrape.css',
+  'styles/pages.css',
+  'styles/sensitive.css',
+  'styles/auto.css',
+  'styles/filter.css',
+  'styles/vue-dashboard.css',
+  'styles/vue-chat.css',
+  'styles/vue-pages.css',
+  'styles/vue-glass.css',
+  'src/app.css',
+] as const;
+
+/** 把样式表拆成「选择器 → 声明体」的块，注释先剥掉。 */
+function ruleBlocks(css: string): { selector: string; body: string }[] {
+  const out: { selector: string; body: string }[] = [];
+  const text = stripComments(css);
+  const re = /([^{}]+)\{([^{}]*)\}/g;
+  let m: RegExpExecArray | null = null;
+  while ((m = re.exec(text)) !== null) {
+    out.push({ selector: m[1].replace(/\s+/g, ' ').trim(), body: m[2] });
+  }
+  return out;
+}
+
+describe('归属：面板的自身几何与材质只有一个写者', () => {
+  for (const [sel, owner] of Object.entries(PANEL_OWNER)) {
+    it(`${sel} 的背景 / 磨砂只在 ${owner} 声明`, () => {
+      const offenders: string[] = [];
+      for (const file of ALL_CSS) {
+        if (file === owner) continue;
+        for (const { selector, body } of ruleBlocks(read(file))) {
+          if (!selector.includes(sel)) continue;
+          if (/(^|[\s;{])(background|backdrop-filter|-webkit-backdrop-filter)\s*:/.test(body)) {
+            offenders.push(`${file} → ${selector}`);
+          }
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+  }
+
+  it('motion.css 只写动效：面板选择器里不出现 background / backdrop-filter / pointer-events', () => {
+    const offenders: string[] = [];
+    for (const { selector, body } of ruleBlocks(read(MOTION_ONLY))) {
+      if (!Object.keys(PANEL_OWNER).some((sel) => selector.includes(sel))) continue;
+      if (/(background|backdrop-filter|pointer-events)\s*:/.test(body)) offenders.push(selector);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('layout.css 不再跨文件改写上述面板的背景与磨砂', () => {
+    const offenders: string[] = [];
+    for (const { selector, body } of ruleBlocks(read('styles/layout.css'))) {
+      if (!Object.keys(PANEL_OWNER).some((sel) => selector.includes(sel))) continue;
+      if (/(^|[\s;{])(background|backdrop-filter|-webkit-backdrop-filter)\s*:/.test(body)) {
+        offenders.push(selector);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('减少动态效果的降级不再用通配符 + !important 压全局', () => {
+    const css = stripComments(read('styles/controls.css'));
+    const m = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?)\n\}/.exec(css);
+    expect(m).not.toBeNull();
+    const body = m === null ? '' : m[1];
+    // 通配符选择器（`*`、`*::before`、`*::after`）在这里一律不允许。
+    expect(body).not.toMatch(/(^|[\s,{])\*(::[a-z-]+)?\s*[,{]/);
   });
 });
 
@@ -218,7 +315,7 @@ describe('三窗固定高 / 敏感库 720 / A54 方块', () => {
 
   it('右栏宽兜底与对话框兜底都在样式里，且右栏乘 scale', () => {
     const css = stripComments(read('styles/vue-chat.css'));
-    expect(css).toContain('--rail-w: calc(300px * var(--ui-scale))');
+    expect(css).toContain('--rail-w: calc(360px * var(--ui-scale))');
     // A36 兜底的宿主必须是 :root：挂到更近的祖先（.app-body / 退役前的 .page-chat）
     // 会把 syncCanvas() 写在 <html> 行内的真实值遮掉，展开态对话框实测只剩 1px 描边。
     expect(css).toMatch(/(^|\n)\s*:root\s*\{[^}]*--detach-w: 0px;/);

@@ -519,6 +519,8 @@ class ChatClient:
                         "company": r["company"] or None,
                         "last_msg": last or None,
                         "last_time": r["last_time"] or None,
+                        # DOM 兜底取不到可信时间戳：留空，让库里的时间不被抹掉。
+                        "last_ts": None,
                         "unread": self._int_or_zero(r["unread"]),
                         "avatar": None,
                     }
@@ -533,6 +535,8 @@ class ChatClient:
                 "title": f["title"] or None,
                 "last_msg": f["last_msg"] or None,
                 "last_time": f["last_time"] or None,
+                # 接口路径带 `lastTS`（毫秒）：会话列表靠它判新旧（用户 m01539）。
+                "last_ts": self._int_or_zero(f["last_ts"]) or None,
                 "unread": f["unread"],
                 "avatar": f["avatar"] or None,
             }

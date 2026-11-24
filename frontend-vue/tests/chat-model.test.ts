@@ -30,6 +30,7 @@ import {
   pickFriend,
   railWidth,
   senderSlug,
+  sortFriends,
   splitThread,
   unreadText,
   withPending,
@@ -92,25 +93,28 @@ describe('对话框宽度公式（SPEC §2.2 / §16.6，A49）', () => {
     expect(detachWidth(Number.POSITIVE_INFINITY)).toBe(DETACH_MIN_W);
   });
 
-  it('右栏宽：≥1280 基准 300，以下 260；≤1920 时 scale=1 故原值不变', () => {
-    expect(railWidth(1280)).toBe(300);
-    expect(railWidth(1600)).toBe(300);
-    expect(railWidth(1279)).toBe(260);
-    expect(railWidth(1200)).toBe(260);
+  it('右栏宽：≥1360 基准 360，以下 280；≤1920 时 scale=1 故原值不变', () => {
+    expect(railWidth(1360)).toBe(360);
+    expect(railWidth(1600)).toBe(360);
+    expect(railWidth(1359)).toBe(280);
+    expect(railWidth(1280)).toBe(280);
+    expect(railWidth(1200)).toBe(280);
   });
 
-  it('右栏宽随 --ui-scale 放大（用户裁决 K/v7）：2560 → 300×1.333', () => {
-    // 大屏上字号放大到 1.333 倍，右栏与对话框一起放大，否则正文会挤在 300px 栏里。
-    expect(railWidth(2560)).toBe(400);
-    expect(railWidth(3840)).toBe(450); // 450 × 1.5（封顶）
+  it('右栏宽随 --ui-scale 放大（用户裁决 K/v7）：2560 → 360×1.333', () => {
+    // 大屏上字号放大到 1.333 倍，右栏与对话框一起放大，否则正文会挤在同一条固定宽度里。
+    expect(railWidth(2560)).toBe(480);
+    expect(railWidth(3840)).toBe(540); // 360 × 1.5（封顶）
   });
 
   it('聊天区可用宽 = 对话框宽 − 右栏宽，规格下限 320 在四档内都满足', () => {
-    expect(chatAreaWidth(1200)).toBe(340);
-    expect(chatAreaWidth(1280)).toBe(340);
-    expect(chatAreaWidth(1440)).toBe(420);
-    expect(chatAreaWidth(1600)).toBe(500);
-    for (const w of [1200, 1280, 1440, 1600, 1920]) {
+    expect(chatAreaWidth(1200)).toBe(320);
+    expect(chatAreaWidth(1280)).toBe(360);
+    expect(chatAreaWidth(1440)).toBe(360);
+    expect(chatAreaWidth(1600)).toBe(440);
+    // 分档点上最紧：1360 时对话框 680 − 右栏 360 = 320，恰好触底。
+    expect(chatAreaWidth(1360)).toBe(320);
+    for (const w of [1200, 1280, 1360, 1440, 1600, 1920]) {
       expect(chatAreaWidth(w)).toBeGreaterThanOrEqual(320);
     }
   });
@@ -299,6 +303,29 @@ describe('打招呼链路（SPEC §16.5 裁决 T）', () => {
     const out = withPending(head, pendingFriend('job-7', '星瀚科技'));
     expect(out.map((f) => f.uid)).toEqual(['gjob-7', 'a', 'b']);
     expect(withPending(head, null)).toBe(head);
+  });
+
+  it('排序：草稿置顶 → 最近聊天在前 → 无时间戳的垫底（用户 m01539）', () => {
+    const list = [
+      friend({ uid: 'old', last_ts: 1_000 }),
+      friend({ uid: 'none', last_ts: null }),
+      pendingFriend('job-7', '星瀚科技'),
+      friend({ uid: 'new', last_ts: 9_000 }),
+      friend({ uid: 'mid', last_ts: 5_000 }),
+    ];
+    const out = sortFriends(list);
+    expect(out.map((f) => f.uid)).toEqual(['gjob-7', 'new', 'mid', 'old', 'none']);
+    // 纯函数：不改入参顺序
+    expect(list.map((f) => f.uid)).toEqual(['old', 'none', 'gjob-7', 'new', 'mid']);
+  });
+
+  it('排序：缺 last_ts 字段（老数据）同样垫底，同段时间倒序后按 uid 稳定', () => {
+    const out = sortFriends([
+      friend({ uid: 'z-noTs' }),
+      friend({ uid: 'b-same', last_ts: 2_000 }),
+      friend({ uid: 'a-same', last_ts: 2_000 }),
+    ]);
+    expect(out.map((f) => f.uid)).toEqual(['a-same', 'b-same', 'z-noTs']);
   });
 });
 

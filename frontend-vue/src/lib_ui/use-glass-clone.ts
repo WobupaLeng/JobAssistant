@@ -19,8 +19,19 @@ import { computeGlassOffset } from './glass';
  */
 const OVERLAY_SELECTORS = '.drawer,.drawer-backdrop,.sensitive-panel,.sensitive-backdrop';
 const STATE_CLASSES = ['is-open', 'is-closing', 'pan-pop', 'pan-modal', 'drawer-anim', 'shell-resized'];
-/** 内容变更重克隆节流（ms）：滚动走反平移不重克隆，仅 childList/characterData 变更触发（裁定 6）。 */
-const RECLONE_THROTTLE_MS = 200;
+/**
+ * 内容变更后的重克隆节流（ms）。
+ *
+ * 副本只是抽屉背后的**静态模糊底图**：消息文本、未读数、列表行的增删改在模糊层上
+ * 看不出区别，而一次重克隆要把整个源容器 `cloneNode(true)` 再逐节点净化
+ * （`sanitizeBackdropCopy`），是整屏级别的 DOM 开销。原来监听
+ * `{childList, subtree, characterData}` + 200ms 节流，聊天页每来一条消息、每次刷新
+ * 列表都会触发一次整屏重克隆——实测足以把主线程压住（用户报「查看消息会很卡」）。
+ *
+ * 节流窗口从 200ms 拉到 1.5s：确实改变了可见结构（例如整块面板换页）时仍会在
+ * 一个呼吸内跟上，但连续的内容更新只会被合并成一次。
+ */
+const RECLONE_THROTTLE_MS = 1500;
 
 /**
  * 净化背景副本：剥锚点 / 防递归 / 排除叠层 / 不可交互，并把滚动容器中性化（overflow:visible、
@@ -107,7 +118,9 @@ export function useBackdropGlass(opts: {
         build();
       }, RECLONE_THROTTLE_MS);
     });
-    contentMo.observe(sourceEl, { childList: true, subtree: true, characterData: true });
+    // 只盯「行级增删」（列表换页、会话进出），不盯 `characterData`：
+    // 聊天消息落进 DOM 时改的都是文本节点，模糊层上看不见，却会触发整屏深拷贝。
+    contentMo.observe(sourceEl, { childList: true, subtree: true });
   }
 
   function onScroll(): void {

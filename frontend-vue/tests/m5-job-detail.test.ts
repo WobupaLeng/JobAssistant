@@ -212,10 +212,12 @@ describe('job-detail-model / 动作口径', () => {
     expect(a.disabled).toBe(false);
   });
 
-  it('已否决时首按钮反向为允许投递', () => {
+  it('已否决时首按钮反向为撤销否决', () => {
     const a = rejectAction(job({ rejected: 1 }));
     expect(a.testId).toBe('job-detail-allow-btn');
-    expect(a.label).toBe('允许投递');
+    // 与列表批量条、卡片同一口径（用户裁决 m00874）：这个动作是把已否决的
+    // 岗位放回待投递，不是「允许投递」再投一次。
+    expect(a.label).toBe('撤销否决');
     expect(a.btnClass).toContain('btn-ghost');
   });
 
@@ -246,7 +248,8 @@ describe('job-detail-model / 动作口径', () => {
     const delivered = detailActions(job({ status: 'delivered' }), 'delivered');
     expect(delivered).toHaveLength(1);
     expect(delivered[0].action).toBe('undo-deliver');
-    expect(delivered[0].label).toBe('取消投递');
+    // 与卡片同一文案（用户裁决 m00904）：动作是把该岗位放回待投递列表。
+    expect(delivered[0].label).toBe('待投递');
   });
 });
 

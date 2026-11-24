@@ -145,7 +145,7 @@ defineExpose({ listEl });
       >
         <span class="state-glyph" aria-hidden="true">●</span>
         <span class="state-title">浏览器未连接</span>
-        <span class="state-sub">请先点「开始抓取」或「扫码登录」，再发送消息</span>
+        <span class="state-sub">请先登录后重试</span>
         <span class="state-actions">
           <button class="btn btn-sm" type="button" :data-testid="ids.retry" @click="emit('retry')">
             重试

@@ -138,6 +138,75 @@
 - **顶栏右组未溢出**：1440 视口下 `.tb-tail.right=1389`，`.topbar` 内容宽 1388，恰好放下。不要因此改顶栏宽度。
 - **未核实项**：日志栏与 `section.page-dashboard` 是否缺 `.dashboard` 类导致 `.app-body` 行布局错位（未运行态确认）；`controls.css` 的 `.btn-danger` 浅色主题覆盖（8 处调用，定义存在，覆盖未核）；`ScrapeBar` 的 `scrape-stop-btn` 初始 disabled、`chat-detach-close-btn` 文案（C5/C9，未核）；`.dashboard` padding-top 对齐（A2，未核）。
 
+### 2.5 Boss 消息卡顿（未做完，待接手的优化项）
+
+> 现象：**点某个 Boss 会话约 1 秒后卡一下**；**点 Boss 列表旁刷新按钮**同样卡。F5 整页刷新**不卡**。
+> 已完成部分见下方「已修」，**未完成部分见方案三档**，按档位接手即可。
+
+**已修（勿重复排查）**
+
+| 热点 | 病灶 | 处置 |
+|---|---|---|
+| L3 透镜自激循环 | `use-glass-l3.ts` 的 `moBody` 监听 `document.body` 的 `style`，帧末 `setOpacity` 写入又触发自己 → rAF 永不停止；`start()` 无条件重置 `lastSig`/`idleSince`，500ms 静止降频永久失效 | MutationObserver 只留 `attributeFilter:['class']`；`setOpacity` 用模块级 `appliedOpacity` 字符串比较；`frame()` 末尾 `scheduleNext(wait)` 按 `GLASS_L3.frameMinMs`(33ms) 限帧；`onScroll` 加 `activeDrawer() === null` 门控。实测渲染进程 CPU 371s/5s → 2.2s/5s |
+| L2 克隆层深度复制 | `use-glass-clone.ts` 的 `contentMo` 监听 `{childList, subtree, characterData}` + 200ms 节流，任何文本变化都整屏 `cloneNode(true)` | `RECLONE_THROTTLE_MS` 200 → 1500，observe 去掉 `characterData` |
+| 已排除 | `main.ts` 卡片高光（仅 `pointermove` 读 rect）、`use-canvas-scale.ts`（仅 resize 时 rAF）、`main.ts` resize 的 140ms 落定加类 | 非热点，勿再查 |
+
+**根因（两条链路，同一病灶：远程数据整体替换 → 节点全量重建）**
+
+- 链路 A「点会话」：`ChatPage.vue:242-245`
+  ```ts
+  const reply = await chatMessages(uid);   // ① IPC → Rust → sidecar → 真实 Chrome 抓取
+  if (ui.value.activeFriendsUid !== uid) return;
+  messages.value = reply.items;            // ② 整个数组一次性替换
+  ```
+  `chatMessages`（`api/commands/chat.ts:34`，命令 `chat_messages`）**不是读缓存**，会命令真实浏览器抓该会话；「一秒后」= 抓取回来的那一刻，不是渲染慢。
+- 链路 B「点刷新」：`ChatPage.vue:219` `friends.value = [...locals, ...reply.items];`，40 个 `.friend` 行同时重建。
+- 重建成本三处叠加（`components/chat/ChatThread.vue:114-126` + `styles/vue-chat.css:728-741`）：每个气泡重建都**重播 `bubble-in`**；`scale(0.985)` 让每气泡**强制独立合成层**（40 条 = 40 层）；气泡无 `contain`，一条变化牵动**整列表重排**。
+- 已于 `.chat-detach-chat .chat-feed` 加 `content-visibility: auto` + `contain-intrinsic-size: auto 48px`：只省**视口外的布局与绘制**，**省不了重建与动画重播**，故仍卡。
+
+**方案一档 · 纯 CSS（推荐先做，零逻辑风险）**
+
+1. 入场动画改为按需触发，替换数据不重播：
+   ```css
+   .chat-detach-chat .bubble { /* 去掉 animation */ }
+   .chat-detach-chat .chat-feed.is-entering .bubble { animation: bubble-in var(--dur) var(--ease-out); }
+   ```
+   `.is-entering` 只在**切换会话首次渲染**时临时挂上，`nextTick` 后 `classList.remove`；**不要**绑响应式状态（每帧变更会触发重算）。
+2. 从 `@keyframes bubble-in` 拿掉 `scale(0.985)`（视觉几乎不可见，却让每行独立合成层）：
+   ```css
+   @keyframes bubble-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+   ```
+3. 给行加渲染隔离：`.chat-detach-chat .bubble-row, .friend { contain: layout paint; }`
+   **注意**：`.friend`（`vue-chat.css:348`）已有 `overflow: hidden` + `flex: 0 0 auto`（`:358-360` 有注释说明防行被压扁），**这两行不要动**。
+
+**方案二档 · 渲染结构**
+
+4. 稳定 key：现在 key 是 `msgTestId(m) ?? \`local-${i}\``，远程消息有 `msg_id` 时稳定，**本地乐观气泡用索引**，刷新后索引错位会整列表重 diff。给乐观气泡生成稳定临时 id 随消息对象保存（`ChatPage.vue` 的 `messages.value = [...]` 乐观插入处，`:328` / `:354` 附近），key 改用该 id。
+5. 虚拟化（可选）：仅当单会话常 100+ 条才值得，引入依赖收益/风险比不划算，**先做一档 + 第 4 条**。
+
+**方案三档 · 数据流（须产品先拍板，不可单方面改）**
+
+6. `ChatPage.vue:231-253` 现在是「先本地（仅 `messages.length === 0` 时填）→ 再等远程整体替换」，切换会话时 `:263` 先 `messages.value = []`，本地数据要等一轮 IPC。应改为：立刻用 `chatMessagesLocal(uid)` 渲染（去掉 `messages.length === 0` 前置）→ 远程结果按 `msg_id` **合并**（保留乐观气泡，只追加/更新）→ 不再整体替换。
+7. 点击会话时不要强制走浏览器抓取：先只读本地库立刻出内容，抓取放后台或推迟到「展开聊天框」（`ChatPage.vue:772` 已有 `messages.value.length === 0` 条件可参考）。**会改变用户看到的数据新鲜度，须产品确认。**
+
+**验收标准**
+
+| 项 | 标准 |
+|---|---|
+| 点 40 条消息的会话 | 可感知卡顿消失，或降到 < 50ms |
+| 点刷新（40 个 Boss） | 同上 |
+| 气泡动画 | 切换会话仍见一次淡入；数据刷新**不重播** |
+| 门禁 | `vue-tsc --noEmit` exit 0；`vitest run` 全绿（基线 39 files / 657 tests） |
+| 回归 | 抽屉开合、Esc 分层、长按多选、右栏提示不受影响 |
+
+**实施注意**
+
+- 一档纯 CSS 安全；二/三档动 `messages.value` 赋值顺序时，严禁改副作用依赖数组、Store 状态流转、IPC 参数（根 AGENTS 前端微调铁律）。
+- `apply_patch` 偶发 `ReplaceFileW EIO (Win32 1175)`：先验证文件未被锁再重试一次。
+- `vitest` 需完整文件访问（沙箱禁 spawn → esbuild `EPERM`）。
+- **playwright-skill 未安装**，无法做浏览器自动化验证；验证手段是 `vue-tsc` + `vitest` + 手工复测。
+- 改 CSS 前读本目录 `AGENTS.md`：分层顺序 tokens→layout→controls→jobs→drawer→motion→scrape→pages→sensitive→auto→filter；`vue-*` 禁颜色字面量；任何 CSS 文件不得含 `//!` 或 `///`（整份样式表被静默丢弃）。
+
 ---
 
 ## 3. 下一步

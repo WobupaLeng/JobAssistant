@@ -42,6 +42,15 @@ const emit = defineEmits<{
 const cards = computed(() => platformCards(props.selected, props.loginBusy, loggedIn.value));
 /** 已登录口径统一走 `login-model.isLoggedIn`（状态字符串唯一真源），不在这里重写比较。 */
 const loggedIn = computed(() => isLoggedIn(props.login?.state));
+/**
+ * 双态「已登录·浏览器未连接」（用户 m01291）：库里存着登录标记，但浏览器（sidecar）
+ * 此刻不在线——后端 `login_status` 在 sidecar 未运行时回 `state: 'unknown'`。
+ * 此时「登录」按钮不能再叫「已登录」并禁用：那句话会与聊天页的「浏览器未连接」打架。
+ * 按钮退回可点的「登录」，title 说清该做什么。
+ */
+const detached = computed(
+  () => (props.login?.state ?? '').toLowerCase() === 'unknown' && props.login?.saved === true,
+);
 const badge = computed(() => loginBadge(props.login as LoginStatus | null));
 const save = computed(() => saveLoginAction(props.login as LoginStatus | null, props.actionBusy));
 const out = computed(() => logoutAction(props.login as LoginStatus | null, props.actionBusy));
@@ -77,11 +86,11 @@ const scanSrc = computed(() => {
       <button
         class="btn btn-sm btn-primary platform-login"
         :data-testid="p.loginTestId"
-        :disabled="p.loginDisabled"
-        :title="p.loginTitle"
+        :disabled="detached ? props.loginBusy === true : p.loginDisabled"
+        :title="detached ? '浏览器未连接：点这里重新拉起浏览器并确认登录态' : p.loginTitle"
         @click="emit('login', p.id)"
       >
-        {{ p.loginLabel }}
+        {{ detached ? '重新连接浏览器' : p.loginLabel }}
       </button>
       <button
         v-if="save.visible"

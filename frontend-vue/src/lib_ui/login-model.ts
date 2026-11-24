@@ -39,6 +39,21 @@ export function isLoginError(state: string | null | undefined): boolean {
 }
 
 /**
+ * 浏览器/Sidecar **根本没连上**（而不是「连上了但没登录」）。
+ *
+ * `commands_scrape.rs` 在 sidecar 不在线时 `login_status` 回 `unknown` 且
+ * `running: false`——那正是「浏览器没起来」。这个态必须和真·未登录区分开：
+ * 库里有登录标记（`saved === true`）时，对用户说「请先登录」是**误导**，
+ * 因为他点的是自己头像旁那句「已登录」（用户 m01784：已登录，boss 列表还在
+ * 提示未登录）。此时该说的是「浏览器未启动，点一下把浏览器拉起来」。
+ */
+export function isDetached(state: string | null | undefined, saved?: boolean | null): boolean {
+  const s = (state ?? '').trim().toLowerCase();
+  if (s !== 'unknown' && s !== '') return false;
+  return saved === true;
+}
+
+/**
  * 事件里的 `state` 是否「已知」。
  *
  * `'unknown'` 是前端合成的占位（从没查过），事件永远不该带它；
@@ -110,6 +125,12 @@ export interface LoginBadge {
 /**
  * 徽标。口径与 `platform-model.loginDot` 完全一致（那条分支里 `running === true`
  * → `unknown`，所以「扫码中」显示为灰点而不是红点）；这里只多给一个 `title`。
+ *
+ * **双态**（用户 m01291）：`state === 'unknown'` 且 `saved === true` 时，两件事都是真的——
+ * 库里存着「已登录」的标记，但浏览器（sidecar）此刻不在线（后端 `commands_scrape.rs`
+ * 在 sidecar 未运行时直接回 `unknown`）。此前这种情况点仍标绿、写着「已登录」，而聊天与
+ * 自动投递同时报「浏览器未连接」，用户看到的就是自相矛盾的两句话。点保持 ok（登录态
+ * 本身没丢），label/title 改成「已登录·浏览器未连接」，让两处说法对齐。
  */
 export function loginBadge(status: LoginStatus | null | undefined): LoginBadge {
   const dot = loginDot(status);
@@ -121,7 +142,11 @@ export function loginBadge(status: LoginStatus | null | undefined): LoginBadge {
   else if (state === 'closed') title = '登录窗口已关闭';
   else if (state === 'no_login') title = '尚未登录';
   else if (message !== '' && dot !== 'ok') title = message;
-  return { dot, dotClass: loginDotClass(dot), dotLabel: loginDotLabel(dot), title };
+  // 双态：标记在、浏览器不在。覆盖上面所有分支——它描述的是整体结论，不是某条原因。
+  const detached = state === 'unknown' && status?.saved === true;
+  const dotLabel = detached ? '已登录·浏览器未连接' : loginDotLabel(dot);
+  if (detached) title = '本地已保存登录；浏览器未连接，点「扫码登录」或「开始抓取」后生效';
+  return { dot, dotClass: loginDotClass(dot), dotLabel, title };
 }
 
 /** 一个按钮的派生：显不显示、能不能点、点了是哪个命令。 */

@@ -53,12 +53,14 @@
   background: var(--popup-surface);
   border: 1px solid var(--hairline-strong);
   box-shadow: var(--shadow-pop);
-  -webkit-backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-2));
-  backdrop-filter: blur(var(--blur-pop)) saturate(var(--saturate-2));
+  /* 磨砂口径走 layout.css 的 --panel-blur；自身几何与材质只在本文件定义。 */
+  -webkit-backdrop-filter: var(--panel-blur);
+  backdrop-filter: var(--panel-blur);
   /* 进场时长与曲线由 motion.css 第 6 段统一：展开 / 收起同一时长、同一条曲线
    * （`.drawer-anim` 把 transform 补间到 none，`.is-closing` 补间回这里写的 24px）。
    * 初始态显式写出来：动画类由 JS 挂载后补上，不能靠「没用类 = 可见」兜底。 */
-  opacity: 0;
+  /* 收起态只剩位移，不再压透明度：透明度归 motion.css 第 6 段管，那里只做 transform
+   * 补间，没有地方能把它补回来（实测症状＝面板全透明、只剩遮罩）。 */
   transform: translateX(24px);
 }
 

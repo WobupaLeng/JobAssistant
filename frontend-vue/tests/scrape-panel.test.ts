@@ -84,13 +84,15 @@ describe('长按多选', () => {
     expect(s.checked).toEqual(['a']);
   });
 
-  it('多选态下点卡片是反选，勾到 0 个自动退出', () => {
+  it('多选态下点卡片是反选，勾到 0 个仍留在多选态', () => {
     let s = clickCard(enterSelecting('a'), 'b');
     expect(s.checked).toEqual(['a', 'b']);
     s = clickCard(s, 'a');
     s = clickCard(s, 'b');
     expect(s.checked).toEqual([]);
-    expect(s.selecting).toBe(false);
+    // 退出多选只走显式出口（空白处单击 / 切页签 / 批量操作完成），
+    // 逐张取消到 0 不再自动退出。
+    expect(s.selecting).toBe(true);
   });
 
   it('点空白处退出多选', () => {

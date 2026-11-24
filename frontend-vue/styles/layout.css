@@ -406,17 +406,13 @@
   }
 }
 
-/* 内容框统一清底：未在前面单独清除的玻璃面板（抽屉、敏感库、配置卡、筛选、Boss 列表外框、好友项）。 */
-.drawer.glass-l2,
-.sensitive-panel.glass-l2,
-.config-card,
-.filter-panel,
-.rail-panel,
-.friend {
-  background: transparent;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
+/* 面板自身的底色 / 磨砂归各自的样式文件：
+ *   .drawer        → drawer.css
+ *   .sensitive-panel → sensitive.css
+ *   .config-card   → pages.css
+ *   .filter-panel  → vue-dashboard.css
+ *   .rail-panel / .friend → vue-chat.css
+ * 本文件只留下「它们共享的模糊口径」，不再跨文件改写背景与 backdrop-filter。 */
 
 /* 高光位置可动画：注册自定义属性为 <length>/<percentage>。
  *
@@ -437,11 +433,8 @@
   initial-value: 0%;
 }
 
-/* 模糊背景：展开的筛选条与敏感库/配置/抽屉/筛选面板统一用 --blur-pop 磨砂，与敏感库一致。 */
-.scrape-filter-bar,
-.config-card,
-.drawer.glass-l2,
-.filter-panel {
-  -webkit-backdrop-filter: blur(calc(var(--blur-pop) * 1.4)) saturate(var(--saturate-2));
-  backdrop-filter: blur(calc(var(--blur-pop) * 1.4)) saturate(var(--saturate-2));
+/* 模糊口径（唯一真源）：面板要磨砂时引用这两个自定义属性，不要再各自写一份
+ * blur 值——跨文件重复声明同一属性正是「改一处、坏一片」的来源。 */
+:root {
+  --panel-blur: blur(calc(var(--blur-pop) * 1.4)) saturate(var(--saturate-2));
 }

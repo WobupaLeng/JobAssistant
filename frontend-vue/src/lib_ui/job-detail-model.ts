@@ -193,8 +193,8 @@ export function needsJdFetch(job: Job): boolean {
  * 详情抽屉底部的两个单条动作（原型 `job-detail-reject-btn` /
  * `job-detail-deliver-btn`，§16.4 裁决保留）。
  *
- * 「不投递」对已排除的岗位反向变成「允许投递」——否则抽屉里会出现一个
- * 点了没反应的按钮（卡片上的 `mark_label` 同口径）。
+ * 「不投递」对已排除的岗位反向变成「撤销否决」——否则抽屉里会出现一个
+ * 点了没反应的按钮（卡片与列表批量条同口径，用户裁决 m00874）。
  */
 export type DetailAction = 'reject' | 'allow' | 'deliver';
 /**
@@ -219,7 +219,7 @@ export interface DetailActionMeta {
  *
  * - 未投递（pending）：不投递 / 标记已投递
  * - 不投递（rejected）：撤销否决（不出现投递类按钮）
- * - 已投递（delivered）：取消投递 /（不出现不投递）
+ * - 已投递（delivered）：待投递（放回待投递列表本身，不出现不投递）
  *
  * 之所以要按页签裁，是因为抽屉里原本两张按钮恒在：在不投递页签点「标记已投递」
  * 会把一个被否决的岗位标成已投递，在已投递页签点「不投递」会让同一行既是
@@ -248,7 +248,7 @@ export function detailActions(job: Job, tab?: string): readonly DetailActionMeta
       {
         action: 'undo-deliver',
         testId: 'job-detail-undeliver-btn',
-        label: '取消投递',
+        label: '待投递',
         btnClass: 'btn btn-sm btn-ghost',
         disabled: false,
       },
@@ -263,7 +263,9 @@ export function rejectAction(job: Job): DetailActionMeta {
     ? {
         action: 'allow',
         testId: 'job-detail-allow-btn',
-        label: '允许投递',
+        // 与列表批量条、卡片上的同一动作统一叫「撤销否决」（用户裁决 m00874）：
+        // 这个动作是把已否决的岗位放回待投递，不是「允许投递」再投一次。
+        label: '撤销否决',
         btnClass: 'btn btn-sm btn-ghost',
         disabled: false,
       }

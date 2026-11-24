@@ -177,6 +177,9 @@ fn friend_to_row(f: &Friend) -> ChatFriendRow {
         last_time: f.last_time.clone(),
         unread: f.unread.unwrap_or(0),
         avatar: f.avatar.clone(),
+        // 判新旧用的时间戳（毫秒）：sidecar 在 `chat.friends` 里给。
+        // 缺省为 `None`（DOM 兜底路径取不到时间），落库时保留库里已有的值。
+        last_ts: f.last_ts.filter(|v| *v > 0),
     }
 }
 
@@ -190,6 +193,7 @@ fn row_to_friend(r: &ChatFriendRow) -> Friend {
         last_time: r.last_time.clone(),
         unread: Some(r.unread),
         avatar: r.avatar.clone(),
+        last_ts: r.last_ts,
     }
 }
 

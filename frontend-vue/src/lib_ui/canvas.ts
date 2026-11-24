@@ -22,10 +22,22 @@ export const UI_SCALE_MAX = 1.5;
 /** 缩放精度：原型 `Math.round(s * 1000) / 1000`。 */
 const SCALE_PRECISION = 1000;
 
-/** 右栏宽基准：≥1280 为 300，以下收窄到 260（与 `styles/vue-chat.css` 的 media 同源）。 */
-export const RAIL_W_WIDE = 300;
-export const RAIL_W_NARROW = 260;
-export const RAIL_NARROW_BELOW = 1280;
+/**
+ * 右栏宽基准：≥1360 为 360，以下收窄到 280，两档都乘 `--ui-scale`
+ * （与 `styles/vue-chat.css` 的 media 同源，`tests/geometry.test.ts` 核对两边）。
+ *
+ * 用户 m00933「增加 boss 列表宽度」：原 300 / 260 下，一条消息里的
+ * 「摘要 · 时间」会被挤成两行、时间戳换行，纵向空出一截；360 让摘要与时间并排躺平。
+ *
+ * 为什么分档点从 1280 挪到 1360：右栏在对话框里占的是固定宽度，对话框本身是
+ * `clamp(600, 50vw, 80vw)`。基准提到 360 后，1280 宽窗口下对话框只有 640px，
+ * 聊天正文区会被压到 280px（规格 §2.2 的舒适下限是 320）。分档点取 1360 =
+ * 「50vw − 360 = 320」的临界点，1280 这一档因此走收窄的 280，正文区回到 360。
+ * 窗口最小宽本就是 1200，窄档只在 1200–1359 这段生效。
+ */
+export const RAIL_W_WIDE = 360;
+export const RAIL_W_NARROW = 280;
+export const RAIL_NARROW_BELOW = 1360;
 
 /** 对话框宽：`clamp(600px, 50vw, 80vw)`，下限 600 是用户裁决（m00332）。 */
 export const DETACH_MIN_PX = 600;

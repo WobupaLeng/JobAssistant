@@ -34,7 +34,11 @@ body,
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  gap: calc(12px * var(--ui-scale));
+  /* 列间距 12 → 6（用户 m01063「左边投递列表和右边 boss 列表中间的间距太大了」）。
+   * 主列与右栏/对话框之间只隔这一条缝，12px 在 1440 窗口下读起来像断开的两块玻璃；
+   * 6px 仍然分得开，同时把省下的 6px 还给主列（卡片宽度直接受益）。
+   * 原注释里 --rail-gap 的原型口径随这次裁决一并作废。 */
+  gap: calc(6px * var(--ui-scale));
   overflow: hidden;
   /* 顶部不留间距（用户 m03129「内容区占满整个窗口，保持顶部无间距」）：
    * 顶栏 46px 自带 0 14px 内边距，内容区顶边直接接在它下沿，

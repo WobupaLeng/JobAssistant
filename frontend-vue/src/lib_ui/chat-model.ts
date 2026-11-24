@@ -298,6 +298,38 @@ export function withPending(head: Friend[], pending: Friend | null): Friend[] {
   return pending === null ? head : [pending, ...head];
 }
 
+/**
+ * 会话列表排序（用户 m01539「还未打招呼的草稿放在最上面」）。
+ *
+ * 三段，各段内部再按时间倒序：
+ * 1. **草稿会话**（还没打过招呼的占位，`isPendingFriend`）——置顶。它们不属于 Boss
+ *    的真实会话列表，混在按时间排的队列里会被刚聊过的 HR 挤到看不见；
+ * 2. 有 `last_ts` 的会话：时间大的在前（最近聊天）；时间相同按 uid 稳定收尾；
+ * 3. 没有 `last_ts` 的（DOM 兜底路径取不到时间）：排在最后。
+ *
+ * 后端 `list_chat_friends` 已经按 `last_ts DESC` 排过一遍，这里再排一次是因为
+ * 前端列表里还掺着草稿占位与实时远程结果，必须统一口径。
+ *
+ * 纯函数，返回新数组，不改入参顺序。
+ */
+export function sortFriends(friends: readonly Friend[]): Friend[] {
+  const rank = (f: Friend): number => {
+    if (isPendingFriend(f)) return 0;
+    return (f.last_ts ?? 0) > 0 ? 1 : 2;
+  };
+  const ts = (f: Friend): number => (isPendingFriend(f) ? 0 : (f.last_ts ?? 0));
+  return [...friends].sort((a, b) => {
+    const ra = rank(a);
+    const rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    if (ra === 1) {
+      const d = ts(b) - ts(a);
+      if (d !== 0) return d;
+    }
+    return a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0;
+  });
+}
+
 /* ------------------------------------------------------------------ *
  * 占位会话持久化：刷新页面不得丢掉「生成打招呼」刚加入的 HR。
  * 只存占位字段（无密钥、无 cookie），读写失败一律静默降级为空。

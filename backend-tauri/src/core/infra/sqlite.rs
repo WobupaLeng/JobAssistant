@@ -172,6 +172,12 @@ impl SqliteStore {
             "jd_decisions",
             crate::core::domain::schema::upgrade_decision_columns(),
         )?;
+        // 会话表：`last_ts`（最后聊天时刻）用于「只有更新才落库」的判新旧。
+        add_missing_columns(
+            &conn,
+            "chat_friends",
+            crate::core::domain::schema::CHAT_UPGRADE_COLUMNS.to_vec(),
+        )?;
 
         conn.execute_batch(SCHEMA_INDEXES)?;
         conn.execute_batch(CHAT_SCHEMA_INDEXES)?;

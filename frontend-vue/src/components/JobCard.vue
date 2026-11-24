@@ -7,8 +7,19 @@
  *
  * 为什么 check 绑 `@click.stop`：多选态下点勾选框只想改勾选，不该触发
  * 卡片单击（那会变成"再切一次"，两次结果互相抵消）。
+ *
+ * 长按（≥500ms）进入多选：判定与状态机全在 `lib_ui/longpress.ts`，这里只负责
+ * 「按住起表 / 松开撤表」并把到期事件转出。计时器只在按下的这张卡上活着，
+ * 指针离开或抖动超 8px 立刻撤销（用户是在滚动列表，不是要选）。
  */
-import { computed } from 'vue';
+import { computed, onBeforeUnmount } from 'vue';
+import {
+  armLongPress,
+  ignorePointerTarget,
+  interactiveSelector,
+  movedBeyond,
+  type TimerHandle,
+} from '../lib_ui/longpress';
 import type { CardView } from '../lib_ui/job-list-model';
 import type { ListTab } from '../lib_ui/job-list-model';
 
@@ -37,6 +48,8 @@ const emit = defineEmits<{
   /** 已投递列表里的反向动作：取消投递标记（回到「未投递」列表）。 */
   (e: 'undeliver', jobId: string): void;
   (e: 'open', jobId: string): void;
+  /** 长按到点：进入多选并勾上这张卡。 */
+  (e: 'longpress', jobId: string): void;
 }>();
 
 function onCheck(): void {
@@ -64,9 +77,57 @@ const scoreLevelClass = computed(() => {
 });
 
 function onOpen(): void {
-  if (props.selecting) return;
   emit('open', props.view.jobId);
 }
+
+/** 从按下到长按到点之间一直存活的撤销句柄；null 表示当前没有按着。 */
+let pressTimer: TimerHandle | null = null;
+let pressOrigin = { x: 0, y: 0 };
+/** 长按已经触发过：随后的 click 是这次长按的余波，不能再当成「打开详情」。 */
+let longPressed = false;
+
+function cancelPress(): void {
+  pressTimer?.cancel();
+  pressTimer = null;
+}
+
+function onPointerDown(ev: PointerEvent): void {
+  // 只认主键：右键菜单、中键滚动都不该起表。
+  if (ev.button !== 0) return;
+  // 按钮 / 输入框上的长按不归多选管（要能正常点、正常聚焦）。
+  const target = ev.target as HTMLElement | null;
+  const interactive = target?.closest?.(interactiveSelector()) ?? null;
+  if (ignorePointerTarget(target?.tagName ?? '', interactive !== null)) return;
+  cancelPress();
+  longPressed = false;
+  pressOrigin = { x: ev.clientX, y: ev.clientY };
+  pressTimer = armLongPress(() => {
+    pressTimer = null;
+    longPressed = true;
+    emit('longpress', props.view.jobId);
+  });
+}
+
+function onPointerMove(ev: PointerEvent): void {
+  if (!pressTimer) return;
+  if (movedBeyond(pressOrigin, { x: ev.clientX, y: ev.clientY })) cancelPress();
+}
+
+/**
+ * 单击：多选期间只切勾选，不弹详情（父级按 `selecting` 决定，这里不重复判断）。
+ *
+ * 长按刚触发时浏览器仍会补一个 click，那个 click 必须吞掉——否则「长按进入多选」
+ * 会立刻被自己的尾巴当成「点一下再取消勾选」，勾选状态一闪即空。
+ */
+function onClick(): void {
+  if (longPressed) {
+    longPressed = false;
+    return;
+  }
+  onOpen();
+}
+
+onBeforeUnmount(cancelPress);
 </script>
 
 <template>
@@ -82,7 +143,13 @@ function onOpen(): void {
     }"
     :data-testid="`job-card-${view.tid}`"
     :data-card="view.jobId"
-    @click="onOpen"
+    @pointerdown="onPointerDown"
+    @pointermove="onPointerMove"
+    @pointerup="cancelPress"
+    @pointerleave="cancelPress"
+    @pointercancel="cancelPress"
+    @click="onClick"
+    @contextmenu.prevent
   >
     <!-- 左列（职位标题 / 公司 / 经验学历 / 地址，逐行省略）与外列（薪资 / 分数 / 打招呼）
          共用一个两列表格：薪资与职位标题同在第一行，左列超长只吃自己的省略号。 -->
@@ -128,10 +195,10 @@ function onOpen(): void {
           type="button"
           :data-allow="view.jobId"
           :data-testid="`job-allow-${view.tid}`"
-          :aria-label="`允许投递 ${view.title}`"
+          :aria-label="`撤销否决 ${view.title}`"
           @click.stop="onAllow"
         >
-          允许投递
+          撤销否决
         </button>
         <button
           v-else-if="showGreet && tab === 'delivered'"
@@ -139,7 +206,7 @@ function onOpen(): void {
           type="button"
           :data-undeliver="view.jobId"
           :data-testid="`job-undeliver-${view.tid}`"
-          :aria-label="`取消投递 ${view.title}`"
+          :aria-label="`设为待投递 ${view.title}`"
           @click.stop="onUndeliver"
         >
           待投递

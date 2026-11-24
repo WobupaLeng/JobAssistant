@@ -67,6 +67,7 @@ const EXPECTED_COMMANDS = [
   'login_status',
   'login_save',
   'logout',
+  'login_ack',
   'scrape_close',
   'session_open',
   'list_logs',
@@ -93,6 +94,10 @@ function fakeInvoke(cmd: string, payload?: unknown): Promise<unknown> {
       return Promise.resolve({ ok: true, deleted: Number((payload as { args: { ids: number[] } }).args.ids.length) });
     case 'get_job':
       return Promise.resolve(emptyJob());
+    case 'list_jobs':
+      // 这条命令的返回值会过一层 `normalizeJob`（后端 `Job` 字段是 `Option<T>`，
+      // 序列化后可能为 null），所以桩必须回真数组，不能落到默认的 `{ ok: true }`。
+      return Promise.resolve([]);
     case 'auto_greet_resume':
       return Promise.resolve(1_700_000_000_000);
     case 'greet_one':
@@ -119,7 +124,7 @@ afterEach(() => {
  * 直接读源文件做文本扫描，不做 AST：48 条命令名都在同一行。
  */
 describe('命令名覆盖：与 generate_handler! 逐条对齐（C1）', () => {
-  it('56 条命令恰好覆盖一次，不多不少', () => {
+  it('57 条命令恰好覆盖一次，不多不少', () => {
     const dir = fileURLToPath(new URL('../src/api/commands/', import.meta.url));
     const used = new Set<string>();
     for (const name of readdirSync(dir).filter((f: string) => f.endsWith('.ts'))) {
@@ -133,7 +138,7 @@ describe('命令名覆盖：与 generate_handler! 逐条对齐（C1）', () => {
         used.add(m[1]!);
       }
     }
-    expect(used.size).toBe(56);
+    expect(used.size).toBe(57);
     expect(EXPECTED_COMMANDS.filter((c) => !used.has(c))).toEqual([]);
     const known: readonly string[] = EXPECTED_COMMANDS;
     expect([...used].filter((c) => !known.includes(c))).toEqual([]);

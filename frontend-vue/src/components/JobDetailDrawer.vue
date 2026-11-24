@@ -56,7 +56,8 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: 'close'): void;
-  (e: 'act', action: DetailAct): void;
+  /** 单条动作：带上这张卡的 job_id，页面据此改库（不回读列表快照）。 */
+  (e: 'act', action: DetailAct, jobId: string): void;
   (e: 'chat', jobId: string): void;
 }>();
 
@@ -65,38 +66,40 @@ const { panel, animateOpen, animateClose } = useDrawerPresence(() => emit('close
 /**
  * 点击抽屉以外即关闭。
  *
- * **必须挂在 `click` 上，不能挂在 `pointerdown` 上**（这一条踩过两次）：
- *   · 打开详情的动作由列表容器的 `@click` 触发，发生在一次 pointerdown →
- *     pointerup → click 序列的末尾；
- *   · 若关闭判据挂在捕获阶段的 `pointerdown`，用户「下一次」点卡片时，
- *     pointerdown 会先跑并把抽屉关掉，紧接着容器的 click 又把详情打开——
- *     中间那一帧抽屉是关的，观感就是「没展开、直接变成选中」；
- *     而长按多选的 pointerdown 建立的长按计时器，也会被这一次关闭打断。
- *   · 改挂冒泡阶段的 `click` 后，打开与关闭发生在同一种事件上，
- *     容器先拿到 click（先打开），冒泡到 document 时 `props.job` 已经有值，
- *     但目标是列表内的卡片 → 仍会被「点外部」命中。所以还要按**按下起点**
- *     判定：`pointerdown` 只记录起点，`click` 时看起点是否落在抽屉外。
+ * 三条约束，缺一条就会出现「点了没反应」：
+ * 1. **挂 `click` 而不是 `pointerdown`**：打开发生在一次 pointerdown → pointerup → click
+ *    的末尾，关闭判据若挂在 pointerdown 上，用户「下一次」按住任意位置的第一个事件就把
+ *    抽屉关掉了。
+ * 2. **`pressOutside` 记的是按下起点**：在面板里按下、拖到外面松开时，浏览器补发的
+ *    click 目标是两者的共同祖先，只看 target 会把一次拖选当成点外部。
+ * 3. **打开那次 click 本身不算「点外面」**（`openedAt` 冷却）：打开由卡片的 click 发起，
+ *    同一次 click 继续冒泡到本监听器时抽屉已经开着、起点又落在卡片（面板外），
+ *    于是被同一击关掉——实测控制台里就是 `card click → job prop -> id → doc click` 后
+ *    立刻 `job prop -> null`。列表卡片与抽屉是同一棵树的兄弟分支，这一击必然同时命中
+ *    打开与关闭两条路径，只能按「刚刚打开」把它滤掉。
  */
+let pressOutside = true;
+/** 最近一次「由 null 变成有值」的时刻：这之后的第一次 click 只可能是打开它的那一击。 */
+let openedAt = 0;
+
 function onDocPointerDown(ev: PointerEvent): void {
-  if (!props.job) return;
   const el = ev.target as HTMLElement | null;
-  if (el === null) return;
-  pressOutsideDrawer = el.closest('[data-testid="job-detail-drawer"]') === null;
+  pressOutside = el === null || el.closest('[data-testid="job-detail-drawer"]') === null;
 }
 
 function onDocClick(ev: MouseEvent): void {
+  const outside = pressOutside;
+  pressOutside = true;
   if (!props.job) return;
   if (hasHigherOverlay('drawer')) return;
   const el = ev.target as HTMLElement | null;
   if (el === null) return;
   if (el.closest('[data-testid="job-detail-drawer"]') !== null) return;
-  // 这一次点击的按下起点在抽屉内部（拖选文字、在抽屉里按下再移出）：不算点外部。
-  if (!pressOutsideDrawer) return;
+  if (!outside) return;
+  // 打开它的那一击与关闭判据是同一个事件：同一轮事件循环内到达的这次 click 一律放过。
+  if (performance.now() - openedAt < 120) return;
   close();
 }
-
-/** 最近一次 pointerdown 是否落在抽屉之外：`click` 用它区分「点外面」与「从里面开始点」。 */
-let pressOutsideDrawer = false;
 /** 补拉后的完整岗位（`jd_text` 在列表接口里是空的）。 */
 const full = ref<Job | null>(null);
 const jdLoading = ref(false);
@@ -141,6 +144,7 @@ watch(
   (job) => {
     void load(job);
     if (job) {
+      openedAt = performance.now();
       // 面板节点在这一帧之后才存在，等 tick 完再挂展开类（pan.ts 内部会强制回流）。
       void nextTick(animateOpen);
     }
@@ -189,6 +193,7 @@ const kv = computed(() => (j.value ? detailKv(j.value) : []));
 const link = computed(() => (j.value ? detailLink(j.value) : null));
 const when = computed(() => (j.value ? detailWhen(j.value) : DASH));
 const rejected = computed(() => (j.value ? j.value.rejected !== 0 : false));
+
 /** 底部动作按钮：由当前页签裁（见 `detailActions` 的注释）；未加载出岗位时按页签给占位。 */
 const footActions = computed(() =>
   j.value ? detailActions(j.value, props.tab) : detailActions(emptyJob(), props.tab),
@@ -196,9 +201,14 @@ const footActions = computed(() =>
 
 function act(a: DetailAct): void {
   if (!j.value) return;
-  // 动作会改岗位状态（不投递 / 已投递 / 待投递），抽屉要跟着收——走同一条收起回程。
+  /*
+   * 动作会改岗位状态（不投递 / 已投递 / 待投递），抽屉要跟着收——走同一条收起回程。
+   *
+   * job_id 随事件一起交出去：页面不能靠 `detailJob` 反查（那是当前列表页的快照，
+   * 抽屉里的这条未必还在其中，落空就会静默无动作）。
+   */
   animateClose();
-  emit('act', a);
+  emit('act', a, j.value.job_id);
 }
 
 /** 「去跟 Boss 聊」：把当前岗位交给页面写草稿，由聊天层同屏消费（不是写操作，不走 act）。 */
@@ -217,6 +227,12 @@ defineExpose({ patch, closeDetail, jdLoading, jdError });
 </script>
 
 <template>
+  <!-- 抽屉次序与层叠（两处都不许调换）：
+       1. 遮罩在前、面板在后 —— DOM 序决定同层先后，遮罩必须先画；
+       2. 与 L3 透镜画布的关系交给层叠上下文：面板是 `position: fixed` + `z-index: 41`，
+          自成上下文，克隆层（`.glass-clone` 的 `filter: url()`）都关在里面，不会跑到
+          窗内任何东西前面；遮罩刻意**不写死了 z-index**（见 styles/drawer.css 注），
+          只老老实实排在面板后面一层。 -->
   <div
     v-if="isOpen"
     class="drawer-backdrop"

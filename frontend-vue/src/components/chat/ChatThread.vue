@@ -54,7 +54,9 @@ const emit = defineEmits<{
   (e: 'discard-greet'): void;
 }>();
 
-const split = computed(() => splitThread(props.messages));
+// `props.messages` 可能缺失（调用方没传 / 测试直挂组件）：默认成空数组，
+// 否则 `splitThread(undefined)` 抛错被 Vue 记为渲染期未捕获错误。
+const split = computed(() => splitThread(props.messages ?? []));
 
 /* `peerName` / `subText` 随 `chat-head` 整行一起移除：这条头行已不再渲染，
    留在脚本里的计算属性只会变成没人读的死代码。Boss 列表用

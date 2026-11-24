@@ -42,6 +42,35 @@ export interface Job {
   score_scale: number;
 }
 
+/**
+ * 把后端回来的岗位补齐成 `Job`。
+ *
+ * Rust 侧大量字段是 `Option<T>`（`domain/job.rs:62` 的注释说明了原因：Boss 列表页
+ * 经常缺字段，空串无法区分「没拿到」和「拿到了空值」），序列化后是 `null`；
+ * 而界面层按 `string` / `number` 消费（`.trim()` / 数值比较，见 `job-detail-model`）。
+ * 不做这一步，`jd_text` 为 `null` 时 `needsJdFetch()` 的 `.trim()` 会抛 TypeError，
+ * 整个详情抽屉渲染中断——表现为「面板在，但里面一片空白」。
+ *
+ * 只做「null → 默认值」，不改任何非空值；缺失次数不该影响显示口径。
+ */
+export function normalizeJob(raw: Partial<Job> | null | undefined): Job {
+  const base = emptyJob();
+  if (raw === null || raw === undefined) return base;
+  const out = { ...base };
+  for (const key of Object.keys(base) as (keyof Job)[]) {
+    const v = raw[key];
+    if (v === null || v === undefined) continue;
+    // 类型上应当一致；后端偶发把数字字段发成字符串也给兜住，免得比较时静默变 false。
+    if (typeof base[key] === 'number') {
+      const n = Number(v);
+      (out[key] as number) = Number.isFinite(n) ? n : 0;
+      continue;
+    }
+    (out[key] as string) = typeof v === 'string' ? v : String(v);
+  }
+  return out;
+}
+
 /** 空岗位：表单初值 / 占位，字段与后端一致（全空串与 0）。 */
 export function emptyJob(): Job {
   return {

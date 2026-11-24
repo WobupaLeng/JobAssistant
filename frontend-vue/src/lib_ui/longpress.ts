@@ -82,7 +82,9 @@ export function clickCard(state: SelectionState, jobId: string): SelectionState 
   if (!state.selecting) return state;
   const has = state.checked.includes(jobId);
   const checked = has ? state.checked.filter((id) => id !== jobId) : [...state.checked, jobId];
-  if (checked.length === 0) return exitSelecting();
+  // 取消到一张不剩时**留在多选态**：用户正在逐张取消，最后一张被取消就自动退出多选，
+  // 会让紧接着的下一次单击变成「打开详情」，观感是「点一下取消选中、再点一下弹窗」。
+  // 真正的出口是空白处单击、切换页签或批量操作完成后（见 exitSelecting 的调用点）。
   return { selecting: true, checked };
 }
 

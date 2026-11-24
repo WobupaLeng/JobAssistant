@@ -589,11 +589,34 @@
   }
 }
 
-/* 尊重系统的「减少动态效果」设置：这不是可选项，是前庭功能敏感用户的硬需求 */
+/* 尊重系统的「减少动态效果」设置：这不是可选项，是前庭功能敏感用户的硬需求。
+ *
+ * 这里刻意**不写通配符 + !important**：`* { transition-duration: .01ms !important }`
+ * 会以最高优先级的身份压过任何局部 `transition: none`，表现为「动了某一处、别处跟着变」，
+ * 排查时完全看不出来。改成逐个点名动态元素族：新增动效时在这里补一行，
+ * 漏了也只是该处不减动效，不会波及全局。 */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  .btn,
+  .chip,
+  .job-card,
+  .job-tab,
+  .tab,
+  .seg,
+  .sort-pill,
+  .win-btn,
+  .friend,
+  .friend-act,
+  .theme-mode-btn,
+  .font-scale-btn,
+  .palette-dot,
+  .auto-toggle,
+  .scrape-filter-btn,
+  .pan-pop,
+  .pan-modal,
+  .drawer-anim,
+  .chat-detach,
+  .hl-surface,
+  .card {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

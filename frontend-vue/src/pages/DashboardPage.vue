@@ -35,7 +35,7 @@ import { scrapeDrain, scrapeProgress, scrapeStart, scrapeStop } from '../api/com
 import { getAppConfig, setAppConfig, setLimit, setScrapeDefaults } from '../api/commands/config';
 import { sensitiveList, sensitiveRemove } from '../api/commands/sensitive';
 import { loginStart, loginStatus } from '../api/commands/scrape';
-import { loginSave, logout } from '../api/commands/scrape';
+import { loginAck, loginSave, logout } from '../api/commands/scrape';
 import { listenLoginState, type UnlistenFn } from '../api/events';
 import { listExpectations } from '../api/commands/chat';
 import type {
@@ -63,17 +63,11 @@ import {
   type SortField,
 } from '../lib_ui/job-list-model';
 import {
-  armLongPress,
   clickBlank,
   clickCard,
-  exitSelecting,
-  ignorePointerTarget,
-  interactiveSelector,
-  movedBeyond,
+  enterSelecting,
   setChecked,
-  type PointerSample,
   type SelectionState,
-  type TimerHandle,
 } from '../lib_ui/longpress';
 import {
   LLM_PREFILTER_DEFAULT,
@@ -302,10 +296,6 @@ function onPickThemeMode(mode: 'dark' | 'light'): void {
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let logTimer: ReturnType<typeof setTimeout> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
-let pressTimer: TimerHandle | null = null;
-let swallowNextClick = false;
-let pressStart: PointerSample | null = null;
-let pressJobId = '';
 
 /**
  * 打分方式与初筛线都落 `app_config`（`score_mode` / `llm_prefilter`，两者都在
@@ -719,7 +709,7 @@ async function batch(op: BatchOp): Promise<void> {
     const hit = await applyBatchOp(op, ids);
     const name = op === 'reject' ? '不投递' : op === 'deliver' ? '已投递' : '待投递';
     filterNote.value = `${name}：影响 ${hit} 条（勾选 ${ids.length} 条）`;
-    selection.value = exitSelecting();
+    selection.value = { selecting: false, checked: [] };
     await refreshList();
   } catch (e) {
     const code = op === 'reject' ? 'reject_jobs' : op === 'deliver' ? 'mark_delivered' : 'allow_jobs';
@@ -727,12 +717,13 @@ async function batch(op: BatchOp): Promise<void> {
   }
 }
 
-/** 卡片上的「允许投递」（只在「不投递」页签出现）：恢复后该岗位回到待投递列表。 */
+/** 卡片上的「撤销否决」（只在「不投递」页签出现）：恢复后该岗位回到待投递列表。 */
 async function onAllowJob(jobId: string): Promise<void> {
   try {
     const hit = await allowJobs([jobId]);
     filterNote.value = actionNote('allow', hit);
-    selection.value = { ...selection.value, checked: selection.value.checked.filter((id) => id !== jobId) };
+    // 多选态只剩一个入口（勾选框 / 全选本页），单条动作后没有理由停在多选态。
+    selection.value = { selecting: false, checked: selection.value.checked.filter((id) => id !== jobId) };
     await refreshList();
   } catch (e) {
     fail(`${actionFailPrefix('allow')}${errText(e)}`, 'allow_jobs', {
@@ -747,7 +738,7 @@ async function onUndeliverJob(jobId: string): Promise<void> {
   try {
     const hit = await unmarkDelivered([jobId]);
     filterNote.value = `待投递：影响 ${hit} 条`;
-    selection.value = { ...selection.value, checked: selection.value.checked.filter((id) => id !== jobId) };
+    selection.value = { selecting: false, checked: selection.value.checked.filter((id) => id !== jobId) };
     await refreshList();
   } catch (e) {
     fail(`取消投递失败：${errText(e)}`, 'unmark_delivered', {
@@ -759,7 +750,7 @@ async function onUndeliverJob(jobId: string): Promise<void> {
 
 // ---------------------------------------------------------------- 详情抽屉
 
-/** 卡片单击（非多选态）= 打开详情。长按多选时 click 由 onGridClick 吃掉。 */
+/** 卡片单击 = 打开详情（长按多选已移除，点击路径只剩这一条）。 */
 function onOpenDetail(jobId: string): void {
   detail.value = openDetail(detail.value, jobId);
 }
@@ -775,10 +766,17 @@ function onCloseDetail(): void {
  * `{args:{jobIds}}`），差别只在「影响几条」的文案。动作成功后关抽屉并刷新，
  * 失败进错误队列——**不让抽屉停在半更新状态**。
  */
-async function onDetailAction(action: DetailAct): Promise<void> {
-  const job = detailJob.value;
-  if (!job) return;
-  const ids = [job.job_id];
+async function onDetailAction(action: DetailAct, jobId: string): Promise<void> {
+  /*
+   * `jobId` 必须由抽屉自己带过来，**不能**回头读 `detailJob`。
+   *
+   * 抽屉里的按钮持有的是一份独立的岗位对象（打开时传入的那条，或 `get_job` 回读的副本），
+   * 而 `detailJob` 是 `jobs.find(id)`——`jobs` 只是当前页签已拉取的那一页（默认 100 条上限
+   * 且带过滤）。抽屉一旦不是从列表页里点开的、或期间列表被刷新/换页，`find` 就落空，
+   * 这里会拿到 `null` 并静默 return，表现正是「按钮点了没反应」。
+   */
+  if (!jobId) return;
+  const ids = [jobId];
   const code =
     action === 'reject'
       ? 'reject_jobs'
@@ -802,7 +800,7 @@ async function onDetailAction(action: DetailAct): Promise<void> {
   } catch (e) {
     fail(`${actionFailPrefix(action)}${errText(e)}`, code, {
       label: '重试',
-      run: () => void onDetailAction(action),
+      run: () => void onDetailAction(action, jobId),
     });
   }
 }
@@ -859,6 +857,8 @@ async function subscribeLoginState(): Promise<void> {
     const off = await listenLoginState(
       (payload) => {
         login.value = mergeLoginState(login.value, payload);
+        // 消费完就回执：两个页面都确认后后端立刻停掉 5 秒补发（用户 m02396）。
+        void loginAck(payload.platform, payload.state);
         // 登录成功那一拍补一次权威查询：`saved` / `message` 只在查询里有。
         if (payload.state === 'logged_in') void refreshLogin();
       },
@@ -987,66 +987,33 @@ function onDetailChat(jobId: string): void {
   void onGreet(jobId);
 }
 
-// ---------------------------------------------------------------- 长按
+// ---------------------------------------------------------------- 卡片单击
 
-function cardOf(target: EventTarget | null): HTMLElement | null {
-  if (!(target instanceof HTMLElement)) return null;
-  return target.closest<HTMLElement>('[data-card]');
-}
-
-function onGridPointerDown(e: PointerEvent): void {
-  const card = cardOf(e.target);
-  if (!card) return;
-  const el = e.target as HTMLElement;
-  if (ignorePointerTarget(el.tagName, el.matches(interactiveSelector()))) return;
-  pressJobId = card.dataset.card ?? '';
-  pressStart = { x: e.clientX, y: e.clientY };
-  pressTimer = armLongPress(() => {
-    pressTimer = null;
-    if (pressJobId === '') return;
-    // 长按触发后松开会补发一次 click：吞掉它，否则同一张卡会被"再点一次"切掉。
-    swallowNextClick = true;
-    selection.value = {
-      selecting: true,
-      checked: selection.value.selecting
-        ? toggleChecked(selection.value.checked, pressJobId)
-        : [pressJobId],
-    };
-  });
-}
-
-function onGridPointerMove(e: PointerEvent): void {
-  if (!pressTimer || !pressStart) return;
-  if (movedBeyond(pressStart, { x: e.clientX, y: e.clientY })) cancelPress();
-}
-
-function cancelPress(): void {
-  if (pressTimer) pressTimer.cancel();
-  pressTimer = null;
-  pressStart = null;
-}
-
-function onGridClick(e: MouseEvent): void {
-  if (swallowNextClick) {
-    swallowNextClick = false;
-    return;
-  }
-  const card = cardOf(e.target);
-  if (!card) {
-    selection.value = clickBlank(selection.value);
-    return;
-  }
-  const id = card.dataset.card ?? '';
-  if (id === '') return;
-  // 多选态：单击 = 勾选切换；非多选态：单击 = 打开详情（长按才进多选）。
-  // 打开详情前先确认不是点在按钮/链接上（`shouldOpenCard` 同口径，见 JobCard）。
+/**
+ * 点这张卡片 = 打开详情，**只有这一种结果**（用户裁决：多选态下单击勾选的设定已删除，
+ * 勾选只剩勾选框与「全选本页」两个入口）。
+ *
+ * 只在卡片自己身上接（`JobCard` 内 emit，不走容器代理）：打开与「点抽屉外即关闭」都是
+ * click，先后只看 DOM 序。卡片是抽屉的祖先分支，它的 click 一定先于 `document` 上那条
+ * 关闭监听器到达，所以抽屉开完不会被同一次点击关掉。
+ */
+function onCardOpen(jobId: string): void {
+  // 多选期间单击卡片只切勾选，绝不弹详情（用户裁决 m00725）。
   if (selection.value.selecting) {
-    selection.value = clickCard(selection.value, id);
+    selection.value = clickCard(selection.value, jobId);
     return;
   }
-  const el = e.target as HTMLElement;
-  if (el.closest('button, a, input, label, select, textarea, [data-greet]')) return;
-  onOpenDetail(id);
+  onOpenDetail(jobId);
+}
+
+/** 长按到点：进入多选并勾上按下的那张卡（时间与位移判定在 `lib_ui/longpress.ts`）。 */
+function onCardLongPress(jobId: string): void {
+  selection.value = enterSelecting(jobId);
+}
+
+/** 多选态下点列表空白处：退出多选。 */
+function onCheckBlank(): void {
+  selection.value = clickBlank(selection.value);
 }
 
 // ---------------------------------------------------------------- 抓取
@@ -1239,13 +1206,12 @@ onBeforeUnmount(() => {
   if (tickTimer !== null) clearInterval(tickTimer);
   stopLogPolling();
   if (saveTimer !== null) clearTimeout(saveTimer);
-  cancelPress();
 });
 
 watch(
   () => tab.value,
   () => {
-    selection.value = exitSelecting();
+    selection.value = { selecting: false, checked: [] };
   },
 );
 </script>
@@ -1328,7 +1294,7 @@ watch(
       @toggle-filter="filterOpen ? closeFilter() : openFilter()"
     />
 
-    <div class="job-fill" @pointerdown="onGridPointerDown" @pointermove="onGridPointerMove" @pointerup="cancelPress" @pointerleave="cancelPress" @pointercancel="cancelPress" @click="onGridClick">
+      <div class="job-fill">
       <JobListView
         :jobs="jobs"
         :counts="counts"
@@ -1347,7 +1313,9 @@ watch(
         @update:tab="onTab"
         @update:show-all="onShowAll"
         @sort="onSort"
-        @open="onOpenDetail"
+        @open="onCardOpen"
+        @longpress="onCardLongPress"
+        @check-blank="onCheckBlank"
         @refresh="refreshList()"
         @toggle="selection = { ...selection, checked: toggleChecked(selection.checked, $event) }"
         @check-all="(checked: boolean) => (selection = setChecked(checked ? jobs.map((j) => j.job_id) : []))"

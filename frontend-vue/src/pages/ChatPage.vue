@@ -47,7 +47,8 @@ import {
 
 } from '../api/commands/chat';
 import { greetDraft, greetOne } from '../api/commands/greet';
-import { loginStatus, sessionOpen } from '../api/commands/scrape';
+import { loginAck, loginStatus, sessionOpen } from '../api/commands/scrape';
+import { listenLoginState, type UnlistenFn } from '../api/events';
 import type { ChatMessage, Friend, GreetReply } from '../api/types';
 import AutoApplyBar from '../components/chat/AutoApplyBar.vue';
 import ChatCompose from '../components/chat/ChatCompose.vue';
@@ -59,7 +60,7 @@ import {
   toggleAction,
   type AutoPhase,
 } from '../lib_ui/auto-model';
-import { startHeartbeat, type HeartbeatTimer } from '../lib_ui/auto-heartbeat';
+import { BROWSER_DETACHED_NOTE, startHeartbeat, type HeartbeatTimer } from '../lib_ui/auto-heartbeat';
 import {
   CHAT_RAIL_TITLE,
   CHAT_STATE_ANNOUNCE_TEXT,
@@ -87,10 +88,12 @@ import {
   pendingFriend,
   pickFriend,
   shouldRetryWithSession,
+  sortFriends,
   withPending,
 } from '../lib_ui/chat-model';
 import { needsSession } from '../lib_ui/session';
-import { isLoggedIn } from '../lib_ui/login-model';
+import { isKnownState, isLoggedIn } from '../lib_ui/login-model';
+import { withLoginAck } from '../lib_ui/login-broadcast';
 import { peekGreetDraft, setGreetDraft, takeGreetDraft } from '../features/chat/greet-draft';
 import { hasHigherOverlay } from '../lib_ui/overlay-stack';
 
@@ -145,6 +148,11 @@ const autoNote = ref('');
  */
 let beat: HeartbeatTimer | null = null;
 
+/** `login-state` 的退订句柄（`subscribeLoginState`）；null = 没订阅上或已退订。 */
+let unlistenLogin: UnlistenFn | null = null;
+/** 组件已卸载：`subscribeLoginState` 是 await 的，回来时据此立刻退订。 */
+let disposed = false;
+
 /* ------------------------------ 窗口宽度（宽度公式） --------------------------
  *
  * --detach-w / --rail-w 的写入已经统一收口到 AppShell 的 syncCanvas()（canvas.ts 是唯一
@@ -164,7 +172,8 @@ const chatW = computed(() => chatAreaWidth(innerWidth.value));
 const activeFriend = computed<Friend | null>(
   () => friends.value.find((f) => f.uid === ui.value.activeFriendsUid) ?? null,
 );
-const visibleFriends = computed(() => filterFriends(friends.value, search.value));
+// 排序口径统一在这里：草稿占位置顶 → 最近聊天在前 → 无时间戳的最后（用户 m01539）。
+const visibleFriends = computed(() => filterFriends(sortFriends(friends.value), search.value));
 const talkableFriend = computed(() => activeFriend.value);
 const canTalk = computed(() => talkableFriend.value !== null && isSendableFriend(talkableFriend.value));
 const composeRef = ref<InstanceType<typeof ChatCompose> | null>(null);
@@ -304,10 +313,8 @@ async function send(): Promise<void> {
     // sidecar 未启动时 loginStatus 本身会抛错：同样视为「浏览器未连接」，不落入「发送失败」。
     const st = await loginStatus('boss').catch(() => ({ state: 'unknown' as const }));
     if (st.state !== 'logged_in') {
-      note.value =
-        st.state === 'no_login'
-          ? '未登录 Boss 直聘：请先点「扫码登录」，登录后再发送消息'
-          : '浏览器未连接：请先点「开始抓取」或「扫码登录」，连接后再发送消息';
+      // 口径同 `onAutoToggle`：一律说「浏览器未连接：请先登录」。
+      note.value = '浏览器未连接：请先登录';
       return;
     }
     // 只有发给「卡片打招呼的那位 Boss」时才带岗位 id，后端据此只标记这一个岗位已投递。
@@ -398,8 +405,12 @@ function regenerateGreet(): void {
 
 /** 当前 Boss 最近一条 HR 消息（`sender === 'hr'`）。没有或已撤回返回空串。 */
 const lastHrMessage = computed<string>(() => {
-  for (let i = messages.value.length - 1; i >= 0; i -= 1) {
-    const m = messages.value[i];
+  // 用 `?? []` 兜住 undefined：测试里 ChatDetach 可能拿到未传的 `messages`，
+  // 原来这里抛 `Cannot read properties of undefined (reading 'length')`，
+  // 被 Vue 记为「渲染期间未捕获错误」，长期污染测试输出。
+  const list = messages.value ?? [];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const m = list[i];
     if (m === undefined) continue;
     if (m.sender !== 'hr' || m.recalled) continue;
     const text = m.content.trim();
@@ -495,13 +506,13 @@ async function onAutoToggle(): Promise<void> {
       // 既发不出去也不该去找浏览器（那正是「窗口无限打开」的来源）。
       // 后端 `auto_greet_next` 也有同一道闸，这里是让用户当场看到原因。
       const st = await loginStatus('boss');
-      // `unknown` = 浏览器（sidecar）还没拉起来：单独提示，不与「登录过期」混为一谈。
-      if (st.state === 'unknown') {
-        autoNote.value = '浏览器未连接：请先点「开始抓取」或「扫码登录」，连接后再开始投递';
-        return;
-      }
+      // `unknown` = 浏览器（sidecar）还没拉起来；`no_login` 等 = 连上了但没登录。
+      // 两种情况都要拦下来，但**说法不能一样**（用户 m01784）：库里还有登录标记时，
+      // 顶栏显示「已登录」，这时说「请先登录」等于让人去点已经写着已登录的按钮。
       if (!isLoggedIn(st.state)) {
-        autoNote.value = '未登录 Boss 直聘：请先点「扫码登录」，登录后再开始投递';
+        autoNote.value = st.state === 'unknown' && st.saved === true
+          ? BROWSER_DETACHED_NOTE
+          : '浏览器未连接：请先登录';
         return;
       }
       // 开始前先清零上一轮计数，否则「已发 N 条」会接着上次累加。
@@ -554,6 +565,123 @@ function onKeydown(ev: KeyboardEvent): void {
   close();
 }
 
+/**
+ * 登录态订阅（用户 m01325：登录成功后，所有「未登录 / 浏览器未连接」提示必须消失，
+ * 直到再次未登录才重新出现）。
+ *
+ * 为什么要有它：本页的提示是**一次性快照**——`beat.start()` 只在挂载、开始投递、
+ * 发消息时各读一次登录态，读到未登录就写一句 `note`/`autoNote` 然后停表。等用户
+ * 在概览页（或刚弹出的浏览器里）真的登录上了，这句话没人去清，会一直挂在右栏。
+ * 后端 `login-state` 事件（`lib.rs` 的旁路推送）正好是「登录态真的变了」的信号，
+ * 所以在这里收口：变了就重新判一次，登录成功则清提示并重新开表。
+ *
+ * 非 Tauri 环境（vitest / 浏览器预览）`listenLoginState` 返回 no-op，不判断运行时。
+ */
+async function onLoginState(payload: { platform?: string; state: string }): Promise<void> {
+  // 后端 `lib.rs` 的 login-state watcher 每 500ms 读一次快照，**只在值真的变了**才播。
+  // 可 `unknown` 是它的降级值（sidecar 不在线 → 快照读不到），于是「会话起来/断开」
+  // 来回抖时就可能播出一串 unknown → waiting → unknown……每一次都走完下面这套
+  // 「重新开表 + 重新轮询」，正好是用户 m02102 截图里 `login_status` 刷屏的来源。
+  // 所以这里先按「已知态」过滤：未知态不是结论，不该驱动任何后续动作。
+  if (!isKnownState(payload.state)) return;
+  // 只有「从没登录」或「登录态真的变了」才值得动状态机：同态重复推送直接返回。
+  if (payload.state === lastLoginState) return;
+  lastLoginState = payload.state;
+  // 登录态确认变化 → 清掉当前登录类提示（`waiting` / `logged_in` / `closed` 都说明
+  // 「浏览器已经能答话」，那句「浏览器未连接：请先登录」已经过期；用户 m01992）。
+  // 原来这里只认 logged_in / no_login / closed，把 `waiting` 排除在外，于是那句提示
+  // 一直没人清。只清登录类，不能连「发送失败：……」一起抹掉——那是与登录无关的真错误。
+  const clearedNote = isSessionNote(note.value);
+  const clearedAuto = isSessionNote(autoNote.value);
+  if (clearedNote) note.value = '';
+  if (clearedAuto) autoNote.value = '';
+  // 广播已消费：回执给后端，全员回话后它就不再每 5 秒补发（用户 m02396）。
+  // 放在清理之后、开表之前：开表可能重试几秒，没必要让后端陪着等。
+  // 平台优先取事件里的原值，缺了才退回本页写死的 'boss'，免得确认对不上轮次。
+  void loginAck(payload.platform ?? 'boss', payload.state);
+  if (isLoggedIn(payload.state)) {
+    // 重新开表：`start()` 会再读一次登录态，成功则恢复心跳（投递节奏跟着回来）。
+    // 但它读不到登录态时会**立刻把引导语写回来**——那正是清完又冒出来的原因
+    // （用户 m02033：已登录 + 收到 logged_in，提示仍在）。
+    //
+    // 广播是**旁路推送**，不是可靠传输（订阅晚于广播 / WebView 在后台丢事件都会
+    // 让这次变化白丢），所以这里带确认：开表成功且提示确实清掉才算办成，否则
+    // 退避重试，最多 3 次（用户 m02345）。不再有定时轮询兜底（用户 m02245）。
+    await withLoginAck(
+      async () => {
+        if (disposed) return true;
+        if (beat !== null) await beat.start();
+        const dirty = isSessionNote(note.value) || isSessionNote(autoNote.value);
+        if (dirty) {
+          if (clearedNote) note.value = '';
+          if (clearedAuto) autoNote.value = '';
+          beat?.stop();
+          return false;
+        }
+        return beat !== null && beat.running();
+      },
+      {
+        onGiveUp: () => {
+          // 3 次都没落账：把表停下，让用户点一次刷新重新判，不偷偷起定时器。
+          beat?.stop();
+        },
+      },
+    );
+    return;
+  }
+  // 掉登录 / 登录窗口关闭：重新判一次，由 `beat.start()` 自己写出对应的引导语。
+  if (beat !== null) await beat.start();
+}
+
+/**
+ * 这条提示是不是「登录类」（未登录 / 浏览器未连接）。
+ *
+ * 判据用文案前缀而不是错误码，与 `lib_ui/session.ts` 同一条理由：两类引导语都是
+ * 前端自己写的常量，登录成功后要成对清掉它们，但不能误伤其它错误。新增登录类
+ * 文案时把它加进 `LOGIN_NOTE_PREFIXES`。
+ */
+const LOGIN_NOTE_PREFIXES: readonly string[] = [
+  '浏览器未连接',
+  '未登录',
+  '登录已失效',
+];
+
+function isSessionNote(text: string): boolean {
+  const t = text.trim();
+  // `needsSession` 兜的是「尚未启动 / 没有会话」这类 sidecar 文案：它们同样是
+  // 「浏览器没连上」，登录成功后必须一起消失（用户 m01477：已登录但提示还在）。
+  if (needsSession(t)) return true;
+  return LOGIN_NOTE_PREFIXES.some((p) => t.startsWith(p));
+}
+
+/**
+ * 上一次**确认**过的登录态（只记已知态：`logged_in` / `no_login` / `waiting` / `error`）。
+ *
+ * 用来挡住 `login-state` 的重复推送与 `unknown` 抖动——两者都会把 `onLoginState`
+ * 下面那套「重开心跳」白跑一遍，表现就是 `login_status` 请求刷屏（用户 m02102）。
+ * 空串 = 还没收到过任何已知态。
+ */
+let lastLoginState = '';
+
+async function subscribeLoginState(): Promise<void> {
+  if (unlistenLogin !== null) return;
+  try {
+    const off = await listenLoginState(
+      (payload) => void onLoginState(payload),
+      () => undefined,
+    );
+    // 订阅是 await 的，期间组件可能已卸载：立刻退订，别留悬挂监听。
+    if (disposed) {
+      off();
+      return;
+    }
+    unlistenLogin = off;
+  } catch {
+    // 订阅失败只影响实时性：挂载、开始投递、发消息三处仍各查一次。
+    unlistenLogin = null;
+  }
+}
+
 onMounted(() => {
   window.addEventListener('resize', onResize);
   window.addEventListener('keydown', onKeydown);
@@ -565,7 +693,8 @@ onMounted(() => {
     await loadFriends();
     consumeGreetDraft();
     // 心跳只受登录限制：已登录就开表（不论自动投递是否在跑），
-    // 未登录 / 浏览器未连接则不开表，只给一句引导。
+    // 未登录 / 浏览器未连接则不开表，只给一句引导。这句引导随后由
+    // `subscribeLoginState` 在真的登录成功时清掉（用户 m01325）。
     beat = startHeartbeat({
       onStatus(st) {
         autoStatus.value = st;
@@ -576,8 +705,13 @@ onMounted(() => {
       onNote: onAutoNote,
     });
     await beat.start();
-    // 后台已在跑的投递必须当场显示「暂停」：心跳开表时已读过一次，只补读状态。
-    if (!autoStatus.value.running) {
+    await subscribeLoginState();
+    // 开表后若仍未登录，`beat.start()` 已把引导语写进 `note`/`autoNote`；
+    // 之后登录成功由 `onLoginState` 收到广播清掉，不再起轮询兜底（用户 m02245）。
+    // 后台已在跑的投递必须当场显示「暂停」。只在**一点都没读到**时补读：
+    // `beat.start()` 成功时已经调过 `autoGreetStatus` 并 `onStatus` 了，
+    // 这里再打一发就是同一毫秒里的第二次请求（用户 m02102 的请求刷屏）。
+    if (beat.lastStatus() === null) {
       try {
         autoStatus.value = await autoGreetStatus();
       } catch {
@@ -589,8 +723,13 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
   window.removeEventListener('resize', onResize);
   window.removeEventListener('keydown', onKeydown);
+  if (unlistenLogin !== null) {
+    unlistenLogin();
+    unlistenLogin = null;
+  }
   beat?.stop();
   beat = null;
 });
@@ -692,9 +831,23 @@ defineExpose({
     <!-- 两条瞬态提示行（结论②保留：发送失败/会话启动的反馈依赖它，K9「错误必须可读」）。
          求职期望行已按 SPEC-001 Rev3/Rev5 退役：原型 L926-927 明写「求职期望已并入筛选
          条件面板；打分试算已移除」，四档基线图右栏也没有这一行；期望数据仍由概览筛选面板
-         的「读取期望职位」承载（DashboardPage.loadExpects 不动，api 封装与契约面都不动）。 -->
-    <div v-if="note !== ''" class="cfg-hint chat-note" data-testid="chat-note">{{ note }}</div>
-    <div v-if="autoNote !== ''" class="cfg-hint chat-note" data-testid="auto-note">{{ autoNote }}</div>
+         的「读取期望职位」承载（DashboardPage.loadExpects 不动，api 封装与契约面都不动）。
+
+         展开态不渲染这条：对话框里的 #notices 会再渲染一份同源提示（用户 m01228：
+         「boss列表未展开聊天框时，这里显示了 2 次」）。两处必须**互斥**——`ChatDetach`
+         收起时用 `[hidden]` 改成零宽盒（`motion.css`）而不是 `display:none`，所以
+         不互斥时收起态那两份都会落在同一屏上，看起来就是同一句提示出现了两次。 -->
+    <template v-if="!ui.chatOpen">
+      <div v-if="note !== ''" class="cfg-hint chat-note" data-testid="chat-note">{{ note }}</div>
+      <!-- `onAutoNote` 会把同一句话同时写进 `note` 与 `autoNote`（那一行是给对话框
+           #notices 与右栏共用一份来源），所以这里必须去重：内容相同时只留上面那条，
+           否则右栏会上下并排出现两条一模一样的提示（用户 m01228）。 -->
+      <div
+        v-if="autoNote !== '' && autoNote !== note"
+        class="cfg-hint chat-note"
+        data-testid="auto-note"
+      >{{ autoNote }}</div>
+    </template>
   </aside>
 
   <!-- ===== 对话框：点 Boss 才展开 ===== -->
@@ -750,7 +903,7 @@ defineExpose({
       :generating="generating"
       :sending-greet="sendingGreet"
       :recalling="recalling"
-      :has-hr-reply="lastHrMessage !== ''"
+      :has-hr-reply="lastHrMessage.length > 0"
       @generate-greet="regenerateGreet"
       @generate-reply="generateReply"
       @recall="recall"

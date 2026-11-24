@@ -78,6 +78,14 @@ export const GLASS_L3 = {
   dprCap: 2,
   /** 静止降频：抽屉静止 500ms 停 rAF 保留最终 draw（规格 §3.4，禁 requestIdleCallback）。 */
   idleStopMs: 500,
+  /**
+   * 帧间隔上限（ms）：连续重绘时也不许超过约 30fps。
+   *
+   * 用户报「查看消息会很卡」：L3 在 60fps 下每帧都把**整屏**卡片层重画进 FBO、
+   * 再拿 `getComputedStyle + getBoundingClientRect` 全量探测一遍 DOM，主线程被占满。
+   * 透镜只是背景装饰，30fps 在视觉上与 60fps 无差，却把主线程还给了列表滚动与输入。
+   */
+  frameMinMs: 33,
 } as const;
 
 /**

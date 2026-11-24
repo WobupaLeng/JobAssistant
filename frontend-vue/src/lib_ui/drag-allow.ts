@@ -23,6 +23,8 @@
  *    后端 `window_start_dragging` 返回时手势已经结束。残留的按下状态会让**下一次**
  *    单击被当成「从上次落点拖到这里」，窗口直接跳走。这里自己记账：
  *    上一次拖动期间收到过 pointermove ⇒ 下一次 pointerdown 直接吞掉。
+ *    **吞一次就要清账**，否则第一次拖完之后每次按下都被吞，窗口再也拖不动。
+ * 3. **属性写成空串等于没写**：见上。这里统一写 `'true'`。
  */
 
 /** 与 Tauri 约定的属性名（`data-tauri-drag-region`）。 */
@@ -34,6 +36,12 @@ const INTERACTIVE = 'button, a, input, select, textarea, label, [contenteditable
 /**
  * 排除区：抽屉 / 模态 / 弹出面板里空白处按下去应该是「什么都不发生」或「关闭弹层」，
  * 拖窗口会与既有的「点外部关闭」打架。
+ *
+ * **只排除盒子本身，不排除它的子树**（用户 m02102「窗口顶部按左键还是不能移动窗口」）。
+ * 原来的写法是 `host.closest(EXCLUDED)`，而 `.drawer` 是所有浮层的**容器**：页面内容
+ * 就长在抽屉里，于是整块界面都被判成排除区，兜底一律不生效。改成「命中的是面板盒子
+ * 自身（`host.matches`）才排除」——按在面板的空白边距上不拖，按在里面的控件/内容上
+ * 仍按普通规则处理（可交互控件走原行为，其余补拖动属性）。
  */
 const EXCLUDED = '[data-overlay], .drawer, .filter-panel, .sensitive-panel, .config-modal, .decisions-modal, .theme-panel, .city-picker-panel';
 
@@ -65,8 +73,7 @@ export function installDragAllow(root: Document | HTMLElement = document): () =>
     const host = hostOf(ev.target);
     if (host === null) return;
     if (host.closest(SURFACES) === null) return;
-    if (host.closest(EXCLUDED) !== null) return;
-    state.moved = false;
+    if (host.matches(EXCLUDED)) return;
     // 真控件：原行为（点按钮、点输入框），顺手把上次可能留下的冒充属性收掉。
     if (host.closest(INTERACTIVE) !== null) {
       if (host.hasAttribute(DRAG_ATTR)) host.removeAttribute(DRAG_ATTR);
@@ -74,13 +81,21 @@ export function installDragAllow(root: Document | HTMLElement = document): () =>
     }
     if (state.inFlight) {
       // 上一次拖动的收尾没回来：这一下不该成为新起点，否则窗口会瞬移。
-      ev.preventDefault();
-      ev.stopPropagation();
+      // 但**必须在这里把账结掉**，只拦这一次：原来把 `inFlight` 永远留在 true，
+      // 于是第一次拖动之后每一次按下都走这条分支，表现就是「窗口再也拖不动」
+      // （用户 m02245「不能拖动」）。拦一次 = 丢掉那次残留的按下，下一次正常起拖。
+      state.inFlight = false;
+      state.moved = false;
       return;
     }
+    state.moved = false;
     state.inFlight = true;
-    // 只有「没有」时才补：品牌栏等原生拖动区自己已经带属性，别重复写。
-    if (!host.hasAttribute(DRAG_ATTR)) host.setAttribute(DRAG_ATTR, '');
+    // 属性必须写在**按下那一刻命中的元素**上（Tauri 只看 `ev.target` 那个节点），
+    // 而且要保证生效值非空：WebView2 里 `setAttribute(D, '')` 取回来是 null，
+    // 插件会判「不是拖动区」。所以先写成 `'true'`。
+    if (host.getAttribute(DRAG_ATTR) === null || host.getAttribute(DRAG_ATTR) === '') {
+      host.setAttribute(DRAG_ATTR, 'true');
+    }
   };
 
   const onMove = (): void => {
