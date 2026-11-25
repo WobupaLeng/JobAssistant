@@ -40,11 +40,12 @@ SEARCH_BASE = "https://www.zhipin.com/web/geek/jobs"
 #   .../web/geek/job?query=Java&city=101020100&salary=406&salary=407&experience=105
 # 同一维度内多项之间是 OR，不同维度之间是 AND。
 
-# 薪资：Boss 官方下拉只有 6 档，URL 编码也只认这几个
-#   403=3K以下 404=3-5K 405=5-10K 414=10-20K 415=20-50K 418=50K以上
+# 薪资：Boss 官方下拉只有 6 档，URL 编码也只认这几个（来源：
+# `/wapi/zpgeek/pc/all/filter/conditions.json` 的 salaryList，实测 405=10-20K、406=20-50K）
+#   402=3K以下 403=3-5K 404=5-10K 405=10-20K 406=20-50K 407=50K以上
 _BOSS_TIER_CODES: list[tuple[int, int, str]] = [
-    (0, 3, "403"), (3, 5, "404"), (5, 10, "405"), (10, 20, "414"),
-    (20, 50, "415"), (50, 9999, "418"),
+    (0, 3, "402"), (3, 5, "403"), (5, 10, "404"), (10, 20, "405"),
+    (20, 50, "406"), (50, 9999, "407"),
 ]
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -77,28 +78,28 @@ def _multi(params: list[str], name: str, values: list[str] | None) -> None:
             params.append(f"{name}={quote(str(v))}")
 
 
-def map_salary_code(code: str) -> str | None:
-    """把界面薪资编码映射成 Boss 的 salary 编码（映射不到返回 None）。"""
+def map_salary_codes(code: str) -> list[str]:
+    """把界面薪资编码映射成 Boss 的 salary 编码（可能有多个，映射不到返回空表）。
+
+    `sal:a-b` 与多档有交集时全部发出：Boss 的 salary 是重复键、同维度内取 OR，
+    只挑「重叠最多」的一档会让 `sal:8-12` 这类跨档区间漏掉另一档。
+    """
     code = str(code or "").strip()
     if not code:
-        return None
-    if code.startswith("sal:"):
-        try:
-            low, high = (int(x) for x in code[4:].split("-"))
-        except Exception:
-            return None
-        best, cover_best = None, 0
-        for tlo, thi, tcode in _BOSS_TIER_CODES:
-            cover = min(high, thi) - max(low, tlo)
-            if cover > 0 and cover > cover_best:
-                best, cover_best = tcode, cover
-        if best:
-            return best
-        for tlo, thi, tcode in _BOSS_TIER_CODES:
-            if tlo <= low and high <= thi:
-                return tcode
-        return None
-    return code
+        return []
+    if not code.startswith("sal:"):
+        return [code]
+    try:
+        low, high = (int(x) for x in code[4:].split("-"))
+    except Exception:
+        return []
+    if high <= low:
+        return []
+    out: list[str] = []
+    for tlo, thi, tcode in _BOSS_TIER_CODES:
+        if min(high, thi) - max(low, tlo) > 0 and tcode not in out:
+            out.append(tcode)
+    return out
 
 
 def build_search_url(cfg: Any, keyword: str) -> str:
@@ -106,8 +107,14 @@ def build_search_url(cfg: Any, keyword: str) -> str:
     params = [f"query={quote(keyword)}", f"city={quote(cfg.city or '101020100')}"]
     if cfg.job_type:
         params.append(f"jobType={quote(cfg.job_type)}")
-    # 自定义档位（sal:18-25）Boss 没有对应编码，后端会用区间二次校验兜底
-    _multi(params, "salary", [map_salary_code(c) for c in (cfg.salary or []) if map_salary_code(c)])
+    # 自定义档位（sal:18-25）Boss 没有对应编码，会映射成有交集的官方档位；
+    # 精确区间由 Rust 侧 `ExcludeRules.salary_ranges` 在预筛阶段二次校验。
+    salary_codes: list[str] = []
+    for c in cfg.salary or []:
+        for mapped in map_salary_codes(c):
+            if mapped not in salary_codes:
+                salary_codes.append(mapped)
+    _multi(params, "salary", salary_codes)
     _multi(params, "experience", cfg.experience)
     _multi(params, "degree", cfg.degree)
     _multi(params, "scale", cfg.scale)
@@ -322,50 +329,72 @@ class BossScraper:
         # 否则第二个关键词会把第一个关键词已抓过的卡片再拉一遍详情）
         mine: list[str] = [jid for jid, kw_of in hit_kw.items() if kw_of == kw]
 
-        batch_no = 0
-        while not self.should_stop():
-            batch_no += 1
-            self.info(f"第 {batch_no} 批：新增 {added_dom} 条卡片（累计 {len(mine)}）")
+        # 「最多翻页」是**批次数**（每批约 15 张卡片），与 card_cap 共同限流。
+        page_cap = max(1, int(getattr(cfg, "max_pages", 0) or 5))
 
-            # 先把已收卡片的详情拉完（流式回传，拿到一条就发给 Rust）
-            fresh = [(jid, jobs[jid]) for jid in mine if jid not in processed]
-            for idx, (jid, item) in enumerate(fresh, 1):
+        # 详情必须开在**独立标签页**：列表页是无限滚动，若在原页 goto 详情，
+        # 列表 DOM 与滚动位置全部丢失；随后 `_load_more_by_scroll` 会在详情页上
+        # 数卡片（恒为 0），把「刚拉完第 1 批」误判成「已到底」，于是每个关键词
+        # 只抓一页就切走。
+        detail_page = None
+        try:
+            batch_no = 0
+            while not self.should_stop():
+                batch_no += 1
+                self.info(f"第 {batch_no} 批：新增 {added_dom} 条卡片（累计 {len(mine)}）")
+
+                # 先把已收卡片的详情拉完（流式回传，拿到一条就发给 Rust）
+                fresh = [(jid, jobs[jid]) for jid in mine if jid not in processed]
+                for idx, (jid, item) in enumerate(fresh, 1):
+                    if self.should_stop():
+                        break
+                    processed.add(jid)
+                    # 用户手动关掉详情标签页时重建，避免本批剩余详情全部空跑
+                    if detail_page is None or detail_page.is_closed():
+                        detail_page = page.context.new_page()
+                        detail_page.set_default_timeout(60_000)
+                    # 详情拿不到就不推送：没有 JD 的条目入库后会被规则判
+                    # 「无 JD 不入库」，白占一条数据库记录，还会让用户以为抓到了
+                    ok = self._fetch_detail(detail_page, jid, item)
+                    item["matched_keyword"] = hit_kw.get(jid)
+                    if ok:
+                        try:
+                            self.on_job(item)
+                        except Exception as exc:
+                            self.warn(f"回传岗位失败：{exc}")
+                    else:
+                        self.info(f"跳过（详情未取到）：{item.get('title') or jid}")
+                    if idx % 10 == 0:
+                        self.info(f"详情进度 {idx}/{len(fresh)}")
+                    self._sleep(0.3)
+
                 if self.should_stop():
                     break
-                processed.add(jid)
-                # 详情拿不到就不推送：没有 JD 的条目入库后会被规则判
-                # 「无 JD 不入库」，白占一条数据库记录，还会让用户以为抓到了
-                ok = self._fetch_detail(page, jid, item)
-                item["matched_keyword"] = hit_kw.get(jid)
-                if ok:
-                    try:
-                        self.on_job(item)
-                    except Exception as exc:
-                        self.warn(f"回传岗位失败：{exc}")
-                else:
-                    self.info(f"跳过（详情未取到）：{item.get('title') or jid}")
-                if idx % 10 == 0:
-                    self.info(f"详情进度 {idx}/{len(fresh)}")
-                self._sleep(0.3)
+                if batch_no >= page_cap:
+                    self.info(f"已达翻页上限 {page_cap} 批，停止加载（当前 {len(mine)} 条）")
+                    break
+                if len(mine) >= card_cap:
+                    self.info(f"已达卡片上限 {card_cap} 条，停止加载（当前 {len(mine)} 条）")
+                    break
 
-            if self.should_stop():
-                break
-            if len(mine) >= card_cap:
-                self.info(f"已达卡片上限 {card_cap} 条，停止加载（当前 {len(mine)} 条）")
-                break
-
-            # 详情拉完再滚动取下一批：此时页面还停在刚才的位置，滚动才有效
-            if not self._load_more_by_scroll(page, len(mine)):
-                self.info(f"已无更多岗位，关键词「{kw}」结束（共 {len(mine)} 条）")
-                break
-            added_dom = _harvest_dom()
-            if not added_dom:
-                self.info(f"滚动后没有新卡片，关键词「{kw}」结束")
-                break
-            mine = [jid for jid, kw_of in hit_kw.items() if kw_of == kw]
-            if len(mine) > card_cap:
-                self.info(f"批次超限（{len(mine)} > {card_cap}），本次最多取 {card_cap} 条")
-            self.jitter()
+                # 详情拉完再滚动取下一批：此时列表页还停在刚才的位置，滚动才有效
+                if not self._load_more_by_scroll(page, len(mine)):
+                    self.info(f"已无更多岗位，关键词「{kw}」结束（共 {len(mine)} 条）")
+                    break
+                added_dom = _harvest_dom()
+                if not added_dom:
+                    self.info(f"滚动后没有新卡片，关键词「{kw}」结束")
+                    break
+                mine = [jid for jid, kw_of in hit_kw.items() if kw_of == kw]
+                if len(mine) > card_cap:
+                    self.info(f"批次超限（{len(mine)} > {card_cap}），本次最多取 {card_cap} 条")
+                self.jitter()
+        finally:
+            if detail_page is not None:
+                try:
+                    detail_page.close()
+                except Exception:
+                    pass
 
     def _load_more_by_scroll(self, page: Any, before: int, rounds: int = 4) -> bool:
         """向下滚动触发无限加载，返回是否真的拿到了新卡片。
@@ -376,6 +405,11 @@ class BossScraper:
         `before` 是调用方眼中的「已收卡片数」；递增到不能再涨就判定到底。
         注意每次滚动后要等网络把新卡片追加进 DOM，2.5 秒是实测的稳妥值。
         """
+        # 详情标签页会抢前台；滚轮必须打在列表页上，先切回来
+        try:
+            page.bring_to_front()
+        except Exception:
+            pass
         prev = before
         for _ in range(rounds):
             try:

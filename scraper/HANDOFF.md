@@ -52,6 +52,7 @@
 - **卡片里公司名在 `a.boss-info > span.boss-name`，不是 `.company-name`**。
 - **卡片选择器 `li` 会匹配到卡片自己**：找经验/学历标签必须限定在 `.tag-list` 里，否则 `inner_text` 拿到整张卡的文本。
 - **翻页判定只看卡片数增长**：滚到底页面可能回弹，选择器一直存在，改成「滚动成功」或「等选择器出现」都会无限翻下去。每次滚动后等 2.5 秒是实测稳妥值。
+- **详情页必须开在独立标签页**：在原列表页上 `goto` 详情会丢列表 DOM 与滚动位置，下一批 `_load_more_by_scroll` 在详情页上数卡片恒 0，每个关键词只抓 1 批就切走。「最多翻页」是**批次数**，由 `_search_keyword` 的 `page_cap` 收口（每批约 15 张卡片），滚动前必须 `bring_to_front()` 切回列表页。
 - **薪资数字常被字体加密**（U+E031..U+E03A → 0-9），取不到就留空，不要在 Python 侧臆造。
 - **空页有五类**（验证码/风控、登录失效、加载中、筛选无结果、真为空），`_diagnose_empty_page` 会把页面特征翻成人话。新增诊断分支时保持「告诉用户下一步该干什么」的口径。
 
@@ -172,6 +173,18 @@ Call log:
 - **每一次真导航都写一行**：`_goto()` 成功即 `self.log("info", f"{what}：{url}")`。用户报「切会话时浏览器刷了两次，第一次是 /web/geek/chat、第二次带 bossid」时，靠这一行才能分清哪次是本程序发的、哪次是 Boss 页面自己跳的——以前 `_goto` 只在失败时说话，日志里一片空白。
 - **每个用户动作一对行**：`messages()` 开头「打开会话：<HR（公司）>」、结尾「会话消息 N 条」；`send()` 开头「发送消息给 …」、结尾「已发送消息给 …」；`friends()` 成功「会话列表已刷新：N 条」。会话怎么称呼见 `_friend_label()`（姓名→公司名→uid），**别在日志里只写 uid**，数字串看不出是哪位 Boss。
 - **`scraper/tests/test_chat_send_open.py` 在 HEAD 就是红的**（`FakeLocator.first` 是方法、`send()` 按属性用），不是本轮引入，也不许拿它当门禁。别照它改 `send()`。
+
+### 2.5.2 开始/暂停抓取的排队语义（用户 m01094）
+
+- **暂停后立刻继续，必须等上一轮 worker 真的退出**。`stop_scrape` 只 `_stop.set()`，`_run_scrape` 的检查点最多 0.2 s 才看到；旧 `start_scrape` 直接判 `_worker.is_alive()` 就 `log("warn", "已有抓取在进行，忽略本次开始请求")` 静默丢弃——界面显示已启动、实际一条没抓。现在开头先 `if _stop.is_set(): _wait_worker_done(20.0)` 再判忙。
+- **`_wait_worker_done` 每次轮询单独加锁**：持着 `_worker_lock` 睡 50 ms 会与收尾线程互锁，25 s 后整条车道死。
+- **同一个 sidecar 进程里再发 `scrape.start` 不会重开 Chrome**：车道 A 走 `ensure_context` / 车道 B 走 `_ensure_chat_context`，两者共用 `_cdp_proc`/`_cdp_port`，所以「暂停 → 继续」沿用已登录的浏览器是安全的；要重新扫码只可能发生在 Rust 侧把进程杀掉重拉（见 `backend-tauri/HANDOFF.md` §2.2）。
+
+### 2.5.3 「重试」只许查状态，不许拉起浏览器（用户 m01706）
+
+- **被动查询登录态（`session.open` 不带 `page`）先问 `_browser_running()`，没起来就直接回报 `state: unknown` 并返回**。以前这里无条件 `ensure_context()`，而它见不到 `_cdp_proc` 就 `start_cdp_chrome` —— 用户关掉浏览器后点界面上的「重试」，Chrome 又自己弹出来，一个写着「只重新检查一次浏览器连接状态」的按钮变成了启动按钮。
+- **`_browser_running()` 只看进程与端口，不探 `_ctx.cookies()`**：patchright 的 sync API 绑死创建它的线程，被动查询可能在别的线程被调用；`_cdp_proc.poll() is not None` + `_port_listening(_cdp_port)` 是跨线程安全的判据。
+- **带 `page` 的主动动作不受影响**：`session.open{page:"chat"}` 仍要拉起浏览器并导航，别为修「重试」把打开消息页也堵死。回归见 `scraper/tests/test_session_open_passive.py`（4 条，自带 runner，`python scraper\tests\test_session_open_passive.py`）。
 
 ### 2.6 反爬
 

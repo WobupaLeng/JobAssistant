@@ -27,10 +27,6 @@ from typing import Any
 
 MAX_LINE_BYTES = 1024 * 1024
 
-# 登录期间「窗口被关 → 重开」的失败上限。超过即放弃：不设上限时，重连持续失败会
-# 每轮重启一次 Chrome，表现为「窗口无限打开」（关一个弹一个）。
-MAX_REOPEN_FAILURES = 3
-
 # 浏览器常驻单车道（scraper/AGENTS.md §4.10：碰浏览器的命令必须排队到同一个
 # 工作线程）。patchright 的 sync API 绑死创建它的线程：旧实现每条命令各起一个
 # 新线程，首条命令的线程一退出，_pw/_ctx 就成了尸体——第二条命令探活必报
@@ -228,6 +224,24 @@ def _port_listening(port: int) -> bool:
         return False
 
 
+def _browser_running() -> bool:
+    """浏览器进程**现在**是否还在跑。只问进程与端口，不碰 playwright。
+
+    被动查询登录态（`session_open` 不带 `page`，界面上的「重试」就走这条）必须
+    先问这一句：`ensure_context` 见到没有进程就 `start_cdp_chrome`，于是写着
+    「重试」的按钮变成了启动按钮——用户关掉浏览器后点重试，窗口又自己弹回来
+    （用户 m01706：重试只能检查状态，不能打开浏览器）。
+
+    不探 `_ctx.cookies()`：patchright 的 sync API 绑死创建它的线程，这里可能
+    在别的线程被调用；进程与端口是跨线程安全的判据。
+    """
+    proc = _cdp_proc
+    if proc is None or proc.poll() is not None:
+        return False
+    port = _cdp_port
+    return bool(port) and _port_listening(int(port))
+
+
 def _shutdown_cdp_chrome() -> None:
     """优雅关闭本模块拉起的 CDP Chrome（应用退出时调用）。
 
@@ -373,8 +387,6 @@ def _run_login(payload: dict[str, Any]) -> None:
 
         platform = payload.get("platform") or "boss"
         timeout_s = int(payload.get("timeout_sec") or 900)
-        # 重开窗口的失败上限：超过就放弃，避免「关一个弹一个」的死循环
-        reopen_failures = 0
 
         log("info", f"准备打开 {platform} 登录页")
         ctx = ensure_context(log)
@@ -383,6 +395,17 @@ def _run_login(payload: dict[str, Any]) -> None:
             page.bring_to_front()
         except Exception:
             pass
+        # `find_page_for` 会复用任意该平台域的标签页（比如上一轮停在的岗位列表），
+        # 那样「点登录」看起来毫无反应——用户点的是登录，必须看到登录页。
+        if not browser_mod.detect_logged_in(ctx, platform):
+            try:
+                page.goto(
+                    browser_mod.PLATFORM_HOME[platform],
+                    wait_until="domcontentloaded",
+                    timeout=30_000,
+                )
+            except Exception as exc:
+                log("warn", f"打开登录页失败：{type(exc).__name__}: {exc}")
 
         emit({"event": "login.state", "data": {
             "platform": platform, "state": "waiting",
@@ -404,24 +427,17 @@ def _run_login(payload: dict[str, Any]) -> None:
                     except Exception:
                         pass
                 return
-            # 浏览器被用户关掉：重新拉起来，别让登录流程卡死。
-            # **必须退避**：重连若持续失败（profile 被占 / Chrome 起不来），
-            # 每 1.5 秒重启一次就是「窗口无限打开」——用户点关闭，下一个立刻弹出。
+            # 用户关掉登录窗口 = 放弃这次登录：**不自动重开**。早先「关一个弹一个」
+            # 的重开兜底在 F5 不再关 sidecar 之后会持续冒窗。
             try:
                 ctx.cookies()
             except Exception:
-                if reopen_failures >= MAX_REOPEN_FAILURES:
-                    raise RuntimeError(
-                        f"登录窗口连续 {MAX_REOPEN_FAILURES} 次重新打开失败，已放弃"
-                    )
-                reopen_failures += 1
-                log("warn", f"登录窗口被关闭，正在重新打开（第 {reopen_failures} 次）…")
-                time.sleep(min(2.0 * reopen_failures, 8.0))
-                _ctx = None
-                ctx = ensure_context(log)
-                page = browser_mod.find_page_for(ctx, platform, log)
-                reopen_failures = 0
-                continue
+                log("info", "登录窗口已关闭，结束本次登录")
+                emit({"event": "login.state", "data": {
+                    "platform": platform, "state": "closed",
+                    "msg": "登录窗口已关闭，想登录请再点「扫码登录」",
+                }})
+                return
             _stop.wait(1.5)
 
         if _stop.is_set():
@@ -469,6 +485,10 @@ def start_scrape(payload: dict[str, Any]) -> None:
     """在后台线程启动抓取。已在跑就拒绝，避免两个浏览器抢同一个 profile。"""
     global _worker
     global _occupant
+    # 上一轮已请求停止、还在收尾（每轮检查点 0.2 s）时，「继续抓取」若直接判 busy
+    # 会被静默丢弃：界面显示「已启动」，实际一条都没抓。先等它真的退出去。
+    if _stop.is_set():
+        _wait_worker_done(20.0)
     with _worker_lock:
         if _worker is not None and _worker.is_alive():
             log("warn", "已有抓取在进行，忽略本次开始请求")
@@ -478,14 +498,37 @@ def start_scrape(payload: dict[str, Any]) -> None:
         _worker = _WorkerHandle(_browser_q.submit(_run_scrape, payload))
 
 
+def _wait_worker_done(timeout_s: float) -> None:
+    """等上一轮抓取线程退出。**不持锁等**：持锁会让收尾线程与自己互锁。"""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        with _worker_lock:
+            alive = _worker is not None and _worker.is_alive()
+        if not alive:
+            return
+        time.sleep(0.05)
+    log("warn", "上一轮抓取迟迟没有退出，本次开始请求按忙处理")
+
+
 def start_login(payload: dict[str, Any]) -> None:
-    """在后台线程打开登录页。已在跑（抓取或登录）就拒绝——浏览器只能有一个主人。"""
+    """在后台线程打开登录页。抓取在跑就拒绝；上一轮登录还在等则抢占重开。"""
     global _worker
     global _occupant
     with _worker_lock:
         if _worker is not None and _worker.is_alive():
-            log("warn", "已有任务在进行（抓取或登录），忽略本次登录请求")
-            return
+            if _occupant != "login":
+                log("warn", "已有抓取任务在进行，忽略本次登录请求")
+                return
+            # 上一轮登录最长会等 15 分钟（扫码超时）。用户又点了登录说明他要重来，
+            # 不抢占的话这次点击会被静默丢弃——界面上就是「点了没反应」。
+            log("info", "上一轮登录仍在等待，先结束它再重新打开登录页")
+            _stop.set()
+            deadline = time.time() + 3.0
+            while _worker is not None and _worker.is_alive() and time.time() < deadline:
+                time.sleep(0.05)
+            if _worker is not None and _worker.is_alive():
+                log("warn", "上一轮登录还没退出，请稍后再点「扫码登录」")
+                return
         _stop.clear()
         _occupant = "login"
         _worker = _WorkerHandle(_browser_q.submit(_run_login, payload))
@@ -513,6 +556,10 @@ _chat_busy = threading.Lock()   # 同一时刻只允许一条聊天命令在跑
 _chat_q = ThreadPoolExecutor(max_workers=1, thread_name_prefix="chat")
 _chat_pw: Any = None     # 聊天线程专属的 sync_playwright 实例
 _chat_ctx: Any = None    # 聊天线程专属的 BrowserContext（经 CDP 连接）
+
+# 车道 C（只读探测）：登录态查询不能排在抓取后面，也不必抢占聊天车道的主线程。
+# 它只把任务转投 `_chat_q` 等待结果（patchright 对象绑死线程），自己不碰浏览器。
+_probe_q = ThreadPoolExecutor(max_workers=1, thread_name_prefix="probe")
 
 
 def _chat_client() -> Any:
@@ -567,6 +614,39 @@ def _ensure_chat_context() -> Any:
         _chat_pw = sync_playwright().start()
     _chat_ctx = browser_mod.connect_cdp_context(_chat_pw, _cdp_port)
     return _chat_ctx
+
+
+def _probe_logged_in_via_chat(platform: str) -> bool:
+    """在聊天车道探测登录态：车道 A 被抓取/登录占着时也能答话。
+
+    必须投递到 `_chat_q`：patchright 的 sync 对象绑死创建它的线程，`_chat_ctx`
+    只能由聊天线程创建与使用。聊天线程排着长命令时 `result(timeout)` 会抛
+    TimeoutError，由调用方降级成 unknown——不能降级成 no_login，那会把
+    「查不到」误报成「没登录」。
+    """
+    def _probe() -> bool:
+        import browser as browser_mod
+
+        return browser_mod.detect_logged_in(_ensure_chat_context(), platform)
+
+    return bool(_chat_q.submit(_probe).result(timeout=8))
+
+
+def _run_login_probe(cmd: dict[str, Any], platform: str) -> None:
+    """`login.status` 与被动 `session.open` 的共用回执：只读 cookie，不抢浏览器。"""
+    cid = cmd.get("id")
+    if not _browser_running():
+        emit({"id": cid, "ok": True, "data": {"logged_in": False, "state": "unknown"}})
+        return
+    try:
+        logged = _probe_logged_in_via_chat(platform)
+        state = "logged_in" if logged else "no_login"
+    except Exception as exc:
+        # 超时 / 聊天车道报错：答「查不到」，不是「没登录」。
+        msg = f"{type(exc).__name__}: {exc}"
+        log("warn", f"探测登录态失败：{msg}")
+        logged, state = False, "unknown"
+    emit({"id": cid, "ok": True, "data": {"logged_in": logged, "state": state}})
 
 
 def _run_chat(cmd: dict[str, Any]) -> None:
@@ -674,6 +754,18 @@ def _run_session_open(cmd: dict[str, Any]) -> None:
     # 可选目标页：`chat` = Boss 聊天页。省略时不导航（保持向后兼容）。
     target = cmd.get("page") or ""
     try:
+        # 被动查询登录态（不带 page，界面上的「重试」按钮走的就是这条）：浏览器
+        # 没起来就只回报「没连上」，**绝不拉起**。以前这里直接 `ensure_context`，
+        # 而它见不到进程就 `start_cdp_chrome`——一个「重试」按钮把浏览器又打开了
+        # （用户 m01706）。
+        if not target and not _browser_running():
+            emit({
+                "id": cid,
+                "ok": True,
+                "data": {"logged_in": False, "state": "unknown"},
+            })
+            log("info", "浏览器未连接：只检查状态，不启动浏览器")
+            return
         with _chat_busy, _worker_lock:
             if _worker is not None and _worker.is_alive():
                 raise RuntimeError(busy_reason("打开浏览器"))
@@ -738,19 +830,11 @@ def handle(cmd: dict) -> None:
         return
 
     if name == "login.status":
-        # 探活同样要投递到浏览器线程：patchright 对象线程绑定，主线程直接
-        # cookies() 必报 greenlet 错。浏览器线程被长任务占用时 5s 超时按
-        # 未登录回报（Rust 侧另有 busy/unknown 兜底）。
-        def _probe() -> bool:
-            import browser as browser_mod
-
-            return _ctx is not None and browser_mod.detect_logged_in(_ctx, "boss")
-
-        try:
-            logged = bool(_browser_q.submit(_probe).result(timeout=5))
-        except Exception:
-            logged = False
-        emit({"id": cid, "ok": True, "data": {"logged_in": logged}})
+        # 探活**不排进车道 A**：抓取是分钟级长任务，排队的探活会 5 秒超时并被
+        # 当成「未登录」，于是用户明明已登录却看到「浏览器未连接：请先登录」。
+        # 改由车道 C 转投聊天车道（只读 cookie，不导航、不抢浏览器）。
+        platform = str(cmd.get("platform") or "boss")
+        _probe_q.submit(_run_login_probe, cmd, platform)
         return
 
     if isinstance(name, str) and name.startswith("chat."):
@@ -775,9 +859,16 @@ def handle(cmd: dict) -> None:
         # 主线程必须继续读 stdin。
         busy = _busy_now("打开浏览器")
         if busy:
-            msg = f"RuntimeError: {busy}"
-            log("warn", f"启动浏览器失败：{msg}")
-            emit({"id": cid, "ok": False, "error": {"code": "SESSION_FAILED", "msg": msg}})
+            if cmd.get("page"):
+                # 带目标页 = 主动开页，必须独占浏览器，照旧挡回。
+                msg = f"RuntimeError: {busy}"
+                log("warn", f"启动浏览器失败：{msg}")
+                emit({"id": cid, "ok": False, "error": {"code": "SESSION_FAILED", "msg": msg}})
+            else:
+                # 被动查询（界面上的「重试」）：抓取占着车道 A 时只读 cookie，
+                # 走聊天车道答话，别让重试按钮被「正在抓取」挡回去。
+                log("info", "抓取进行中：登录态改由聊天车道探测")
+                _probe_q.submit(_run_login_probe, cmd, str(cmd.get("platform") or "boss"))
         else:
             _browser_q.submit(_run_session_open, cmd)
         return

@@ -241,9 +241,19 @@ def start_cdp_chrome(profile_dir: str) -> tuple[Any, int]:
     端口由系统动态分配（bind 到 0 取空闲口），仅绑定 127.0.0.1，且只在本进程
     存活期间存在：父进程（sidecar）退出时由 Popen 句柄随之释放，不常驻占口。
     这一步只负责起进程与分配端口，连接与标签页由调用方用 connect_over_cdp 完成。
+
+    兜底：profile 已被别的 Chrome 占用时（上次异常退出留下的孤儿），新进程只会
+    把启动请求移交过去、自己以退出码 0 退出，CDP 端口永远不监听。此时直接接管
+    旧进程已有的调试端口，而不是让「点登录」变成弹出一个空白页。
     """
     import socket
     import subprocess
+
+    adopted = _find_profile_cdp(profile_dir)
+    if adopted is not None:
+        pid, old_port = adopted
+        print(f"[browser] 接管已在运行的 Chrome（pid={pid}, 127.0.0.1:{old_port}）", file=sys.stderr)
+        return ReusedChrome(pid, old_port), old_port
 
     exe = _find_system_browser()
     if not exe:
@@ -267,6 +277,20 @@ def start_cdp_chrome(profile_dir: str) -> tuple[Any, int]:
     # 立刻返回会让调用方的 _port_listening() 探空 → 再起一个 Chrome → 窗口无限打开。
     ready_port = _wait_cdp_ready(proc, port, log=None)
     if ready_port is None:
+        # 预检与真正 spawn 之间有竞态（另一个 Chrome 恰好在这几秒里抢到 profile）：
+        # 再查一次，能接管就接管，做不到才报错。
+        adopted = _find_profile_cdp(profile_dir)
+        if adopted is not None:
+            pid, old_port = adopted
+            # 新起的这个进程只是「移交请求的壳」：它在把请求转给旧实例后自行退出，
+            # 但若还活着也不能留着，否则下次它又占着 profile。
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+            print(f"[browser] 接管已在运行的 Chrome（pid={pid}, 127.0.0.1:{old_port}）", file=sys.stderr)
+            return ReusedChrome(pid, old_port), old_port
         # 端口没起来：进程要么已经死了，要么卡在被别的会话接管。
         # 不回收的话它会在调用方抛错后变成孤儿，占着 profile 让下一次启动必败。
         try:
@@ -300,6 +324,98 @@ def _wait_cdp_ready(proc: Any, port: int, log: Any = None, timeout_s: float = 15
         except OSError:
             time.sleep(0.2)
     return None
+
+
+def _tcp_alive(port: int) -> bool:
+    """探测 127.0.0.1:port 是否还在监听（只做 connect，不发 HTTP）。"""
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _find_profile_cdp(profile_dir: str) -> tuple[int, int] | None:
+    """找出正在占用该 profile 且开着 CDP 端口的 Chrome，返回 (pid, port)。
+
+    Chrome 对 user-data-dir 有单例锁：同 profile 已有进程时，新的 chrome.exe 会把
+    启动请求移交过去后自己退出，调试端口永不监听。这种孤儿进程多数是上次崩溃
+    留下的——直接接管它，比报错或再弹一个空白窗口都好。
+
+    只在 Windows 上查（应用只发 Windows 包）；查询失败一律当作「没有」。
+    """
+    # 空路径会让 `-like '*--user-data-dir=*'` 匹配到任意 Chrome（误接管别人的浏览器）
+    if not profile_dir.strip() or sys.platform != "win32":
+        return None
+    import base64
+    import subprocess
+
+    ps = (
+        "$p = Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+        f"Where-Object {{ $_.CommandLine -like '*--user-data-dir={profile_dir}*' "
+        "-and $_.CommandLine -match '--remote-debugging-port=(\\d+)' } | "
+        "Select-Object -First 1\n"
+        "if ($p) { \"$($p.ProcessId) $([regex]::Match($p.CommandLine,'--remote-debugging-port=(\\d+)').Groups[1].Value)\" }"
+    )
+    try:
+        encoded = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        ).stdout.strip()
+    except Exception:
+        return None
+    parts = out.split()
+    if len(parts) != 2 or not all(p.isdigit() for p in parts):
+        return None
+    pid, port = int(parts[0]), int(parts[1])
+    if port <= 0 or not _tcp_alive(port):
+        return None
+    return pid, port
+
+
+class ReusedChrome:
+    """接管一个已在运行的 Chrome：我们不是它的父进程，只能经 CDP 关。
+
+    `ensure_context` 只用 `poll()` 判活、`_shutdown_cdp_chrome` 用 `wait()` /
+    `terminate()`，这里按同样的三个方法实现，好让调用方不必分支。
+    """
+
+    def __init__(self, pid: int, port: int) -> None:
+        self.pid = pid
+        self.port = port
+
+    def poll(self) -> int | None:
+        # 只认端口：进程号可能已被复用，端口关了才算这个浏览器没了。
+        return None if _tcp_alive(self.port) else 0
+
+    def wait(self, timeout: float | None = None) -> int:
+        import time
+
+        deadline = time.monotonic() + (8.0 if timeout is None else timeout)
+        while time.monotonic() < deadline:
+            if not _tcp_alive(self.port):
+                return 0
+            time.sleep(0.2)
+        raise TimeoutError("接管的 Chrome 未在超时内退出")
+
+    def terminate(self) -> None:
+        import subprocess
+
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(self.pid), "/T", "/F"],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except Exception:
+            pass
 
 
 def reuse_or_new_page(ctx: Any) -> Any:
