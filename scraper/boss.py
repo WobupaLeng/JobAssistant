@@ -608,18 +608,24 @@ class BossScraper:
             self.info("已停止：放弃打开这条详情")
             return False
         self.info(f"等待 {wait_s:.1f}s 后打开详情（{item.get('title') or jid}）")
-        nav_ok = True
+        # 标签页在后台时 Chrome 会冻结导航（实测后台 new_page 的 goto 可能
+        # 40 秒都不发请求，前台 0.2 秒完成），打开详情前必须先切到前台。
+        try:
+            page.bring_to_front()
+        except Exception:
+            pass
         try:
             page.goto(item["job_url"], wait_until="domcontentloaded", timeout=25000)
             self._sleep(1.5)
         except Exception as exc:
-            nav_ok = False
+            # 超时后页面可能还停在上一条详情上，继续解析会把旧 JD 挂到当前岗位。
             self.warn(f"打开详情页失败：{exc}")
+            return False
         try:
             self._parse_detail_dom(page, item)
         except Exception as exc:
             self.warn(f"解析详情页异常：{type(exc).__name__}: {exc}")
-        if nav_ok and not (item.get("jd_text") or "").strip():
+        if not (item.get("jd_text") or "").strip():
             try:
                 cur = page.url
             except Exception:
