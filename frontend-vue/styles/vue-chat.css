@@ -1165,9 +1165,7 @@
   overflow-wrap: anywhere;
 }
 
-/* 「已是最新消息」在 Boss 列表标题行里的那一份，放在列表最上方。 */
-   标题行是 44px 定高 flex，提示跟在标题 / 未读徽标之后，靠 margin-left: auto 与
-/* 刷新按钮前的 spacer 并排右靠；放不下就省略号，不撑高标题行。 */
+/* 「已是最新消息」在 Boss 列表最上方的那一份：挂在 .rail-fresh-row 里独占一行，可换行。 */
 .rail-fresh {
   display: block;
   font-size: var(--fs-2xs);

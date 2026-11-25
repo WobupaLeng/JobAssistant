@@ -1155,7 +1155,9 @@ defineExpose({
          ChatDetach 收起时用 [hidden] 改成零宽盒（motion.css）而不是 display:none，不互斥时
          两份会落在同一屏上，看起来就是同一句提示出现了两次。 -->
     <template v-if="!ui.chatOpen">
-      <div v-if="note !== ''" class="cfg-hint chat-note" data-testid="chat-note">
+      <!-- 同一条「已是最新消息」只在列表头顶用灰字说一次（freshNote），
+           不再落到下面这条红底瞬态条上重复一遍。 -->
+      <div v-if="note !== '' && freshNote === ''" class="cfg-hint chat-note" data-testid="chat-note">
         <span class="note-text">{{ note }}</span>
         <button
           v-if="noteNeedsCheck"

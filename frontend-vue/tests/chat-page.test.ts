@@ -200,6 +200,8 @@ describe('提示条的语气与位置（用户 m01273）', () => {
     const detachRail = w.find('[data-testid="chat-detach-rail-fresh"]');
     expect(rail.text()).toBe('已是最新消息，点「刷新」可重新拉取。');
     expect(detachRail.text()).toBe('已是最新消息，点「刷新」可重新拉取。');
+    // 同一句话不再落到红底瞬态条（chat-note）上重复一遍。
+    expect(w.find('[data-testid="chat-note"]').exists()).toBe(false);
     // 它必须在 Boss 列表（rail-body）之前 —— 也就是「最上方」，不是列表里。
     const railHead = w.find('[data-testid="chat-rail-body-slot"]');
     expect(railHead.exists()).toBe(true);
