@@ -19,7 +19,7 @@
 |---|---|
 | `backend-tauri/` | ✅ 可用。命令全部定义且全部注册；CSP 已显式声明 `script-src`（缺失即白屏，见 §3.1）；sidecar 子进程 spawn 即纳入 Job Object（`KILL_ON_JOB_CLOSE`），shutdown/强杀整树回收 |
 | `scraper/` | ✅ 抓取 / 登录 / 聊天 / 求职期望已通，从 Tauri 子进程拉起真实 Chrome 已修复并实测；浏览器命令走常驻单车道执行器（见模块 AGENTS §5） |
-| `frontend-vue/` | ✅ Vue 3 重写完成：四页接线 + M5 补遗、Leptos `.rs` 计数 0、QA 复审收口（A54 几何/11 testid 对齐原型/A36）、vitest 全绿；CSP 收紧（删 `wasm-unsafe-eval`）+ `tauri build --no-bundle` 产物工作区外冒烟通过（Vue 渲染 + IPC 回读正常，非白屏）；Liquid Glass L2 折射克隆层 / L3 WebGL 透镜已实现（SPEC-003），周末三档前端批已落地（SPEC-004） |
+| `frontend-vue/` | ✅ Vue 3 重写完成：四页接线 + M5 补遗、Leptos `.rs` 计数 0、QA 复审收口（A54 几何/11 testid 对齐原型/A36）、vitest 全绿；CSP 收紧（删 `wasm-unsafe-eval`）+ `tauri build --no-bundle` 产物工作区外冒烟通过（Vue 渲染 + IPC 回读正常，非白屏）；Liquid Glass L2 折射克隆层 / L3 WebGL 透镜已实现（SPEC-003），周末三档前端批已落地（SPEC-004）；登录态改**广播 + 消费确认 ack**（删 5s 轮询）、会话列表落 `chat_friends.last_ts`（只写更新行）。待办：「刷新卡顿」三档数据流待产品拍板，见 `frontend-vue/HANDOFF.md` §2.5 |
 | `docs/ui/` + `prototypes/ui-v1/` | ✅ 界面设计 `UI_READY`：聊天抽屉 v3–v10 裁决已冻结（[UI-SPEC-chat-detach-v3](docs/ui/UI-SPEC-chat-detach-v3.md)），单文件原型带三套无浏览器自检脚本 |
 
 - **状态只升不降**，推进时原地替换整表。
@@ -160,3 +160,4 @@ python -m compileall -q scraper
 2. **预筛否决的 `rule` 字段恒写 `"prescan"`**，丢失具体命中规则。需给 `ingest::PreScan::Rule` 加承载字段（纯后端，不动前端契约）。
 3. **`set_limit` 夹值语义未定**：`max_jd > 500` 时返回错误而非静默夹住，表现为「保存失败但上限已生效」。
 4. **`tests/sidecar_smoke.rs` 常年 `#[ignore]`**（需真实 Chrome + 登录态），是唯一未被门禁覆盖的集成路径。
+5. **「从未聊过的岗位」建会话**：已实现（`chat_open` / `ChatOpen{job_id}` / `chat.ChatClient.ensure()`，前端占位行点开时先建会话再换真 uid）。新 uid 取自点「立即沟通」后跳转 URL 的 `id` 参数，**不要**改成前后拉两次列表求差集。`ChatOpen` 语义已从「按公司名找会话」换成「按 jobId 建会话」，改动动过 `protocol.rs` 与 `scraper/sidecar.py` 两个高冲突单点。细节见 [`scraper/HANDOFF.md`](scraper/HANDOFF.md) §2.4.4。
