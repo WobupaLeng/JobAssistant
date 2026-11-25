@@ -38,7 +38,6 @@ import {
   EMPTY_DETAIL,
 } from '../lib_ui/job-detail-model';
 import { useDrawerPresence } from '../lib_ui/use-drawer';
-import GlassClone from './GlassClone.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -227,12 +226,8 @@ defineExpose({ patch, closeDetail, jdLoading, jdError });
 </script>
 
 <template>
-  <!-- 抽屉次序与层叠（两处都不许调换）：
-       1. 遮罩在前、面板在后 —— DOM 序决定同层先后，遮罩必须先画；
-       2. 与 L3 透镜画布的关系交给层叠上下文：面板是 `position: fixed` + `z-index: 41`，
-          自成上下文，克隆层（`.glass-clone` 的 `filter: url()`）都关在里面，不会跑到
-          窗内任何东西前面；遮罩刻意**不写死了 z-index**（见 styles/drawer.css 注），
-          只老老实实排在面板后面一层。 -->
+  <!-- 抽屉次序（不许调换）：遮罩在前、面板在后 —— DOM 序决定同层先后，遮罩必须先画。
+       遮罩刻意**不写死 z-index**（见 styles/drawer.css 注），只老老实实排在面板后面一层。 -->
   <div
     v-if="isOpen"
     class="drawer-backdrop"
@@ -243,15 +238,13 @@ defineExpose({ patch, closeDetail, jdLoading, jdError });
   <aside
     ref="panel"
     v-show="isOpen"
-    class="drawer glass-l2 hl-surface"
+    class="drawer hl-surface"
     :class="{ 'is-open': isOpen }"
     data-testid="job-detail-drawer"
     role="dialog"
     aria-label="岗位详情"
     aria-modal="false"
   >
-    <!-- L2-2 P0：面板背后窗内内容（.dashboard）的非交互折射副本（裁定 6），开合时建 / 拆。 -->
-    <GlassClone mode="backdrop" :active="isOpen" />
     <div class="drawer-head">
       <span class="card-title" data-testid="job-detail-title">{{ title }}</span>
       <span class="spacer" />

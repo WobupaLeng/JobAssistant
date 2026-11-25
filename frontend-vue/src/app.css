@@ -29,6 +29,7 @@ body,
  * 左右内边距对齐顶栏 `.topbar` 的 14px：卡片与右栏都是窗口里的玻璃块，
  * 不能贴住窗口左右边；两列之间由 gap 分隔。 */
 .app-body {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;

@@ -1341,7 +1341,7 @@ watch(
         v-show="filterOpen"
         id="scrape-filter-bar"
         ref="filterBar"
-        class="drawer glass-l2 scrape-filter-bar is-floating"
+        class="drawer scrape-filter-bar is-floating"
         :class="{ 'is-open': filterOpen }"
         data-testid="scrape-filter-bar"
         @click.stop

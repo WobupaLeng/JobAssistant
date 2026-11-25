@@ -36,10 +36,7 @@
 }
 /* 面板：右侧滑出，上下各留 12px（旧版 `inset` 写法），宽 min(560px, 100vw-24px)。
  * 层级必须高于遮罩（41 > 40），且高于 sticky 表头（jobs.css 里是 1），否则抽屉会被列表盖住。 */
-/* 同时挂 glass-l2 时，vue-glass.css（后加载）的 .glass-l2{position:relative} 会覆盖 fixed，
- * 抽屉因此落进文档流、跑到页面下方。用 .drawer.glass-l2 提高权重，保证 fixed 胜出。 */
-.drawer,
-.drawer.glass-l2 {
+.drawer {
   position: fixed;
   top: 12px;
   right: 12px;
@@ -215,7 +212,7 @@
 
 /* 左抽屉同样只写初始位移：时长与曲线在 motion.css 第 6 段统一，
  * 这里不再自带一条 220ms 的独立开场动画（否则左右两个抽屉手感不一致）。 */
-.scrape-filter-bar.glass-l2 {
+.scrape-filter-bar {
   position: fixed;
   top: 12px;
   left: 12px;

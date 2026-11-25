@@ -178,18 +178,9 @@ describe('Liquid Glass L3 透镜锚点（SPEC-003 裁定 3/5）', () => {
     return out.join('\n');
   }
 
-  it('glass-l3-canvas 锚点在 GlassCanvas.vue 且全站唯一', () => {
-    const canvas = read('frontend-vue/src/components/GlassCanvas.vue');
-    expect(canvas).toContain('data-testid="glass-l3-canvas"');
+  it('玻璃折射层已整体移除（无透镜画布锚点残留）', () => {
     const src = readTree(join(ROOT, 'frontend-vue', 'src'));
-    const hits = src.split('data-testid="glass-l3-canvas"').length - 1;
-    expect(hits).toBe(1);
-  });
-
-  it('透镜画布不吞事件（pointer-events:none 在 vue-glass.css）', () => {
-    const css = readFileSync(join(ROOT, 'frontend-vue', 'styles', 'vue-glass.css'), 'utf8');
-    expect(css).toContain('.glass-l3-canvas');
-    expect(css).toMatch(/\.glass-l3-canvas\s*\{[^}]*pointer-events:\s*none/);
+    expect(src.split('glass-l3-canvas').length - 1).toBe(0);
   });
 });
 

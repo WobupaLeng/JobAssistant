@@ -347,18 +347,18 @@
   transform: translateX(24px);
 }
 
-.scrape-filter-bar.glass-l2.is-closing {
+.scrape-filter-bar.is-closing {
   transform: translateX(-24px);
 }
 
-.sensitive-panel.glass-l2.is-closing {
+.sensitive-panel.is-closing {
   transform: translate(-50%, -50%);
 }
 
 /* 左抽屉的「打开态」：`.is-open` 由 DashboardPage 的 `filterOpen` 直接驱动，
  * 所以关闭那一帧就摘掉，位移回程立刻开播（不再等 `.is-closing`、不再排队）。
  * 节点由页面层留到 `closePanel()` 的过渡结束再卸，离场这一段看得见。 */
-.scrape-filter-bar.glass-l2.is-open {
+.scrape-filter-bar.is-open {
   transform: none;
 }
 
@@ -376,18 +376,18 @@
  * 这条边界是硬约束：同一元素的自身几何与材质只允许一个文件定义，否则同特异性
  * 覆盖会互相吃掉，改动一处会在完全无关的地方冒出来（本次已多次踩中）。
  * tests/geometry.test.ts 的 OWNERSHIP 守卫盯着它。 */
-.sensitive-panel.glass-l2 {
+.sensitive-panel {
   transition: none;
 }
 
 /* 打开态：居中原位，不缩放、不淡化。 */
-.sensitive-panel.glass-l2.is-open,
-.sensitive-panel.glass-l2.is-open.is-closing {
+.sensitive-panel.is-open,
+.sensitive-panel.is-open.is-closing {
   transform: translate(-50%, -50%);
 }
 
 /* 收起态：向右回 24px 再卸载（与岗位详情抽屉同一个方向、同一距离）。 */
-.sensitive-panel.glass-l2.is-closing {
+.sensitive-panel.is-closing {
   transform: translate(-50%, -50%) translateX(24px);
 }
 

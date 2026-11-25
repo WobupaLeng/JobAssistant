@@ -34,7 +34,7 @@ function stripComments(css: string): string {
   return css.replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
-const VUE_CSS = ['styles/vue-dashboard.css', 'styles/vue-chat.css', 'styles/vue-pages.css', 'styles/vue-glass.css'] as const;
+const VUE_CSS = ['styles/vue-dashboard.css', 'styles/vue-chat.css', 'styles/vue-pages.css'] as const;
 
 describe('computeUiScale：clamp(1, innerWidth / 1920, 1.5)', () => {
   it('五档：1200/1440/1920 → 1，2560 → 1.333，3840 → 1.5', () => {
@@ -187,7 +187,6 @@ const ALL_CSS = [
   'styles/vue-dashboard.css',
   'styles/vue-chat.css',
   'styles/vue-pages.css',
-  'styles/vue-glass.css',
   'src/app.css',
 ] as const;
 

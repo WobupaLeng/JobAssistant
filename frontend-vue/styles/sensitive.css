@@ -52,8 +52,7 @@
   border-radius: var(--radius-lg);
   /* 自身材质归本文件独占（用户口径：不需要透明）。用 --panel-solid 而不是
    * --popup-surface：后者与弹窗语义耦合，改弹窗底色会把面板一起带透。
-   * 背景继承给反射玻璃（`.glass-clone` 是 background: inherit），所以这里一旦
-   * 透，折射层跟着一起透——「不透明玻璃」只能从这里保证。 */
+   * 「不透明玻璃」只能从这里保证。 */
   background: var(--panel-solid);
   border: 1px solid var(--hairline-strong);
   box-shadow: var(--shadow-pop);
@@ -90,10 +89,6 @@
 /* 宿主同时挂 glass-l2 时，vue-glass.css（后加载）的 .glass-l2{position:relative}
  * 同特异性覆盖掉 position:fixed，面板会被压到 body 底部、视口外（打不开）。
  * 这里用更高特异性把定位钉回 fixed，不改 glass-l2 的全局语义。 */
-.sensitive-panel.glass-l2 {
-  position: fixed;
-}
-
 /* 头部：左标题区可收缩，右侧「关闭」固定。 */
 .sensitive-head {
   flex: 0 0 auto;

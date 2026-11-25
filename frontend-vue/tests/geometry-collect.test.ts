@@ -88,7 +88,6 @@ describe('契约样式表：裸 font-size px 归零', () => {
       'vue-dashboard',
       'vue-chat',
       'vue-pages',
-      'vue-glass',
     ]);
   });
 });
