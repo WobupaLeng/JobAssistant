@@ -319,13 +319,18 @@ pub async fn greet_draft(
 
 /// 把一句话术发给指定 HR。这是**真实外发动作**，前端必须先让用户确认。
 ///
+/// 可选的 `jobId`：从聊天页对着某条会话打招呼时带上它，发出去之后**顺带把该岗位
+/// 标记为已投递**。不带就得用户去岗位列表手动标一次——用户报「打招呼后没进已投递列表」。
+///
 /// `async` 的理由同 `greet_draft`：`ChatSend` 要等 sidecar 回执，
 /// 留在主线程上会让窗口在发送期间拖不动。
 #[tauri::command]
 pub async fn greet_one(
     scrape: tauri::State<'_, ScrapeState>,
+    store: tauri::State<'_, crate::commands_db::StoreState>,
     uid: String,
     text: String,
+    job_id: Option<String>,
 ) -> CmdResult<String> {
     let uid = uid.trim().to_string();
     if uid.is_empty() {
@@ -339,6 +344,8 @@ pub async fn greet_one(
         &handle,
         &crate::core::sidecar::protocol::Command::ChatSend { uid, text },
     )?;
+    // 发出去才算投递：标记放在回执之后，sidecar 报错时不会留下「没发却已投递」的脏记录。
+    let _ = crate::commands_chat::mark_delivered(&store, job_id);
     Ok(data
         .get("text")
         .and_then(|v| v.as_str())

@@ -3,7 +3,9 @@
 //! 判断顺序**必须与 Python 严格一致**：最先命中的规则决定用户的"排除原因"文案，
 //! 调整顺序会改变界面提示，属于静默行为变更。
 
-use crate::core::domain::parse::{exp_required_re, hr_active_days, parse_salary};
+use crate::core::domain::parse::{
+    exp_required_re, hr_active_days, parse_salary, salary_out_of_range,
+};
 use crate::core::domain::profile::Profile;
 use regex::Regex;
 use std::sync::OnceLock;
@@ -42,6 +44,9 @@ pub struct ExcludeRules {
     pub exclude_salary_min: Option<u32>,
     /// 岗位薪资上限高于此值(K) → 排除
     pub exclude_salary_max: Option<u32>,
+    /// 用户勾选的薪资区间（K，闭区间）：岗位薪资与**任何一档都不相交**即排除。
+    /// 空表 = 未勾选，不限制。
+    pub salary_ranges: Vec<(u32, u32)>,
     /// JD 硬卡这些学历 → 排除，如 ["硕士","博士"]
     pub exclude_degree: Vec<String>,
     /// 公司成立年限小于此年数 → 排除
@@ -61,6 +66,7 @@ impl Default for ExcludeRules {
             name_words: VETO_NAME_WORDS.iter().map(|s| s.to_string()).collect(),
             exclude_salary_min: None,
             exclude_salary_max: None,
+            salary_ranges: Vec::new(),
             exclude_degree: Vec::new(),
             exclude_founded_below: None,
             exclude_resume_max_years: None,
@@ -416,7 +422,38 @@ pub fn reject_labeled(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<(&'sta
         }
     }
 
+    // 11. 勾选薪资区间：Boss 服务端只按官方粗档过滤（20-30K 会落到 20-50K 档），
+    //     这里按岗位卡片上的真实薪资做精确求交，不相交即排除（同旧版口径）。
+    if !rules.salary_ranges.is_empty() {
+        if let Some((low, high)) = parse_salary(job.salary) {
+            if salary_out_of_range(job.salary, &rules.salary_ranges) {
+                return Some((
+                    "salary_range",
+                    format!(
+                        "薪资 {low}-{high}K 不在勾选区间 {} 内",
+                        describe_salary_ranges(&rules.salary_ranges)
+                    ),
+                ));
+            }
+        }
+    }
+
     None
+}
+
+/// 勾选区间给人看的写法：`15-30K / 40-60K / 50K以上`。
+fn describe_salary_ranges(ranges: &[(u32, u32)]) -> String {
+    ranges
+        .iter()
+        .map(|&(lo, hi)| {
+            if hi >= 9000 {
+                format!("{lo}K以上")
+            } else {
+                format!("{lo}-{hi}K")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" / ")
 }
 
 /// 分数是否达到门槛。`profile` 参数为将来画像可配置预留。
@@ -487,6 +524,31 @@ mod tests {
         let r = ExcludeRules::default();
         let j = job("某科技", "Java 工程师", "要求 985 院校毕业");
         assert!(reject(&j, &r).unwrap().contains("985"));
+    }
+
+    #[test]
+    fn salary_ranges_reject_non_overlapping_job() {
+        let mut r = ExcludeRules::default();
+        r.salary_ranges = vec![(15, 30)];
+        let mut j = job("某科技", "Java 工程师", "写代码");
+        j.salary = Some("45-55K");
+        let (rule, reason) = reject_labeled(&j, &r).expect("薪资不在勾选区间必须否决");
+        assert_eq!(rule, "salary_range");
+        assert!(reason.contains("不在勾选区间 15-30K"), "实际：{reason}");
+    }
+
+    #[test]
+    fn salary_ranges_keep_overlapping_and_negotiable() {
+        let mut r = ExcludeRules::default();
+        r.salary_ranges = vec![(15, 30), (40, 60)];
+        let mut j = job("某科技", "Java 工程师", "写代码");
+        j.salary = Some("28-35K");
+        assert_eq!(reject_labeled(&j, &r), None, "与 15-30K 有交集必须放行");
+        j.salary = Some("面议");
+        assert_eq!(reject_labeled(&j, &r), None, "面议不参与区间否决");
+        r.salary_ranges = Vec::new();
+        j.salary = Some("1-2K");
+        assert_eq!(reject_labeled(&j, &r), None, "未勾选区间不限制");
     }
 
     #[test]

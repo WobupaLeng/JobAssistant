@@ -139,8 +139,9 @@ impl SidecarHandle {
         cfg: &SidecarConfig,
         ready_timeout: Duration,
     ) -> Result<(Self, Receiver<SidecarEvent>), SidecarError> {
+        let frozen = cfg.bundled.is_some();
         let script = cfg.script();
-        if !script.is_file() {
+        if !frozen && !script.is_file() {
             return Err(SidecarError::Spawn {
                 program: script.display().to_string(),
                 source: std::io::Error::new(
@@ -152,10 +153,12 @@ impl SidecarHandle {
 
         let program = cfg.program();
         let mut cmd = Command::new(&program);
-        cmd.arg(&script)
-            // 强制无缓冲：否则 Python 的 stdout 缓冲会让 Rust 侧一直等不到行
-            .arg("-u")
-            .env("PYTHONIOENCODING", "utf-8")
+        if !frozen {
+            cmd.arg(&script)
+                // 强制无缓冲：否则 Python 的 stdout 缓冲会让 Rust 侧一直等不到行
+                .arg("-u");
+        }
+        cmd.env("PYTHONIOENCODING", "utf-8")
             .env("PYTHONUTF8", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

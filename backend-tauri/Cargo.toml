@@ -41,6 +41,9 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# Windows.UI.Composition 的 HostBackdropBrush：在窗口内容下方画圆角桌面模糊。
+# 旧的 accent/Mica 在 Tauri 透明窗上实测只返回成功、不出效果，只保留为回退。
+haze = "0.3"
 
 [features]
 # 与 Tauri 模板保持一致：生产构建走自定义协议，避免 CSP 报错

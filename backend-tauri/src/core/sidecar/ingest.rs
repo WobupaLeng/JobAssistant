@@ -357,6 +357,7 @@ fn rule_ident(rule: &str) -> &'static str {
         "founded",
         "salary_floor",
         "salary_ceiling",
+        "salary_range",
         "prescan",
         "sensitive",
         "duplicate",

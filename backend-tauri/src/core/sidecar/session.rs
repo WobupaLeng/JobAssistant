@@ -12,7 +12,7 @@
 //! 依赖注入用闭包而不是直接收 `SqliteStore`：本模块因此不依赖 `rusqlite`，
 //! 单测可以用内存计数器替代真实数据库，验证「达标才写、重复不写」的判定链。
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -230,6 +230,16 @@ pub struct SidecarSession {
     /// app 层决定（core 不擅自复活子进程），此计数保留给 app 层回写。
     restarts: Arc<AtomicU64>,
     join: Option<std::thread::JoinHandle<()>>,
+    /// 入库口径（门槛 + 排除词）。**共享可变**：暂停后再「继续抓取」复用同一个
+    /// 会话时，用户新设的门槛必须跟着换，否则界面显示 70 分、实际仍按旧门槛入库。
+    icfg: Arc<Mutex<IngestConfig>>,
+    /// 「最多 JD 条数」。数的是本次抓取**真正进待投递列表**的条数（用户 m01540），
+    /// 0 = 不限。由 `send(ScrapeStart)` 从命令里抄下来，`consume` 每条入库后比对，
+    /// 到点自己停——sidecar 侧只认候选卡片数，不知道该不该入库。
+    max_jd: Arc<AtomicU32>,
+    /// 上限已触发过。**跨轮共享**：同一会话里再点一次「开始抓取」时，
+    /// `send()` 会把它清零，否则第二轮永远到不了上限。
+    cap_hit: Arc<AtomicBool>,
 }
 
 impl SidecarSession {
@@ -256,14 +266,35 @@ impl SidecarSession {
         let (tx, rx) = mpsc::channel::<SessionUpdate>();
         let stop_requested = Arc::new(AtomicBool::new(false));
         let restarts = Arc::new(AtomicU64::new(0));
+        let icfg = Arc::new(Mutex::new(icfg));
+        let max_jd = Arc::new(AtomicU32::new(0));
+        let cap_hit = Arc::new(AtomicBool::new(false));
 
         let join = {
             let progress = Arc::clone(&progress);
             let stop = Arc::clone(&stop_requested);
+            let icfg = Arc::clone(&icfg);
+            let max_jd = Arc::clone(&max_jd);
+            let cap_hit = Arc::clone(&cap_hit);
+            // 到点要发 `scrape.stop`，句柄得跟着进消费线程（`send` 只写 stdin，线程安全）
+            let cap_handle = handle.clone();
             std::thread::Builder::new()
                 .name("sidecar-session".into())
                 .spawn(move || {
-                    consume(events, progress, tx, profile, icfg, sink, lookup, stop);
+                    consume(
+                        events,
+                        progress,
+                        tx,
+                        profile,
+                        icfg,
+                        sink,
+                        lookup,
+                        stop,
+                        max_jd,
+                        cap_hit,
+                        // 类型是 `Option`，只为单测能传 `None`（测试里没有真句柄）。
+                        Some(cap_handle),
+                    );
                 })
                 .map_err(|e| SidecarError::Spawn {
                     program: "sidecar-session".into(),
@@ -278,11 +309,27 @@ impl SidecarSession {
             stop_requested,
             restarts,
             join: Some(join),
+            icfg,
+            max_jd,
+            cap_hit,
         })
     }
 
     pub fn pid(&self) -> u32 {
         self.handle.pid()
+    }
+
+    /// 子进程是否还活着。应用层据此决定「复用现有会话」还是「重新拉起」——
+    /// 每次抓取都重建进程会把用户已登录的浏览器一起关掉。
+    pub fn is_alive(&self) -> bool {
+        self.handle.is_alive()
+    }
+
+    /// 换掉入库口径（门槛 / 排除词）。只在**复用**同一会话下发新一轮抓取时调用。
+    pub fn set_ingest(&self, cfg: IngestConfig) {
+        if let Ok(mut c) = self.icfg.lock() {
+            *c = cfg;
+        }
     }
 
     /// 发命令（`scrape.start` / `scrape.stop` / `login.start` / `session.open`）。
@@ -292,7 +339,11 @@ impl SidecarSession {
     /// 「扫码登录」（一个岗位都没在抓），界面却显示「抓取中」，还会让
     /// `stop()` 把 `finished_reason` 写成「用户停止」——诊断信息全是假的。
     pub fn send(&self, cmd: &Command) -> Result<String, SidecarError> {
-        if matches!(cmd, Command::ScrapeStart { .. }) {
+        if let Command::ScrapeStart { max_jd, .. } = cmd {
+            // 「最多 JD 条数」按本次抓取**真正进待投递列表**的条数算（用户 m01540）：
+            // 到点由消费线程的 `maybe_stop_at_cap` 发停止，这里只记下上限。
+            self.max_jd.store(*max_jd, Ordering::SeqCst);
+            self.cap_hit.store(false, Ordering::SeqCst);
             if let Ok(mut p) = self.progress.lock() {
                 p.running = true;
                 p.finished_reason = None;
@@ -423,16 +474,59 @@ impl Drop for SidecarSession {
     }
 }
 
+/// 「最多 JD 条数」到点就发 `scrape.stop`。原因只能在这里判：入库与否是
+/// Rust 侧 `handle_job` 的判定结果，sidecar 只有候选卡片，不知道几条真进了待投递列表。
+///
+/// 触发一次即锁存（`cap_hit`），否则同一轮里每条入库都会再发一遍停止。
+fn maybe_stop_at_cap(
+    progress: &Arc<Mutex<ScrapeProgress>>,
+    max_jd: &AtomicU32,
+    cap_hit: &AtomicBool,
+    stop_handle: &Option<SidecarHandle>,
+) -> bool {
+    let limit = max_jd.load(Ordering::SeqCst);
+    if limit == 0 || cap_hit.load(Ordering::SeqCst) {
+        return false;
+    }
+    let inserted = match progress.lock() {
+        Ok(p) => p.inserted,
+        Err(_) => return false,
+    };
+    // 重复 / 低于门槛 / 被规则否决 / 写库失败都不进 `inserted`，正好对上用户口径
+    if inserted < limit {
+        return false;
+    }
+    if cap_hit.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    // 先写原因再停：`scrape.finished` 那条有 `running` 守卫，后到的帧不会把
+    // 「到上限」盖成「抓取完成」。
+    if let Ok(mut p) = progress.lock() {
+        if p.running {
+            p.running = false;
+            p.finished_reason = Some(format!("已达到最多 {limit} 条上限，本次抓取结束"));
+        }
+    }
+    if let Some(h) = stop_handle {
+        // 发不出去也不重试：进程没了就等于已经停了
+        let _ = h.send(&Command::ScrapeStop);
+    }
+    true
+}
+
 /// 消费线程主体。**唯一负责**把事件变成入库动作的地方。
 fn consume(
     events: Receiver<SidecarEvent>,
     progress: Arc<Mutex<ScrapeProgress>>,
     tx: Sender<SessionUpdate>,
     profile: Profile,
-    icfg: IngestConfig,
+    icfg: Arc<Mutex<IngestConfig>>,
     mut sink: impl IngestPort,
     mut lookup: impl SensitiveLookup,
     stop: Arc<AtomicBool>,
+    max_jd: Arc<AtomicU32>,
+    cap_hit: Arc<AtomicBool>,
+    stop_handle: Option<SidecarHandle>,
 ) {
     // 用户点「停止」后，抓取线程最多 0.2 s 收尾，之后 sidecar 还会补发
     // 一两条日志。这里不靠它结束循环——结束只认 Exited，否则崩在半路的
@@ -462,12 +556,30 @@ fn consume(
                 }
             }
             SidecarEvent::Event(Event::JobScraped(sj)) => {
-                handle_job(&progress, &tx, &profile, &icfg, &mut sink, &mut lookup, sj);
+                // 每条现取一次口径：复用会话时用户可能刚改过门槛（`set_ingest`）。
+                let cfg = icfg
+                    .lock()
+                    .map(|c| c.clone())
+                    .unwrap_or_else(|e| e.into_inner().clone());
+                handle_job(&progress, &tx, &profile, &cfg, &mut sink, &mut lookup, sj);
+                if maybe_stop_at_cap(&progress, &max_jd, &cap_hit, &stop_handle) {
+                    let _ = tx.send(SessionUpdate::Log {
+                        level: "info".into(),
+                        msg: format!(
+                            "已达到最多 {} 条上限，停止抓取",
+                            max_jd.load(Ordering::SeqCst)
+                        ),
+                    });
+                }
             }
             SidecarEvent::Event(Event::Log { level, msg }) => {
                 if let Ok(mut p) = progress.lock() {
                     p.last_log = Some(format!("[{level}] {msg}"));
                 }
+                // 日志必须在这里落一次全局环：`SessionUpdate` 只有前端主动
+                // `scrape_drain` 时才被消费，空闲态（登录/聊天）根本不 drain，
+                // 日志页与仪表盘就会永远是空框。
+                crate::commands_logs::push(&level, &msg);
                 let _ = tx.send(SessionUpdate::Log { level, msg });
             }
             SidecarEvent::Event(Event::LoginState {
@@ -860,7 +972,7 @@ mod tests {
             Arc::clone(&progress),
             tx,
             DEFAULT_PROFILE.clone(),
-            IngestConfig::default(),
+            Arc::new(Mutex::new(IngestConfig::default())),
             Ports::new(
                 |_: &Job| Ok(false),
                 |_: &SensitiveEntry<'_>| {},
@@ -868,6 +980,9 @@ mod tests {
             ),
             NoSensitive,
             Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicU32::new(0)),
+            Arc::new(AtomicBool::new(false)),
+            None,
         );
         assert!(
             !progress.lock().unwrap().running,
@@ -896,7 +1011,7 @@ mod tests {
             Arc::clone(&progress),
             tx,
             DEFAULT_PROFILE.clone(),
-            IngestConfig::default(),
+            Arc::new(Mutex::new(IngestConfig::default())),
             Ports::new(
                 |_: &Job| Ok(false),
                 |_: &SensitiveEntry<'_>| {},
@@ -904,6 +1019,9 @@ mod tests {
             ),
             NoSensitive,
             Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicU32::new(0)),
+            Arc::new(AtomicBool::new(false)),
+            None,
         );
         let snap = progress.lock().unwrap().clone();
         assert_eq!(snap.login_state, "logged_in");
@@ -1237,6 +1355,44 @@ mod tests {
     // 缺陷现场：sidecar 抓完只 log「抓取结束」，仍守在 stdin 上不发 Exited，
     // Rust 侧 running 永远 true，界面永停「抓取中」直到用户手动停止。
 
+    /// 「最多 JD 条数」只在**真正进待投递列表**的条数达到上限时停（用户 m01540）：
+    /// 重复、低于门槛、被规则否决、写库失败都不算，`inserted` 天然就是这个口径。
+    #[test]
+    fn max_jd_cap_counts_only_inserted() {
+        let progress = Arc::new(Mutex::new(ScrapeProgress::new()));
+        progress.lock().unwrap().running = true;
+        let max_jd = AtomicU32::new(2);
+        let cap_hit = AtomicBool::new(false);
+
+        // 还没到上限：不动它，哪怕重复数攒了一堆
+        {
+            let mut p = progress.lock().unwrap();
+            p.inserted = 1;
+            p.duplicates = 9;
+        }
+        assert!(!maybe_stop_at_cap(&progress, &max_jd, &cap_hit, &None));
+        assert!(progress.lock().unwrap().running, "没到上限不许停");
+
+        // 到上限：写原因、退出「抓取中」、锁存
+        progress.lock().unwrap().inserted = 2;
+        assert!(maybe_stop_at_cap(&progress, &max_jd, &cap_hit, &None));
+        let snap = progress.lock().unwrap().clone();
+        assert!(!snap.running);
+        assert_eq!(
+            snap.finished_reason.as_deref(),
+            Some("已达到最多 2 条上限，本次抓取结束")
+        );
+        assert!(
+            !maybe_stop_at_cap(&progress, &max_jd, &cap_hit, &None),
+            "锁存后不许反复触发"
+        );
+
+        // 0 = 不限
+        let off = AtomicU32::new(0);
+        let hit = AtomicBool::new(false);
+        assert!(!maybe_stop_at_cap(&progress, &off, &hit, &None));
+    }
+
     /// 直接喂事件给 consume（与 ready/login 用例同风格）。
     fn consume_events(
         events: Vec<SidecarEvent>,
@@ -1255,10 +1411,10 @@ mod tests {
             Arc::clone(progress),
             tx,
             DEFAULT_PROFILE.clone(),
-            IngestConfig {
+            Arc::new(Mutex::new(IngestConfig {
                 min_score: 0,
                 ..Default::default()
-            },
+            })),
             Ports::new(
                 move |_: &Job| Ok(put_ok),
                 |_: &SensitiveEntry<'_>| {},
@@ -1266,6 +1422,9 @@ mod tests {
             ),
             NoSensitive,
             stop,
+            Arc::new(AtomicU32::new(0)),
+            Arc::new(AtomicBool::new(false)),
+            None,
         );
     }
 

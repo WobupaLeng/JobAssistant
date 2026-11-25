@@ -21,6 +21,8 @@
 
 **抓取自然完成信号已接线**（本轮 fix(sidecar)）：协议新增 `scrape.finished` 事件（`{count,stopped,error}`，additive，Envelope 三帧形状不变）；`session.rs` consume 收到即 `running=false` 并按帧写 `finished_reason`（`stopped`→「已按用户请求停止」；`error` 非空→「抓取异常结束：…」；否则「抓取完成，共 N 条」，N 用 Rust 权威计数 `p.scraped`），五段计数保留；`if p.running` 守卫保证与手动 stop 竞态不互相覆盖原因。**consume 侧只信帧内 `stopped`，不用 `stop_requested`**——后者只在 stop/Drop 置 true 从不复位，跨轮次粘滞会把上一轮用户停止误记到新一轮自然完成。前端零改动：Dashboard 每 tick 轮询 `scrape_progress`，下一 tick 自动退出「抓取中」。真实 E2E（Java，maxJd=10，已登录真实 profile，自然跑完、全程不手动 stop）：+151s `running=false`、reason=「抓取完成，共 15 条」、scraped=15 / inserted=4 / below_threshold=6 / rejected=5 计数保留，CDP 取证顶条转「空闲」，`scrape_close` 整树回收 1.7s，硬杀 exe 后残留 0（证据 `%TEMP%\jt-running\t8\RESULT-t8.json`）。
 
+**免安装分发（内嵌 Python）已接线**（本轮 feat(release)）：`backend-tauri/scripts/pack_sidecar.py` 用 PyInstaller onedir 把 `scraper/` 打成 `backend-tauri/sidecar-dist/`（约 130 MB，含 `_internal/patchright/driver/node.exe`）；`tauri.conf.json` 的 `bundle.resources` 以 `"sidecar-dist/**/*": "sidecar-dist/"` 打进安装包。Rust 侧 `locate_bundled_sidecar`（`core/sidecar/process/config.rs`）按 `<scraper 的上级>/sidecar-dist/jobassistant-sidecar.exe` 命中即直接跑它，`handle.rs` 此时**不传 `sidecar.py`、也不做脚本存在性检查**；`resolve_script_dir`（`core/scrape/launch.rs`）在找不到 `sidecar.py` 但命中 `sidecar-dist/` 时返回合成的 `<exe>/scraper` 供定位。开发态没有该目录，自动退回 `python sidecar.py`。验证：`scraper` 冻结包 `ping` 通、`login.start` 能拉起真实 Chrome 到 `login.state waiting`；`cargo test --test sidecar_smoke -- --ignored bundled` 走 Rust 真实 spawn 通道 1.08s 握手通过。
+
 ---
 
 ## 2. 坑（踩过的，别再踩）
@@ -45,8 +47,11 @@
 - **`commands_auto.rs` 有 2 个既有 unused import 警告**（`GreetingProfile`/`DEFAULT_PROFILE`）：历史遗留，与功能提交分开清理。
 - **`tauri.conf.json` 的 `version` 是 `0.2.0`，`Cargo.toml` 是 `0.1.0`**：两者不一致，改版本号时两个文件都要动。
 - **`beforeDevCommand` / `beforeBuildCommand` 已设为 `npm --prefix ../frontend-vue run dev` / `run build`**（Vue 重写后接线；`backend-tauri/package.json` 锚 `@tauri-apps/cli` 修 cwd，否则 `../frontend-vue` 解析到仓库外 ENOENT）。`tauri.conf.json` 的 csp 仍是唯一来源（`script-src 'self'`，`wasm-unsafe-eval` 已删，见根 `AGENTS.md` 3.1）。
+- **「开始抓取」不许无脑重启 sidecar**（用户 m01094）：`commands_scrape::scrape_start` 只在会话不存在或进程已死时才 `launch_session`；活着就 `set_ingest(...)` + `send(start_command())` **复用**。旧写法每次 `guard.take()` → `shutdown()`，Job Object 连带把整棵 Chrome 树杀掉，用户每次点「开始/继续抓取」都得重新扫码。
+- **入库口径是热的，不是启动快照**：`IngestConfig` 在 `SidecarSession` 里存 `Arc<Mutex<IngestConfig>>`，`consume` 每条 `JobScraped` 现取一次快照（`set_ingest` 可随时改）。复用会话若还把阈值钉在 `start()` 的参数上，界面上改的门槛/排除词会静默不生效。
 - **`SidecarHandle` 是共享克隆，Drop 必须查 `strong_count`**：全字段 Arc 共享、手写 Clone，任一克隆出 scope 都会跑 Drop。守卫在 `process/handle.rs` 的 Drop（`strong_count(&self.child) > 1` 直接 return）；删掉守卫 = 瞬态克隆（`login_status` / `request_chat` 的 `handle_clone`）随手杀会话。回归测试 `dropping_handle_clone_keeps_sidecar_alive` 钉住此行为。
 - **Job Object 回收的是整树不是单个 child**：python + node driver + Chrome 全在 job 里，shutdown 尾部 drop job 句柄触发 `KILL_ON_JOB_CLOSE`。不要「优化」成只 kill child——那会留下持 Chrome 单例窗的孤儿。
+- **「最多入库」= 真进待投递列表的条数，计数在 Rust 侧**（用户 m01540）：sidecar 拿到的 `max_jd` 谁都不读（`ScrapeConfig` 只有 `max_pages`/`max_cards`/`daily_limit`），要不要入库只有 `ingest.rs` 知道。`session.rs` 的 `maybe_stop_at_cap` 读 `ScrapeProgress::inserted`（只由 `sink.put` 返回 `Ok(true)` 累加，重复/低于门槛/被否决/写库失败都不计），到点自己写 `finished_reason` 并置 `running=false`，再 `handle.send(ScrapeStop)`；`ScrapeFinished` 分支有 `if p.running` 守卫，后到不覆盖。**每轮 `ScrapeStart` 会清零计数并解锁 `cap_hit`**——用户口径是「当前这一次抓取」。
 
 ### 2.3 契约面
 
@@ -55,6 +60,7 @@
 - **词元三键的累计口径**：`tokens_total`/`tokens_greet`/`tokens_score` 只经 `ConfigStore::bump_tokens` SQL 侧加法累计，遗留值只增不清，非数字 CAST→0（与读侧 `num()` 同口径）。
 - **`LineParse::Ignore` 不是解析失败**：它是「这行不该冒泡」的正常分支。
 - **`session.rs` 的预筛否决 `rule` 字段恒写 `"prescan"`**：决策日志里看不出具体命中了哪条卡片规则。
+- **「已投递」只在发消息之后标记**：`chat_send` 与 `greet_one` 都走 `commands_chat::mark_delivered(store, job_id)`，且必须在 sidecar 回执之后调用——反过来会在 sidecar 报错时留下「没发却已投递」的脏记录。新增任何「替用户发消息」的命令都得接这里，漏一处就是「消息发出去了、岗位还在未投递里」（用户报：打招呼后没进已投递列表）。
 
 ### 2.4 数据库
 

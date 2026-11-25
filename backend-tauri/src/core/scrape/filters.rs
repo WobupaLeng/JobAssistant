@@ -120,7 +120,50 @@ pub fn exclude_rules_from_defaults(d: &serde_json::Value) -> ExcludeRules {
         .and_then(|s| s.parse::<u32>().ok())
         .filter(|n| *n > 0);
     r.weekend = text_of(d.get("work_weekend")).filter(|w| w != "any");
+    r.salary_ranges = salary_ranges_of(d.get("salary"));
     r
+}
+
+/// Boss 官方薪资档位（编码 → K 区间）。与 `scraper/boss.py::_BOSS_TIER_CODES` 逐项同源：
+/// 前端存 `sal:a-b`，旧库可能存裸编码（`406`），两种都要认。
+const SALARY_TIERS: [(u32, u32, &str); 6] = [
+    (0, 3, "402"),
+    (3, 5, "403"),
+    (5, 10, "404"),
+    (10, 20, "405"),
+    (20, 50, "406"),
+    (50, 9999, "407"),
+];
+
+/// `salary` 多选键 → K 区间表。`sal:a-b` 原样取；裸编码查官方档位表；
+/// 脏值丢弃（宁可放行，也不让整次抓取起不来）。
+fn salary_ranges_of(v: Option<&serde_json::Value>) -> Vec<(u32, u32)> {
+    let mut out: Vec<(u32, u32)> = Vec::new();
+    for raw in list_of(v) {
+        let code = raw.trim();
+        let range = if let Some(rest) = code.strip_prefix("sal:") {
+            rest.split_once('-')
+                .and_then(|(a, b)| {
+                    Some((
+                        a.trim().parse::<u32>().ok()?,
+                        b.trim().parse::<u32>().ok()?,
+                    ))
+                })
+                .filter(|(lo, hi)| hi > lo)
+                .map(|(lo, hi)| (lo, hi.min(9999)))
+        } else {
+            SALARY_TIERS
+                .iter()
+                .find(|(_, _, c)| *c == code)
+                .map(|&(lo, hi, _)| (lo, hi))
+        };
+        if let Some(range) = range {
+            if !out.contains(&range) {
+                out.push(range);
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -166,6 +209,16 @@ mod tests {
         assert_eq!(f.industry, vec!["100020"]);
         assert_eq!(f.job_type.as_deref(), Some("1901"));
         assert_eq!(f.max_pages, Some(3));
+    }
+
+    #[test]
+    fn salary_multi_select_maps_to_exact_ranges() {
+        // 前端存 sal:a-b；裸编码是旧库 / 手工改库的写法，两种都要认
+        let d = serde_json::json!({"salary": ["sal:18-25", "406", "407", "sal:bad", "999", "sal:30-20"]});
+        let r = exclude_rules_from_defaults(&d);
+        assert_eq!(r.salary_ranges, vec![(18, 25), (20, 50), (50, 9999)]);
+        // 与 filters 下发给 sidecar 的 salary 编码互不影响
+        assert_eq!(filters_from_defaults(&d).salary.len(), 6);
     }
 
     #[test]

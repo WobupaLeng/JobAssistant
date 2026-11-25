@@ -29,6 +29,28 @@ fn idle_progress_without_reason_gets_one() {
     assert_eq!(q.finished_reason.as_deref(), Some("已按用户请求停止"));
 }
 
+/// 打包态没有 sidecar.py，只有 `sidecar-dist/jobassistant-sidecar.exe`：
+/// 目录解析必须给一个合成的 `scraper/`，否则启动在解析阶段就失败。
+#[test]
+fn resolve_script_dir_accepts_bundled_sidecar_layout() {
+    let root = std::env::temp_dir().join(format!("aja-bundled-resolve-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dist = root.join("sidecar-dist");
+    std::fs::create_dir_all(&dist).expect("建 sidecar-dist");
+    let exe_name = if cfg!(windows) {
+        "jobassistant-sidecar.exe"
+    } else {
+        "jobassistant-sidecar"
+    };
+    std::fs::write(dist.join(exe_name), b"stub").expect("写占位 exe");
+
+    let manifest = root.join("no-such-manifest");
+    let got = resolve_script_dir(Some(root.clone()), &manifest).expect("打包态应解析成功");
+    assert_eq!(got, root.join("scraper"));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 // ---------- 崩溃重启的四种情形（SPEC-002 第 7 节） ----------
 
 fn exited(reason: &str) -> ScrapeProgress {

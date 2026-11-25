@@ -343,6 +343,35 @@ fn message_to_row(m: &ChatMessage) -> Option<ChatMessageRow> {
     })
 }
 
+/// 消息已经发出去之后，顺带把岗位标进「已投递」，返回**真正标记成功**的岗位 id。
+///
+/// 三处发消息的命令（`chat_send` / `greet_one` / 将来新增的）都走这里：漏一处就会出现
+/// 「消息发出去了、岗位还在未投递里」的错位（用户报：打招呼后没进已投递列表）。
+///
+/// 不冒泡：消息已经在 Boss 那边了，把「标记失败」当错误会让用户以为没发出去。
+pub(crate) fn mark_delivered(
+    store: &tauri::State<'_, crate::commands_db::StoreState>,
+    job_id: Option<String>,
+) -> String {
+    let Some(id) = job_id
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    else {
+        return String::new();
+    };
+    match with_store(store, |s| {
+        s.set_delivered(&[id.clone()], true).map_err(store_err)
+    }) {
+        Ok(n) if n > 0 => id,
+        Ok(_) => String::new(),
+        Err(e) => {
+            eprintln!("[chat] 标记已投递失败：{e}");
+            crate::commands_logs::push("warn", format!("标记已投递失败：{e}"));
+            String::new()
+        }
+    }
+}
+
 /// 发送一条文本消息。
 ///
 /// **这是唯一会真的把内容发出去的命令**。前端必须先让用户确认，不得自动触发。
@@ -367,24 +396,7 @@ pub async fn chat_send(
     }
     let handle = handle_of(&state)?;
     let data = request_chat(&handle, &Command::ChatSend { uid, text })?;
-    let mut marked = String::new();
-    if let Some(id) = job_id
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-    {
-        use crate::core::domain::store_ports::JobAdminStore;
-        match with_store(&store, |s| {
-            s.set_delivered(&[id.clone()], true).map_err(store_err)
-        }) {
-            Ok(n) if n > 0 => marked = id,
-            Ok(_) => marked = String::new(),
-            Err(e) => {
-                // 不冒泡：消息已发出，把「标记失败」当成错误会让用户以为没发出去
-                eprintln!("[chat] 标记已投递失败：{e}");
-                crate::commands_logs::push("warn", format!("标记已投递失败：{e}"));
-            }
-        }
-    }
+    let marked = mark_delivered(&store, job_id);
     Ok(SendReply {
         text: data
             .get("text")

@@ -19,6 +19,8 @@ app/src-tauri/
   src/                      见下
 ```
 
+`scripts/pack_sidecar.py` 打包态辅助脚本：PyInstaller onedir 产出 `backend-tauri/sidecar-dist/`（约 130 MB，gitignore），`tauri.conf` 的 `bundle.resources` 用 glob `sidecar-dist/**/*` 打进安装包。**resources 写成字面量目录会让 `cargo test` 的 build script 直接报 `resource path ... doesn't exist`**，必须留 glob 形式。
+
 `src/` 五个部分：
 
 | 部分 | 职责 | 一句话 |

@@ -35,7 +35,10 @@ mod job;
 mod tests;
 
 pub use codec::{parse_line, protocol_line, LineParse};
-pub use config::{locate_script_dir, SidecarConfig, DEFAULT_READY_TIMEOUT, PYTHON_ENV};
+pub use config::{
+    locate_bundled_sidecar, locate_script_dir, SidecarConfig, BUNDLED_SIDECAR,
+    BUNDLED_SIDECAR_DIR, DEFAULT_READY_TIMEOUT, PYTHON_ENV,
+};
 pub use handle::{SidecarError, SidecarEvent, SidecarHandle};
 
 // 回执类型与读线程既被 `handle` 用、也被 `codec` 用，公开面只有

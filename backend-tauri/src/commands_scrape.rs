@@ -261,9 +261,8 @@ pub fn to_update_reply(u: SessionUpdate) -> UpdateReply {
             }
         }
         SessionUpdate::Log { level, msg } => {
-            // sidecar 的日志此前只返回给界面而被丢弃，这里同步进全局环形缓冲，
-            // 让日志页与仪表盘能看到抓取/登录/聊天过程中的运行信息。
-            crate::commands_logs::push(&level, &msg);
+            // 环形缓冲在 `core::sidecar::session` 收帧时就已写入（空闲态也要可见），
+            // 这里只负责把增量回给前端，不再重复 push。
             UpdateReply::Log { level, msg }
         }
         SessionUpdate::Login { state, msg } => UpdateReply::Login { state, msg },
@@ -319,14 +318,6 @@ pub fn scrape_start(
         ));
     }
 
-    // 旧会话必须先关干净：两个 python 抢同一个浏览器 profile 会直接失败
-    {
-        let mut guard = state.0.lock().map_err(|_| "抓取锁已中毒".to_string())?;
-        if let Some(mut old) = guard.take() {
-            old.shutdown();
-        }
-    }
-
     let spec = ScrapeJobSpec {
         script_dir,
         platform: args.platform.clone().unwrap_or_else(|| "boss".to_string()),
@@ -336,13 +327,48 @@ pub fn scrape_start(
         filters: scrape::filters_from_defaults(&defaults),
         rules: scrape::exclude_rules_from_defaults(&defaults),
     };
-    let mut session = scrape::launch_session(&spec, store)?;
-    let pid = session.pid();
 
-    if let Err(e) = session.send(&spec.start_command()) {
-        session.shutdown();
-        return Err(format!("发送抓取命令失败：{e}"));
-    }
+    // 会话活着就**复用**：它手里已经是一个登着 Boss 的浏览器，杀掉重开会把
+    // 用户逼回去重新扫码（用户报：开始抓取会关闭浏览器再次打开登录）。
+    // 只有进程真的没了（首次 / 崩溃后）才拉新进程——两个 python 抢同一个
+    // 浏览器 profile 会直接失败，所以「复用」这一支绝不能出现第二个进程。
+    // 复用分支只在锁内做「发命令」，因为启动新进程要等 sidecar 发 ready
+    // （最长十几秒，期间聊天命令都在等同一把锁）。
+    let reused = {
+        let guard = state.0.lock().map_err(|_| "抓取锁已中毒".to_string())?;
+        match guard.as_ref() {
+            Some(s) if s.is_alive() => {
+                // 门槛 / 排除词是 Rust 侧入库口径，换一轮就要换一份。
+                s.set_ingest(scrape::ingest_config_for(&spec));
+                s.send(&spec.start_command())
+                    .map_err(|e| format!("发送抓取命令失败：{e}"))?;
+                Some(s.pid())
+            }
+            _ => None,
+        }
+    };
+
+    let pid = match reused {
+        Some(pid) => pid,
+        None => {
+            let stale = {
+                let mut guard = state.0.lock().map_err(|_| "抓取锁已中毒".to_string())?;
+                guard.take()
+            };
+            if let Some(mut old) = stale {
+                old.shutdown();
+            }
+            let mut session = scrape::launch_session(&spec, store)?;
+            let pid = session.pid();
+            if let Err(e) = session.send(&spec.start_command()) {
+                session.shutdown();
+                return Err(format!("发送抓取命令失败：{e}"));
+            }
+            let mut guard = state.0.lock().map_err(|_| "抓取锁已中毒".to_string())?;
+            *guard = Some(session);
+            pid
+        }
+    };
 
     // 前端需要拿到窗口句柄来收事件推送；这里只做「让 app 保持存活」的兜底，
     // 真正的进度轮询走 scrape_progress，避免依赖 Tauri 事件通道是否被前端监听。
@@ -353,9 +379,6 @@ pub fn scrape_start(
     if let Ok(mut g) = LAST_SPEC.lock() {
         *g = Some(spec);
     }
-
-    let mut guard = state.0.lock().map_err(|_| "抓取锁已中毒".to_string())?;
-    *guard = Some(session);
 
     Ok(ScrapeReply {
         pid,

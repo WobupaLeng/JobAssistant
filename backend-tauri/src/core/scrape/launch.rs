@@ -7,7 +7,7 @@ use crate::core::domain::profile::DEFAULT_PROFILE;
 use crate::core::domain::rules::ExcludeRules;
 use crate::core::infra::SqliteStore;
 use crate::core::sidecar::ingest::IngestConfig;
-use crate::core::sidecar::process::SidecarConfig;
+use crate::core::sidecar::process::{locate_bundled_sidecar, SidecarConfig};
 use crate::core::sidecar::protocol::Command;
 use crate::core::sidecar::session::SidecarSession;
 
@@ -29,14 +29,24 @@ pub fn resolve_script_dir(
     // （找不到 sidecar.py / python 不在 PATH / ready 超时）全在这行里。
     // 历史上 sidecar 静默死亡就是因为没人把这行打出来。
     eprintln!("[sidecar] 解析目录 exe_dir={exe_dir:?} manifest={}", manifest_dir.display());
-    crate::core::sidecar::process::locate_script_dir(exe_dir.as_deref(), manifest_dir)
-        .ok_or_else(|| {
-            format!(
-                "找不到 scraper/sidecar.py（已查 exe 同级与 {} 的上级目录）。\
-                 开发态请在仓库根启动；打包态请确认 scraper/ 随应用发布。",
-                manifest_dir.display()
-            )
-        })
+    let located = crate::core::sidecar::process::locate_script_dir(exe_dir.as_deref(), manifest_dir);
+    if let Some(dir) = located {
+        return Ok(dir);
+    }
+    // 打包态不发布 sidecar.py：只有 sidecar-dist/jobassistant-sidecar.exe。
+    // 这里给它一个合成的 `scraper/` 路径，`launch_session` 会据父目录找到 sidecar-dist，
+    // 此时 script_dir 本身不会被读取。
+    if let Some(exe) = &exe_dir {
+        let synthetic = exe.join("scraper");
+        if crate::core::sidecar::process::locate_bundled_sidecar(&synthetic).is_some() {
+            return Ok(synthetic);
+        }
+    }
+    Err(format!(
+        "找不到 scraper/sidecar.py（已查 exe 同级与 {} 的上级目录）。\
+         开发态请在仓库根启动；打包态请确认 sidecar-dist/ 随应用发布。",
+        manifest_dir.display()
+    ))
 }
 
 /// 一次抓取任务的快照：崩溃重启时要照着原样再下发一遍。
@@ -93,12 +103,10 @@ pub fn launch_session(
         // data_dir 让 sidecar 用默认值（与现行版共用 %LOCALAPPDATA%\ai-job-assistant）。
         // 改成别处会让用户被迫重新扫码登录。
         data_dir: None,
+        // 打包态优先跑内嵌解释器的 sidecar.exe；开发态返回 None，走 python。
+        bundled: locate_bundled_sidecar(&spec.script_dir),
     };
-    let icfg = IngestConfig {
-        min_score: spec.min_score,
-        // 用户自定义排除词在此生效：不再恒用 ExcludeRules::default()
-        rules: spec.rules.clone(),
-    };
+    let icfg = ingest_config_for(spec);
     SidecarSession::start(
         scfg,
         DEFAULT_PROFILE.clone(),
@@ -110,6 +118,18 @@ pub fn launch_session(
         eprintln!("[sidecar] 启动失败：{e}");
         format!("启动抓取进程失败：{e}")
     })
+}
+
+/// 本轮抓取的入库口径（门槛 + 排除词）。
+///
+/// 抽成 `pub` 的理由：复用已在跑的会话下发新一轮抓取时，要用它更新会话手里的
+/// 口径（`SidecarSession::set_ingest`），不能各自拼一遍——两处各写一份迟早分叉。
+pub fn ingest_config_for(spec: &ScrapeJobSpec) -> IngestConfig {
+    IngestConfig {
+        min_score: spec.min_score,
+        // 用户自定义排除词在此生效：不再恒用 ExcludeRules::default()
+        rules: spec.rules.clone(),
+    }
 }
 
 /// 确保 `guard` 里有一个活着的 sidecar 会话，返回它的 pid。

@@ -39,7 +39,9 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "resources": [],
+    "resources": {
+      "sidecar-dist/**/*": "sidecar-dist/"
+    },
     "windows": {
       "nsis": {
         "installMode": "currentUser"

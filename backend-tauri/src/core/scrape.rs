@@ -36,7 +36,8 @@ mod tests;
 
 pub use filters::{exclude_rules_from_defaults, filters_from_defaults, ScrapeFilters};
 pub use launch::{
-    ensure_session_locked, launch_session, resolve_script_dir, ScrapeJobSpec, DEFAULT_PLATFORM,
+    ensure_session_locked, ingest_config_for, launch_session, resolve_script_dir, ScrapeJobSpec,
+    DEFAULT_PLATFORM,
 };
 pub use restart::{
     finalize_idle_progress, finish_restart, give_up_reason, plan_restart, restart_decision,

@@ -75,6 +75,33 @@ fn window_close(window: tauri::WebviewWindow) -> Result<(), String> {
     window.close().map_err(|e| e.to_string())
 }
 
+/// 主题切换后按新主题重刷窗口模糊底色。
+///
+/// 只有 accent 链会带 tint；Haze 的 `HostBackdropBrush` 是纯模糊、不叠色，
+/// 挂上时什么都不做——重刷 accent 会把 `HostBackdropBrush` 覆盖掉。
+fn refresh_window_tint(window: &tauri::WebviewWindow, theme: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        use tauri::Manager as _;
+        if let Some(st) = window.app_handle().try_state::<HazeState>() {
+            let attached = st.0.lock().map(|g| g.is_some()).unwrap_or(false);
+            if attached {
+                return;
+            }
+        }
+    }
+    apply_blur(window, theme);
+}
+
+/// 前端挂载与切主题时调用：让窗口模糊底色跟 `data-theme` 走。
+///
+/// 深色档是深蓝黑；浅色主题若不换成近白档，整窗会被压成灰蓝（「浅色不够透亮」）。
+#[tauri::command]
+fn set_window_theme(window: tauri::WebviewWindow, theme: String) -> Result<(), String> {
+    refresh_window_tint(&window, theme.as_str());
+    Ok(())
+}
+
 /// 前端确认「这个登录态我消费了」。
 ///
 /// 谁的确认：`platform` + `state` 必须与当前这一轮广播完全一致才算数，
@@ -98,11 +125,51 @@ fn login_ack(platform: String, state: String) -> Result<usize, String> {
 /// 该函数未文档化，`windows-sys` 不导出，所以按 `window-vibrancy` 的同样做法用
 /// `GetProcAddress` 取指针。降级链：系统亚克力 → Win11 亚克力材质 → 纯色。
 /// **任何一步失败都不报错**，绝不能白屏或透明穿透（SPEC-002 V5）。
-fn apply_blur(window: &tauri::WebviewWindow) {
-    if apply_system_glass(window) {
+fn apply_blur(window: &tauri::WebviewWindow, theme: &str) {
+    if apply_system_glass(window, theme) {
         return;
     }
     eprintln!("[window] 系统玻璃不可用，降级为纯色背景");
+}
+
+/// 持有 Haze 句柄，防止挂载后的合成器对象被提前释放。
+#[cfg(target_os = "windows")]
+#[allow(dead_code)]
+struct HazeState(std::sync::Mutex<Option<haze::Haze>>);
+
+/// 在窗口内容下方挂载 HostBackdropBrush 圆角模糊。
+///
+/// 必须在拥有窗口的线程调用；`Haze` 自己跟随窗口尺寸与 DPI。
+/// 返回 `false` 表示系统不支持或挂载失败，调用方回退到旧的 accent 链。
+#[cfg(target_os = "windows")]
+fn attach_haze(window: &tauri::WebviewWindow) -> bool {
+    use tauri::Manager as _;
+
+    if !haze::Haze::supported() {
+        eprintln!("[window] Haze 不支持当前 Windows，回退 accent");
+        return false;
+    }
+    let Ok(hwnd) = window.hwnd() else {
+        return false;
+    };
+    // 只做纯模糊；底色仍由 CSS 的 --shell-tint 控制，避免系统 tint 与主题叠色。
+    let style = haze::Style::dark()
+        .radius(8.0)
+        .strength(20.0)
+        .tint(0.0);
+    match haze::Haze::attach_hwnd(hwnd.0, style) {
+        Ok(handle) => {
+            window
+                .app_handle()
+                .manage(HazeState(std::sync::Mutex::new(Some(handle))));
+            eprintln!("[window] Haze HostBackdropBrush 已挂载");
+            true
+        }
+        Err(e) => {
+            eprintln!("[window] Haze 挂载失败，回退 accent: {e}");
+            false
+        }
+    }
 }
 
 /// 亚克力底色：深蓝黑，alpha 越低桌面越透。`SetWindowCompositionAttribute` 的
@@ -113,23 +180,41 @@ const ACRYLIC_TINT: (u8, u8, u8, u8) = (18, 24, 38, 125);
 /// （Win10 才是白雾），所以底色交给它的 `TintColor`：alpha 越低桌面越透。
 const BLUR_TINT: (u8, u8, u8, u8) = (12, 16, 26, 115);
 
+/// 浅色主题的亚克力底色：近白，透明度与深色档一致。
+///
+/// 深色档是深蓝黑，浅色主题下会把整窗压成灰蓝——用户观感就是「浅色不够透亮」。
+const ACRYLIC_TINT_LIGHT: (u8, u8, u8, u8) = (250, 252, 255, 118);
+
+/// 浅色主题的高斯模糊底色：近白。浅底透上来的是桌面亮部，白 tint 只提亮不加灰。
+const BLUR_TINT_LIGHT: (u8, u8, u8, u8) = (255, 255, 255, 108);
+
+/// 按主题挑两侧的窗口底色。未知主题一律按深色处理（深色是默认）。
+fn tints_for(theme: &str) -> ((u8, u8, u8, u8), (u8, u8, u8, u8)) {
+    if theme == "light" {
+        (BLUR_TINT_LIGHT, ACRYLIC_TINT_LIGHT)
+    } else {
+        (BLUR_TINT, ACRYLIC_TINT)
+    }
+}
+
 /// 开系统「磨砂玻璃」。
 ///
 /// 顺序有讲究：
-/// 1. **`ACCENT_ENABLE_ACRYLICBLURBEHIND` 在这台机器上不出效果**（2026-11-21 实测：
-///    `SetWindowCompositionAttribute` 返回成功、`WS_EX_LAYERED` 也为真，屏幕上却什么都没有），
-///    所以它不能排第一——排第一就等于把「返回成功但无效」当成了成功。
+/// 1. 两种 accent 都受 Windows「个性化 → 颜色 → 透明效果」开关约束；关闭时
+///    `SetWindowCompositionAttribute` 仍返回成功，但屏幕上没有模糊。不能把「返回成功」
+///    当成「已经出效果」。
 /// 2. `ACCENT_ENABLE_BLURBEHIND` 是 Win7 起就有的高斯模糊，不依赖透明客户区；
 ///    Win11 去掉了 Win10 的白雾，并**自动叠加系统设置里的「透明效果」色**。
 /// 3. 都不行时用 Win11 的 `DWMWA_SYSTEMBACKDROP_TYPE = DWMSBT_TRANSIENTWINDOW`（亚克力材质）
 ///    兜底；它只保证非客户区，属于最后手段。
 ///
 /// 返回 `false` 表示三条都不成立，**不是错误**（调用方降级为纯色）。
-fn apply_system_glass(window: &tauri::WebviewWindow) -> bool {
-    if apply_accent_effect(window, ACCENT_ENABLE_BLURBEHIND, BLUR_TINT) {
+fn apply_system_glass(window: &tauri::WebviewWindow, theme: &str) -> bool {
+    let (blur_tint, acrylic_tint) = tints_for(theme);
+    if apply_accent_effect(window, ACCENT_ENABLE_BLURBEHIND, blur_tint) {
         return true;
     }
-    if apply_accent_effect(window, ACCENT_ENABLE_ACRYLICBLURBEHIND, ACRYLIC_TINT) {
+    if apply_accent_effect(window, ACCENT_ENABLE_ACRYLICBLURBEHIND, acrylic_tint) {
         return true;
     }
     apply_material_backdrop(window)
@@ -168,7 +253,6 @@ fn apply_accent_effect(
     #[cfg(target_os = "windows")]
     {
         use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
-
         #[repr(C)]
         struct AccentPolicy {
             accent_state: u32,
@@ -303,7 +387,7 @@ fn apply_round_corners(window: &tauri::WebviewWindow) {
 
 /// 验证脚本用的临时诊断开关：设 `AJA_DIAG_WINDOW=1` 时启动即打印窗口样式位与特效调用结果。
 /// 它不改变任何业务行为，只输出读数，所以可以长期留在代码里。
-fn window_diag(window: &tauri::WebviewWindow) {
+fn window_diag(window: &tauri::WebviewWindow, glass_attached: bool) {
     #[cfg(target_os = "windows")]
     {
         if std::env::var("AJA_DIAG_WINDOW").is_err() {
@@ -322,23 +406,20 @@ fn window_diag(window: &tauri::WebviewWindow) {
             let ex = GetWindowLongPtrW(raw, GWL_EXSTYLE);
             eprintln!(
                 "[diag] hwnd={raw:?} style=0x{style:08X} exstyle=0x{ex:08X} layered={}",
-                ex & 0x0008_0000 != 0, // WS_EX_LAYERED，亚克力生效必须为 true
+                ex & 0x0008_0000 != 0, // WS_EX_LAYERED，仅作诊断记录
             );
         }
-        // 三种效果的调用结果都打出来，否则「没效果」分不清是没调用还是被挡
+        // 这里只读样式位，绝不能再调 accent / Mica：那会把 Haze 的
+        // ACCENT_ENABLE_HOSTBACKDROP 覆盖掉，诊断本身反而毁掉效果。
         eprintln!(
-            "[diag] blur = {}",
-            apply_accent_effect(window, ACCENT_ENABLE_BLURBEHIND, BLUR_TINT)
+            "[diag] glass = {}",
+            if glass_attached { "haze" } else { "legacy/fallback" }
         );
-        eprintln!(
-            "[diag] acrylic = {}",
-            apply_accent_effect(window, ACCENT_ENABLE_ACRYLICBLURBEHIND, ACRYLIC_TINT)
-        );
-        eprintln!("[diag] material = {}", apply_material_backdrop(window));
     }
     #[cfg(not(target_os = "windows"))]
     {
         let _ = window;
+        let _ = glass_attached;
     }
 }
 
@@ -821,8 +902,19 @@ pub fn run() {
         .setup(|app| {
             // 必须在主线程、窗口创建完成后才能应用特效。
             if let Some(win) = app.get_webview_window("main") {
-                window_diag(&win);
-                apply_blur(&win);
+                // Haze 自己写 ACCENT_ENABLE_HOSTBACKDROP；成功时不能再走 accent，
+                // 否则会把 HostBackdropBrush 覆盖掉。
+                #[cfg(target_os = "windows")]
+                let glass_attached = attach_haze(&win);
+                #[cfg(not(target_os = "windows"))]
+                let glass_attached = false;
+                if !glass_attached {
+                    // 主题存在前端 localStorage，这里还不知道，先按深色档起窗口；
+                    // 前端挂载后经 `set_window_theme` 换成当前主题的底色。
+                    apply_blur(&win, "dark");
+                }
+                // 诊断放在特效之后：先打印会看不到特效是否真正落地。
+                window_diag(&win, glass_attached);
                 // 窗口四角由 DWM 按 8px 画弧：透明客户区的方角只能由系统裁掉，
                 // 前端外壳与它同心内缩（--shell-radius），不再自己另画一套外形。
                 apply_round_corners(&win);
@@ -886,6 +978,7 @@ pub fn run() {
             window_minimize,
             window_toggle_maximize,
             window_close,
+            set_window_theme,
             login_ack,
             commands_db::list_jobs,
             commands_db::get_job,

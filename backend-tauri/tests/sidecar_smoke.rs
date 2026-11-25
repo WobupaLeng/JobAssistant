@@ -44,6 +44,8 @@ fn sidecar_starts_handshakes_and_stops() {
         // data_dir=None：与现行版共用 %LOCALAPPDATA%\ai-job-assistant 的登录态，
         // 否则冒烟时用户得重新扫码。
         data_dir: None,
+        // 冒烟走仓库里的 sidecar.py，不用打包态 exe。
+        bundled: None,
     };
     let icfg = IngestConfig::default();
 
@@ -104,4 +106,55 @@ fn sidecar_starts_handshakes_and_stops() {
     eprintln!("最终进度：{p:?}");
     assert!(!saw_exit || p.finished_reason.is_some(), "进程退出必须给出原因");
     assert_eq!(sink_hits.load(Ordering::Relaxed), 0, "未发 scrape.start 不应有入库");
+}
+
+/// 打包态冒烟：不调用本机 python，直接跑 PyInstaller 产出的 sidecar.exe。
+///
+/// 先执行 `python backend-tauri/scripts/pack_sidecar.py`，再跑
+/// `cargo test --test sidecar_smoke -- --ignored bundled`。产物不存在时只打印提示，
+/// 不判红——它是分发前的手工门禁，不是每次 `cargo test` 的必跑项。
+#[test]
+#[ignore = "打包态 sidecar 冒烟：先跑 scripts/pack_sidecar.py"]
+fn bundled_sidecar_starts_without_python() {
+    let backend = repo_root().join("backend-tauri");
+    let exe = backend
+        .join("sidecar-dist")
+        .join(if cfg!(windows) {
+            "jobassistant-sidecar.exe"
+        } else {
+            "jobassistant-sidecar"
+        });
+    if !exe.is_file() {
+        eprintln!("跳过：{} 不存在，先跑 scripts/pack_sidecar.py", exe.display());
+        return;
+    }
+    let scfg = SidecarConfig {
+        program: None,
+        // 合成路径：`launch_session` 只拿它的父目录找 sidecar-dist，不读脚本本身
+        script_dir: backend.join("scraper"),
+        data_dir: None,
+        bundled: Some(exe),
+    };
+    let sink = Ports::new(
+        |_job: &Job| Ok(true),
+        |_e: &jobassistant_app_lib::core::domain::job::SensitiveEntry<'_>| {},
+        |_n: &jobassistant_app_lib::core::sidecar::ingest::DecisionNote| {},
+    );
+
+    let t0 = Instant::now();
+    let mut session = SidecarSession::start(
+        scfg,
+        DEFAULT_PROFILE.clone(),
+        IngestConfig::default(),
+        sink,
+        NoSensitive,
+    )
+    .unwrap_or_else(|e| panic!("打包态 sidecar 启动失败：{e}"));
+    eprintln!("打包态 ready 握手耗时 {:?}，pid={}", t0.elapsed(), session.pid());
+    assert!(
+        session
+            .send(&jobassistant_app_lib::core::sidecar::protocol::Command::Ping)
+            .is_ok()
+    );
+    session.shutdown();
 }
