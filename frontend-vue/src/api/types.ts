@@ -154,6 +154,14 @@ export interface Friend {
    * uid 失效时靠它重新点「立即沟通」把会话接回来。
    */
   job_id?: string | null;
+  /**
+   * 前端本地标记：这条会话是**本机新建**（点「立即沟通」后由 `chat_open` 换来的真实 uid），
+   * 远程 `getGeekFriendList` 还没收录。Rust 不写也不读它。
+   *
+   * 为什么必须有它：`chat_open` 给的是聊天页地址里的**加密 uid**，而好友列表给的是**数字 uid**，
+   * 两个 id 空间不重叠；只按 uid 合并会让这条刚建好的会话被下一次刷新整条吃掉。
+   */
+  local_only?: boolean;
 }
 
 export interface ChatMessage {

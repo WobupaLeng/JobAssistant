@@ -20,14 +20,21 @@ describe('rowsFromReply', () => {
     expect(rows[1].level).toBe('error');
     expect(rows[1].key).toBe('1000-2');
   });
+
+  it('补齐展示字段：序号文案与带年份的完整时间', () => {
+    // 1704067200000 = 2024-01-01T00:00:00Z → 展示时区固定 UTC+8，见 lib_ui/time.ts
+    const rows = rowsFromReply([row(42, 1704067200000)]);
+    expect(rows[0].seqLabel).toBe('#42');
+    expect(rows[0].stampFull).toBe('2024-01-01 08:00:00');
+  });
 });
 
-describe('mergeRunRows — seq 过滤 + 倒序', () => {
+describe('mergeRunRows — seq 过滤 + 正序（第一行在最上面）', () => {
   it('只收 seq > afterSeq 的新行', () => {
     const old = rowsFromReply([row(1, 1000), row(2, 1000)]);
     const incoming = rowsFromReply([row(1, 1000), row(2, 1000), row(3, 1001)]);
     const merged = mergeRunRows(old, incoming, 2);
-    expect(merged.map((r) => r.seq)).toEqual([3, 2, 1]);
+    expect(merged.map((r) => r.seq)).toEqual([1, 2, 3]);
   });
 
   it('闭区间重送的边界条目（seq <= afterSeq）被丢弃，不重复', () => {
@@ -38,11 +45,11 @@ describe('mergeRunRows — seq 过滤 + 倒序', () => {
     expect(merged[0].seq).toBe(5);
   });
 
-  it('同毫秒多条按 seq 倒序，新行不丢', () => {
+  it('同毫秒多条按 seq 正序，新行不丢', () => {
     const old = rowsFromReply([row(1, 1000), row(2, 1000)]);
     const incoming = rowsFromReply([row(3, 1000), row(4, 1000)]);
     const merged = mergeRunRows(old, incoming, 2);
-    expect(merged.map((r) => r.seq)).toEqual([4, 3, 2, 1]);
+    expect(merged.map((r) => r.seq)).toEqual([1, 2, 3, 4]);
   });
 
   it('无新行时返回旧数组副本', () => {
@@ -77,21 +84,21 @@ describe('seq 游标 — 恰好一次（同毫秒边界不丢不重）', () => {
     const p1 = rowsFromReply([row(1, 1000), row(2, 1000), row(3, 1000)]);
     rows = mergeRunRows(rows, p1, cursor.afterSeq);
     cursor = advanceCursor(cursor, p1, 1000);
-    expect(rows.map((r) => r.seq)).toEqual([3, 2, 1]);
+    expect(rows.map((r) => r.seq)).toEqual([1, 2, 3]);
     expect(cursor).toEqual({ afterSeq: 3, since: 1000 });
 
     // 第二次 since=1000（闭区间）：重送 1-3 + 同毫秒新增 seq4
     const p2 = rowsFromReply([row(1, 1000), row(2, 1000), row(3, 1000), row(4, 1000)]);
     rows = mergeRunRows(rows, p2, cursor.afterSeq);
     cursor = advanceCursor(cursor, p2, 1000);
-    expect(rows.map((r) => r.seq)).toEqual([4, 3, 2, 1]); // seq4 同毫秒没丢，1-3 没重
+    expect(rows.map((r) => r.seq)).toEqual([1, 2, 3, 4]); // seq4 同毫秒没丢，1-3 没重
     expect(cursor.afterSeq).toBe(4);
 
     // 第三次：重送 seq4 + 新增 seq5@1001
     const p3 = rowsFromReply([row(4, 1000), row(5, 1001)]);
     rows = mergeRunRows(rows, p3, cursor.afterSeq);
     cursor = advanceCursor(cursor, p3, 1001);
-    expect(rows.map((r) => r.seq)).toEqual([5, 4, 3, 2, 1]);
+    expect(rows.map((r) => r.seq)).toEqual([1, 2, 3, 4, 5]);
     expect(cursor).toEqual({ afterSeq: 5, since: 1001 });
   });
 

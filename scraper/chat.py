@@ -146,6 +146,18 @@ def _on_chat_page(page: Any) -> bool:
         return False
 
 
+def _input_ready(page: Any) -> bool:
+    """聊天框是否已经可输入（`#chat-input` 存在且可见）。只做一次快照，不等。
+
+    `send()` 用它区分两种「没点中会话行」：会话本来就开着（`ensure()` 刚建好的），
+    还是页面确实停在会话列表页、必须换个方式打开。
+    """
+    try:
+        return bool(page.locator(SEL_INPUT).first.is_visible())
+    except Exception:
+        return False
+
+
 def _goto_landed(page: Any, url: str) -> bool:
     """导航报错，但页面其实已经到了要去的地方（页面自己跳过去了）。
 
@@ -385,6 +397,20 @@ class ChatClient:
         self._listeners[reg] = _on_response
         page.on("response", _on_response)
 
+    def _reset_signals(self, key: str) -> None:
+        """把某个 key 的「回过几次」计数与待读队列清零，开始一轮新的等待。
+
+        `_drained` 是**累计**的：不归零的话，上一轮（甚至上一次进入聊天页时）记下的
+        那一次会让 `_wait_friends` / `_wait_messages` 在第一次 `_drain` 就以为「接口
+        已经回来过」，于是立刻判失败——表现为「只有第一次能拉到会话列表/消息，
+        之后全报没拿到」。
+
+        同时丢掉队列里的旧响应：那些属于上一次等待、绑的还是旧 handler/旧 uid。
+        """
+        with self._sig_lock:
+            self._drained[key] = 0
+            self._signals.pop(key, None)
+
     def _drain(self, key: str) -> int:
         """在主流程里把监听器攒下的响应正文读出来交给 handler。返回处理条数。"""
         with self._sig_lock:
@@ -491,6 +517,9 @@ class ChatClient:
         for _ in range(2):
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=45_000)
+                # 每一次真导航都留一行：用户报「切会话时浏览器刷了两次」时，
+                # 日志里能直接看出哪一次是本程序发的、哪一次是 Boss 页面自己跳的。
+                self.log("info", f"{what}：{url}")
                 return
             except Exception as exc:
                 if _browser_gone(exc):
@@ -501,6 +530,7 @@ class ChatClient:
                 # 页面已经跳到目标页（被自己的脚本顶掉那一次，地址就已经对了）
                 # 不算失败。地址还停在旧页才重试，重试仍失败照实报。
                 if _goto_landed(page, url):
+                    self.log("info", f"{what}：{url}（页面自己跳过去的）")
                     return
                 last = exc
                 if "ERR_ABORTED" not in str(exc):
@@ -724,6 +754,12 @@ class ChatClient:
         reload 本身并不慢（首帧实测 ~0.7s），所以直接刷就是常态最快路径。
         """
         page = self.chat_page(ctx)
+        # reload 之前必须换成真正解析正文的 handler：`chat_page()` 里那次注册是
+        # 「只记账不入队」的（怕 reload 打断旧文档时往日志里灌 ERR_ABORTED）。
+        # 少了这一行，reload 回来的 getGeekFriendList 会被丢掉，`_friends_order`
+        # 永远为空 → 每次刷新都报「没拿到 Boss 会话列表」（用户 m00001 的截图）。
+        self._catch(page, KEY_FRIENDS, self._on_friends)
+        self._reset_signals(KEY_FRIENDS)
         self._friends_raw.clear()
         self._friends_order = []
         try:
@@ -740,7 +776,21 @@ class ChatClient:
         got = self._wait_friends(page, FRIENDS_RELOAD_WAIT_S)
         if not got:
             self.log("warn", "刷新后仍未拿到会话列表接口")
-        return self._friends_out(page)
+        items = self._friends_out(page)
+        self.log("info", f"会话列表已刷新：{len(items)} 条")
+        return items
+
+    def _friend_label(self, uid: str) -> str:
+        """日志里怎么称呼一条会话：优先 HR 姓名，其次公司名，最后 uid。
+
+        日志面板是给用户看的，`uid=694553429` 这种数字串说明不了是哪位 Boss。
+        """
+        raw = self._friends_raw.get(uid) or {}
+        name = str(raw.get("name") or "").strip()
+        brand = str(raw.get("brandName") or "").strip()
+        if name and brand:
+            return f"{name}（{brand}）"
+        return name or brand or f"uid={uid}"
 
     def _wait_friends(self, page: Any, timeout_s: float) -> bool:
         """等 `getGeekFriendList` 填进 `_friends_order`。返回是否拿到。
@@ -849,6 +899,13 @@ class ChatClient:
         （用户 m00585 已删）。直接点开是确定的动作，且点开本身本来就要做。
         """
         page = self.chat_page(ctx)
+        who = self._friend_label(uid)
+        # 点开一位 Boss 往往要等 1–3 秒（点行 → 页面换会话 → 等 historyMsg），
+        # 这行是「点了之后有反应」的唯一凭据（用户 m00505：日志里没有操作信息）。
+        self.log("info", f"打开会话：{who}")
+        # 先丢掉上一次会话留下的信号与计数：`historyMsg` 的响应里没有 uid，
+        # 队列里残留的旧响应会被当成本条会话的正文（见 `_reset_signals` 的累计计数说明）。
+        self._msgs_raw.pop(uid, None)
         friend = self._friends_raw.get(uid)
         if friend is None:
             self.friends(ctx)
@@ -858,7 +915,7 @@ class ChatClient:
             # 交给 `_open_conversation` 判——列表里没有可点的行时它会返回 False，
             # 那时页面本来就已经停在这条会话上，不需要再点。
             friend = {}
-        self._msgs_raw.pop(uid, None)
+        self._reset_signals(KEY_HISTORY)
         # 挂信号与点开都在 `_open_conversation` 里做：historyMsg 的 handler 必须绑定
         # 本次的 uid（响应本身不带 uid）。
         #
@@ -872,6 +929,14 @@ class ChatClient:
                 )
             self._catch(page, KEY_HISTORY, self._history_handler(uid))
             self._catch(page, KEY_ENTER, self._on_enter)
+            if uid not in self._msgs_raw:
+                # 页面停在这条会话上，但「它自己那次 historyMsg」多半已经在我们挂
+                # 监听之前就回来了（`friends()` 的 reload 会重发一次，等待又花了
+                # 一两秒）——白等 8 秒只会让新会话显示成空对话。带 id 重新打开一次，
+                # 逼页面把 historyMsg 再发一遍（地址格式同 `ensure()`）。
+                self._goto(page, f"{CHAT_URL}?id={uid}", "Boss 会话页")
+                self._catch(page, KEY_HISTORY, self._history_handler(uid))
+                self._catch(page, KEY_ENTER, self._on_enter)
         got = self._wait_messages(page, uid, MESSAGES_REOPEN_WAIT_S)
         raw = self._msgs_raw.get(uid)
         if raw is None:
@@ -880,7 +945,9 @@ class ChatClient:
         self._note_me(raw, uid)
         msgs = [normalize_message(m, self._my_id) for m in raw]
         msgs = merge_dom_status(msgs, self._dom_messages(page))
-        return strip_internal(msgs)
+        out = strip_internal(msgs)
+        self.log("info", f"会话消息 {len(out)} 条：{who}")
+        return out
 
     def _wait_messages(self, page: Any, uid: str, timeout_s: float) -> bool:
         """等 `historyMsg` 填进 `_msgs_raw[uid]`。返回是否拿到。
@@ -913,6 +980,8 @@ class ChatClient:
         if len(text) > 1000:
             text = text[:1000]
         page = self.chat_page(ctx)
+        # 与 messages() 同理：发送要先打开会话再打字，慢的时候得先看到「开始在动」。
+        self.log("info", f"发送消息给 {self._friend_label(uid)}：{text[:20]}")
         friend = self._friends_raw.get(uid)
         if friend is None:
             self.friends(ctx)
@@ -925,11 +994,32 @@ class ChatClient:
                     "在 Boss 会话列表里找不到这条会话（会话列表可能未加载成功，点「刷新」重试）"
                 )
             friend = {}
-        self._open_conversation(page, friend, uid)
+        # 点行打开会话。**返回值必须看**：会话列表在 DOM 里是虚拟滚动的（约 40 行，
+        # 接口有 100 条），会话排到后面时 `_open_conversation` 找不到可点的行、
+        # 什么也不会点，页面还停在列表页——接着去等 `#chat-input` 只会白等满 15 秒，
+        # 用户拿到的是一句裸的 Playwright `TimeoutError`（实测报障 2026-11-25）。
+        # 这时改成按 uid 直接打开这条会话（地址格式同 `ensure()` / `messages()`），
+        # 不依赖会话行有没有渲染出来。
+        opened = self._open_conversation(page, friend, uid)
+        # 输入框已经可输入 = 会话本来就开着（`ensure()` 刚建好的那条就是），
+        # 不必再导航一次打断它。
+        if not opened and not _input_ready(page) and uid:
+            self.log("info", f"会话行没点中，按 uid 直接打开：{uid}")
+            self._goto(page, f"{CHAT_URL}?id={uid}", "Boss 会话页")
         # 输入框是 contenteditable div：先点聚焦，再用键盘输入（受控组件只有真实按键
         # 才会置空发送按钮的 disabled 态），最后清掉可能残留的草稿。
         box = page.locator(SEL_INPUT).first
-        box.wait_for(state="visible", timeout=15_000)
+        try:
+            box.wait_for(state="visible", timeout=15_000)
+        except Exception as exc:
+            # 不给用户看 Playwright 的多行 Call log：这里只有一条可操作的说法。
+            # 日志里留一句能用来自查的事实：人已经在聊天页却没有输入框，多半是
+            # Boss 把 `#chat-input` 换掉了（那时只能改选择器，重试没有意义）。
+            if _on_chat_page(page):
+                self.log("warn", f"聊天页里没有 {SEL_INPUT}（uid={uid}），页面结构可能已变")
+            raise ChatError(
+                "Boss 聊天页没有出现输入框（这条会话可能打不开，或页面结构已变），消息没有发出"
+            ) from exc
         box.click()
         page.wait_for_timeout(120)
         page.keyboard.press("Control+A")
@@ -952,8 +1042,7 @@ class ChatClient:
         if self._input_text(page).strip():
             raise ChatError("消息没有发出去（输入框内容还在），可能是账号被限制或网络异常")
         self._msgs_raw.pop(uid, None)
-        name = (friend or {}).get("name") or uid
-        self.log("info", f"已发送消息给 {name}：{text[:40]}")
+        self.log("info", f"已发送消息给 {self._friend_label(uid)}：{text[:40]}")
         return text
 
     def resumes(self, ctx: Any, uid: str | None = None) -> list[dict[str, Any]]:

@@ -47,7 +47,7 @@
   padding: 0 10px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--hairline);
-  background: var(--glass-0);
+  background: var(--surface-0);
   color: var(--text-2);
   font-size: var(--fs-xs);
   font-weight: 560;
@@ -123,7 +123,7 @@
 .sort-pill.is-active {
   color: var(--text-1);
   border-color: var(--hairline);
-  background: var(--glass-0);
+  background: var(--surface-0);
 }
 
 .sort-arrow {
@@ -143,7 +143,7 @@
   padding: 5px 10px;
   min-height: 30px;
   border-radius: var(--radius-sm);
-  background: var(--glass-0);
+  background: var(--surface-0);
   border: 1px solid var(--hairline);
   font-size: var(--fs-sm);
   color: var(--text-2);
@@ -180,7 +180,7 @@
   position: relative;
   /* 三行卡片行高锁定，不随窗口伸缩：1440×900 下 900 − 14 外壳 − 46 顶栏 − 42 抓取条
    − 20 页面 gap − 220 日志卡 − 40 页签行 − 40 批量条 − 24 网格内边距 − 28 行间隙 */
-  --job-card-h: 142px;
+  --job-card-h: 143px;
   /* 卡片间隙与网格内边距同档（14px，对齐 .app-body 的左右留白）。 */
   --job-grid-gap: 14px;
   display: grid;
@@ -199,9 +199,9 @@
   overflow-y: auto;
   /* 滚动条槽常驻：有无滚动条都占同样宽度，三个 tab 卡片宽度才一致。 */
   scrollbar-gutter: stable;
-  /* 岗位多于 3 行时要有可见滚动条：细条 + 透明轨道。 */
+  /* 岗位多于 3 行时要有可见滚动条：细条 + 主题色轨道。 */
   scrollbar-width: thin;
-  scrollbar-color: var(--hairline-strong) transparent;
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
   box-sizing: border-box;
   padding: 10px 14px 14px;
 }
@@ -215,15 +215,15 @@
 
 .job-grid::-webkit-scrollbar-thumb {
   border-radius: var(--radius-pill);
-  background: var(--hairline-strong);
+  background: var(--scroll-thumb);
 }
 
 .job-grid::-webkit-scrollbar-thumb:hover {
-  background: var(--text-3);
+  background: var(--scroll-thumb-hover);
 }
 
 .job-grid::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--scroll-track);
 }
 
 @media (max-width: 1599px) {
@@ -256,7 +256,7 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  /* 上下对称：顶部与底部留白相同，文字行距由 .job-info-main 统一给。 */
+  /* 行距由 .job-info-main / .job-info-side 各自给；两列各自整体居中。 */
   gap: 0;
   justify-content: center;
   /* 内容必须裁在卡片自己的边框里：超出的文字 / 方块不得压到上下相邻的行。 */
@@ -267,20 +267,21 @@
   min-height: var(--job-card-h);
   padding: 8px 12px;
   border-radius: var(--radius-sm);
-  /* 默认边框完全去掉：外轮廓只由光带（layout.css 的 1px 高光环）给出。
-   * 边框归零后卡片内容盒变高 2px（142 − 16 = 126），四等分随之变成 31.5px。 */
+  /* 默认边框完全去掉：外轮廓只由光带（layout.css 的 1px 高光环）给出。 */
   border: 0;
-  background: var(--glass-0);
+  /* 岗位卡不铺底：让外壳的整窗流光直接透上来，卡片只保留 1px 高光边与文字。 */
+  background: transparent;
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition: border-color var(--dur) var(--ease-glass), background var(--dur) var(--ease-glass),
-    transform var(--dur-fast) var(--ease-glass);
+  transition: border-color var(--dur) var(--ease-smooth), background var(--dur) var(--ease-smooth),
+    transform var(--dur-fast) var(--ease-smooth);
 }
 
 .job-card:hover {
-  /* 只提亮底色，不上边框色：外轮廓始终是光带。 */
-  background: var(--glass-input);
+  /* 不铺底，只把光带提亮一档；否则悬停会重新盖住流光。 */
+  background: transparent;
+  --spec-strength: 1;
 }
 
 .job-card.is-checked {
@@ -315,7 +316,6 @@
   --spec-top: color-mix(in srgb, var(--good) 62%, transparent);
   --spec-side: color-mix(in srgb, var(--good) 34%, transparent);
   --spec-bottom: color-mix(in srgb, var(--good) 14%, transparent);
-  background: var(--good-soft);
 }
 
 .job-card.tone-rejected {
@@ -323,7 +323,6 @@
   --spec-top: color-mix(in srgb, var(--bad) 62%, transparent);
   --spec-side: color-mix(in srgb, var(--bad) 34%, transparent);
   --spec-bottom: color-mix(in srgb, var(--bad) 14%, transparent);
-  background: var(--bad-soft);
 }
 
 .job-card.is-linked {
@@ -389,14 +388,11 @@
   white-space: nowrap;
 }
 
-/* 卡片主体：左侧四行文字 + 右侧一列（薪资 / 分数 / 打招呼）。
-   两列的子项各自成行、行高相等，所以薪资与职位标题同在第一行，
-   分数对齐「经验学历」行、方块对齐「地址」行。右列 flex: 0 0 auto 不被左列挤压， */
+/* 卡片主体：左侧四行文字 + 右侧一列（薪资 / 分数 / 打招呼）。两列都按内容高排、
+   整体在卡片内垂直居中，行距各自给 6px，所以右列三格与左列前四行不强制逐行对齐。 */
 .job-info {
   display: flex;
-  /* 必须 stretch：两列内部的行都写成 flex: 1 1 0（basis 0），
-   交叉轴若用 flex-start 就按内容撑高，而内容高又全是 0 —— 两列会一起塌成 0px。 */
-  align-items: stretch;
+  align-items: center;
   gap: 0 10px;
   min-width: 0;
   min-height: 0;
@@ -407,11 +403,9 @@
 .job-info-main {
   display: flex;
   flex-direction: column;
-  /* 四行把卡片内容盒 4 等分：
-   卡片无边框，内容盒 = 142 − 16 padding = 126px，每行 = 126 / 4 = 31.5px，
-   首行贴顶、末行贴底，不留 gap 也不用 space-between：行本身就有 31.5px 高， */
-  justify-content: flex-start;
-  gap: 0;
+  /* 四行按自身行高紧凑排列，整组在外层 .job-info 里居中；行距 6px 让四行不糊成一片。 */
+  justify-content: center;
+  gap: 6px;
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -420,23 +414,19 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  /* 与左列同口径 4 等分：薪资 1 格 + 分值 2 格 + 打招呼 1 格 = 4 格，
-   * 两列因而逐行严格对齐。 */
-  justify-content: flex-start;
-  gap: 0;
+  /* 与左列同口径：按内容高排、整组居中，行距 6px。 */
+  justify-content: center;
+  gap: 6px;
   flex: 0 0 auto;
 }
 
-/* 左列四行与右列四格都必须等高，两列才能逐行对齐。
-   用 flex: 1 1 0 而不是 height: 25%：百分比高度在 flex 列里不参与 flex-basis
-   分配（实测会退回各自内容高 21 / 21 / 21 / 19.5），四格就分不匀。 */
 .job-info-main > * {
-  flex: 1 1 0;
+  flex: 0 0 auto;
   min-height: 0;
 }
 
 .job-info-side > * {
-  flex: 1 1 0;
+  flex: 0 0 auto;
   min-height: 0;
 }
 
@@ -445,14 +435,41 @@
   align-items: center;
 }
 
-/* 分值占两行：盒子高度 = 两个 24px 行，数字居中于这两行之间。 */
-.job-info-side > .score-box {
-  /* 分值占右列 2 格（4 等分里的 2 份）。 */
-  flex: 2 1 0;
+/* 分值块按自身字号撑高，不再拉伸占两格。 */
+.job-score-row > .score-box {
+  flex: 0 0 auto;
   min-height: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+/* 分数行：入库时间在左、分值在右，整行随右列右对齐。 */
+.job-score-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 公司行：单行省略，右侧不再挂入库时间。 */
+.job-company-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.job-company {
+  min-width: 0;
+}
+
+/* 入库时间与分数同一行、贴在分数左侧：右列整体右对齐，卡片之间对齐。 */
+.job-created {
+  flex: 0 0 auto;
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .job-addr {
@@ -476,7 +493,6 @@
   border: 0;
   background: transparent;
   color: var(--text-1);
-  /* 分值放大：字号高于 --fs-lg（20px），所在行高由 .job-info-side > * 统一给。 */
   font-size: calc(24px * var(--ui-scale));
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -494,6 +510,9 @@
 .score-box .score-num {
   /* 分值必须大于薪资（--fs-lg = 20px）；覆盖 jobs.css 全局 .score-num 的 --fs-xs。 */
   font-size: calc(26px * var(--ui-scale));
+  /* 固定三字宽（等宽数字）：分值块宽度恒定，左侧入库时间才不会随位数挪位。 */
+  min-width: 3ch;
+  text-align: center;
   line-height: 1;
   background-image: linear-gradient(
     100deg,
@@ -532,9 +551,9 @@
 
 /* 打招呼方块：主色底白字，紧凑按钮，宽度按三字横排取 --fs-sm × 3.6。 */
 .job-greet {
-  /* 占右列第 4 格，与左列第 4 行同高：写成 flex: 0 0 auto 会退回内容高并与左列错位。 */
-  flex: 1 1 0;
-  min-height: 0;
+  /* 按自身字号撑高，不参与右列的拉伸：给 1 1 0 会在右侧空间不足时被压成 0 高。 */
+  flex: 0 0 auto;
+  min-height: calc(var(--fs-sm) * 2.4);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -579,7 +598,7 @@
   display: block;
   height: 10px;
   border-radius: 4px;
-  background: var(--glass-2);
+  background: var(--surface-2);
   animation: vd-skel 1.4s ease-in-out infinite;
 }
 
@@ -613,9 +632,7 @@
   display: grid;
   place-items: center;
   border: 1px solid var(--hairline-strong);
-  background: var(--glass-1);
-  backdrop-filter: blur(var(--blur-3)) saturate(var(--saturate-2));
-  -webkit-backdrop-filter: blur(var(--blur-3)) saturate(var(--saturate-2));
+  background: var(--surface-1);
   box-shadow: var(--inner-light), var(--shadow-near);
   color: var(--text-2);
 }
@@ -653,7 +670,7 @@
   color: var(--text-3);
   padding: 5px 9px;
   border-radius: 8px;
-  background: var(--glass-input);
+  background: var(--surface-input);
   border: 1px solid var(--hairline);
   width: max-content;
   max-width: min(100%, 560px);
@@ -709,10 +726,8 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* 自身材质只在本文件写（原先是 layout.css 跨文件覆盖背景与磨砂）。 */
+  /* 底色只在本文件写，别的文件不许跨文件覆盖。 */
   background: var(--popup-surface);
-  -webkit-backdrop-filter: var(--panel-blur);
-  backdrop-filter: var(--panel-blur);
 }
 
 .f-head {
@@ -755,6 +770,27 @@
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+}
+
+/* 组头一行放齐：名称 → 已选 N → 说明。说明过长时省略，不换行。 */
+.f-ghead {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.f-ghead > .f-glabel,
+.f-ghead > .f-count {
+  flex: 0 0 auto;
+}
+
+.f-ghead > .f-glabel-sub {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .f-glabel {
@@ -902,7 +938,7 @@
 
 .f-x:hover {
   color: var(--text-1);
-  background: var(--glass-input);
+  background: var(--surface-input);
   border-color: var(--hairline);
 }
 
@@ -940,7 +976,7 @@
   padding: 0 9px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--hairline);
-  background: var(--glass-0);
+  background: var(--surface-0);
   color: var(--text-2);
   font-size: var(--fs-xs);
   cursor: pointer;
@@ -1052,16 +1088,16 @@ body {
   opacity: 0.7;
   /* 悬停时底色与亮度一起变，没有过渡会像两台不同的控件。只动颜色与透明度。 */
   transition:
-    opacity var(--dur-fast) var(--ease-glass),
-    background-color var(--dur-fast) var(--ease-glass),
-    color var(--dur-fast) var(--ease-glass),
-    filter var(--dur-fast) var(--ease-glass);
+    opacity var(--dur-fast) var(--ease-smooth),
+    background-color var(--dur-fast) var(--ease-smooth),
+    color var(--dur-fast) var(--ease-smooth),
+    filter var(--dur-fast) var(--ease-smooth);
 }
 
 .win-btn:hover,
 .win-btn:focus-visible {
   opacity: 1;
-  background: var(--glass-0);
+  background: var(--surface-0);
 }
 
 .win-close:hover,
@@ -1203,7 +1239,7 @@ body {
   border-radius: var(--radius-pill);
   /* 去边界感：胶囊描边与顶栏同色，不再画出可见分隔线。 */
   border: 1px solid transparent;
-  background: var(--glass-0);
+  background: var(--surface-0);
 }
 
 .seg {
@@ -1252,7 +1288,7 @@ body {
   height: 26px;
   padding: 0 10px;
   border-radius: var(--radius-pill);
-  background: var(--glass-0);
+  background: var(--surface-0);
   color: var(--text-3);
   /* 与胶囊同步放大，否则「规则分 ≥ 50 才走大模型」会比左边的分段小一号 */
   font-size: var(--fs-md);
@@ -1266,7 +1302,7 @@ body {
   padding: 0 4px;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
-  background: var(--glass-input);
+  background: var(--surface-input);
   color: var(--text-1);
   font-size: var(--fs-md);
   font-variant-numeric: tabular-nums;
@@ -1392,10 +1428,35 @@ body {
   padding: 0;
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
+  /* 常显滚动条：overlay 滚动条不悬停时看不见，用户会以为这块不能滚 */
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.log-rows::-webkit-scrollbar {
+  width: 10px;
+}
+
+.log-rows::-webkit-scrollbar-track {
+  background: var(--scroll-track);
+  border-radius: 999px;
+}
+
+.log-rows::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--scroll-thumb);
+  background-clip: padding-box;
+}
+
+.log-rows::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+  background-clip: padding-box;
 }
 
 .log-row {
@@ -1532,7 +1593,7 @@ body {
   border: 0;
   font-size: var(--vd-fs-sm);
   white-space: nowrap;
-  transition: opacity var(--dur) var(--ease-glass);
+  transition: opacity var(--dur) var(--ease-smooth);
 }
 
 .platform-card.is-off {
@@ -1575,7 +1636,7 @@ body {
   border-radius: 50%;
   flex: 0 0 auto;
   background: var(--text-3);
-  box-shadow: 0 0 0 3px var(--glass-input);
+  box-shadow: 0 0 0 3px var(--surface-input);
 }
 
 .status-dot.is-ok {

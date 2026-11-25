@@ -5,11 +5,13 @@
  */
 
 import type { DecisionRecord, LogRow } from '../../api/types';
+import { platformName } from '../../lib_ui/options';
 import {
   decisionLabel,
   decisionScores,
   decisionTone,
   fmtDecisionTime,
+  fmtLogStamp,
   logVisible,
   matchesKeyword,
   parseLogLevel,
@@ -38,6 +40,10 @@ export interface RunRow {
   levelRaw: string;
   message: string;
   key: string;
+  /** 行首序号文案 `#600`：同一毫秒多条时唯一能区分先后的是它。 */
+  seqLabel: string;
+  /** `YYYY-MM-DD HH:mm:ss`：列表列只到秒，跨年记录靠 tooltip 补年份。 */
+  stampFull: string;
 }
 
 export function rowsFromReply(items: readonly LogRow[]): RunRow[] {
@@ -48,7 +54,30 @@ export function rowsFromReply(items: readonly LogRow[]): RunRow[] {
     levelRaw: r.level,
     message: r.message,
     key: `${r.ts}-${r.seq}`,
+    seqLabel: `#${r.seq}`,
+    stampFull: fmtLogStamp(r.ts),
   }));
+}
+
+/**
+ * 运行日志的级别分档条数。工具栏把它和「N 条」一起显示：只知道总数时，
+ * 出错了还得自己一屏屏翻着数错误行。
+ */
+export interface LevelCounts {
+  error: number;
+  warn: number;
+  info: number;
+}
+
+export function countLevels(rows: readonly RunRow[]): LevelCounts {
+  const out: LevelCounts = { error: 0, warn: 0, info: 0 };
+  for (const r of rows) out[r.level] += 1;
+  return out;
+}
+
+/** 分档条数文案：`错误 3 · 警告 5 · 信息 12`。 */
+export function levelCountsText(c: LevelCounts): string {
+  return `错误 ${c.error} · 警告 ${c.warn} · 信息 ${c.info}`;
 }
 
 /**
@@ -63,7 +92,9 @@ export interface LogCursor {
 export const INITIAL_CURSOR: LogCursor = { afterSeq: 0, since: null };
 
 /**
- * 合并增量：只收 seq > afterSeq 的新行，按时间倒序（同毫秒按 seq 倒序）。
+ * 合并增量：只收 seq > afterSeq 的新行，按时间**正序**（同毫秒按 seq 正序）。
+ * 正序即「第一行在最上面、新行追加在底下」：日志是顺着时间读的，
+ * 倒序会让每条新行把整屏往上顶，视线永远追不上。
  * 没有新行时原样返回旧数组的副本（不触发无谓的重排）。
  */
 export function mergeRunRows(
@@ -73,7 +104,7 @@ export function mergeRunRows(
 ): RunRow[] {
   const fresh = incoming.filter((r) => r.seq > afterSeq);
   if (fresh.length === 0) return old.slice();
-  return [...old, ...fresh].sort((a, b) => b.ts - a.ts || b.seq - a.seq);
+  return [...old, ...fresh].sort((a, b) => a.ts - b.ts || a.seq - b.seq);
 }
 
 /**
@@ -128,7 +159,7 @@ export type DecisionTone = ReturnType<typeof decisionTone>;
 /** 决策行的展示视图模型（组件只消费这个纯对象，不 import features）。 */
 export interface DecisionRowView {
   id: number;
-  /** MM-DD HH:mm（created_at 是 Unix 秒）。 */
+  /** MM-DD HH:mm:ss（created_at 是 Unix 秒）。 */
   time: string;
   /** 行为文案：排除 / 入库 / 重算 / 未标注。 */
   kind: string;
@@ -144,6 +175,12 @@ export interface DecisionRowView {
   rowClass: string;
   company: string;
   title: string;
+  /** 平台显示名（`boss` → Boss直聘；空串 → `—`，不认识的原样回显）。 */
+  platform: string;
+  /** 只有「原因」那一段（不含公司 / 岗位），空 → `（未记录原因）`。 */
+  why: string;
+  /** `YYYY-MM-DD HH:mm:ss`：列表列只到秒，跨年记录靠 tooltip 补年份。 */
+  timeTitle: string;
 }
 
 export function scoreTitle(dir: ScoreDelta['dir']): string {
@@ -181,6 +218,7 @@ export function decisionRowFromRecord(r: DecisionRecord): DecisionRowView {
   return {
     id: r.id,
     time: fmtDecisionTime(r.created_at),
+    timeTitle: fmtLogStamp(r.created_at),
     kind: decisionLabel(r.decision),
     tone,
     verdict: delta.text,
@@ -191,6 +229,8 @@ export function decisionRowFromRecord(r: DecisionRecord): DecisionRowView {
     rowClass: decisionRowClass(tone, delta.dir),
     company,
     title,
+    platform: r.platform.trim() === '' ? '—' : platformName(r.platform),
+    why: reason,
   };
 }
 

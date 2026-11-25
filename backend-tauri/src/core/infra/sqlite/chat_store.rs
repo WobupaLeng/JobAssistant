@@ -28,6 +28,10 @@ pub struct ChatFriendRow {
     pub avatar: Option<String>,
     /// 最后聊天时刻（毫秒）。判新旧**只认它**，不看界面文案 `last_time`。
     pub last_ts: Option<i64>,
+    /// 最后一条是不是我发的。`None` = 不知道（DOM 兜底路径取不到），界面不加状态词。
+    pub last_from_me: Option<bool>,
+    /// 我发的最后一条的送达态：`1` 已送达、`2` 已读。
+    pub last_status: Option<u32>,
 }
 
 /// 消息一行。
@@ -68,7 +72,8 @@ impl SqliteStore {
     pub fn list_chat_friends(&self, platform: &str) -> Result<Vec<ChatFriendRow>> {
         let conn = self.conn.lock().expect("存储锁中毒");
         let mut stmt = conn.prepare(
-            "SELECT uid, name, company, title, last_msg, last_time, unread, avatar, last_ts
+            "SELECT uid, name, company, title, last_msg, last_time, unread, avatar, last_ts,
+                    last_from_me, last_status
              FROM chat_friends WHERE platform = ?1
              ORDER BY COALESCE(last_ts, 0) DESC, uid",
         )?;
@@ -83,6 +88,8 @@ impl SqliteStore {
                 unread: r.get::<_, Option<i64>>(6)?.unwrap_or(0).max(0) as u32,
                 avatar: r.get(7)?,
                 last_ts: r.get(8)?,
+                last_from_me: r.get::<_, Option<i64>>(9)?.map(|v| v != 0),
+                last_status: r.get::<_, Option<i64>>(10)?.map(|v| v.max(0) as u32),
             })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -127,8 +134,9 @@ fn upsert_friends_tx(
         }
         n += tx.execute(
             "INSERT INTO chat_friends
-                (platform, uid, name, company, title, last_msg, last_time, unread, avatar, synced_at, last_ts)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                (platform, uid, name, company, title, last_msg, last_time, unread, avatar,
+                 synced_at, last_ts, last_from_me, last_status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
              ON CONFLICT(platform, uid) DO UPDATE SET
                 name = excluded.name,
                 company = excluded.company,
@@ -139,7 +147,10 @@ fn upsert_friends_tx(
                 avatar = excluded.avatar,
                 synced_at = excluded.synced_at,
                 -- 远程行没带时间戳时保留库里已有的，别把它抹成 NULL
-                last_ts = COALESCE(excluded.last_ts, chat_friends.last_ts)
+                last_ts = COALESCE(excluded.last_ts, chat_friends.last_ts),
+                -- 同理：这次没拿到送达态就留旧值，别把「已读」抹回空
+                last_from_me = COALESCE(excluded.last_from_me, chat_friends.last_from_me),
+                last_status = COALESCE(excluded.last_status, chat_friends.last_status)
              -- 只有远程时间「更大」才覆盖；相等说明库里那份一样新，不必重写
              WHERE excluded.last_ts IS NULL
                 OR excluded.last_ts > COALESCE(chat_friends.last_ts, 0)",
@@ -154,7 +165,9 @@ fn upsert_friends_tx(
                 r.unread as i64,
                 r.avatar,
                 now,
-                r.last_ts
+                r.last_ts,
+                r.last_from_me.map(|v| v as i64),
+                r.last_status.map(|v| v as i64)
             ],
         )?;
     }

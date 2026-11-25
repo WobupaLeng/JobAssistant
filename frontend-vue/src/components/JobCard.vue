@@ -172,7 +172,9 @@ onBeforeUnmount(cancelPress);
           </span>
           <span class="job-title">{{ view.title }}</span>
         </div>
-        <div class="job-meta">{{ view.company }}</div>
+        <div class="job-company-row">
+          <span class="job-meta job-company">{{ view.company }}</span>
+        </div>
         <div class="job-meta">{{ view.metaText }}</div>
         <div
           class="job-addr"
@@ -185,12 +187,15 @@ onBeforeUnmount(cancelPress);
       </div>
       <div class="job-info-side">
         <span class="job-salary">{{ view.salary }}</span>
-        <span
-          class="score-box"
-          :class="[view.scoreTier === 'is-high' ? 'is-hi' : '', scoreLevelClass]"
-          :data-testid="`score-${view.tid}`"
-          ><span class="score-num">{{ view.score }}</span></span
-        >
+        <div class="job-score-row">
+          <span class="job-created" :data-testid="`job-created-${view.tid}`">{{ view.time }}</span>
+          <span
+            class="score-box"
+            :class="[view.scoreTier === 'is-high' ? 'is-hi' : '', scoreLevelClass]"
+            :data-testid="`score-${view.tid}`"
+            ><span class="score-num">{{ view.score }}</span></span
+          >
+        </div>
         <button
           v-if="showGreet && tab === 'rejected'"
           class="btn btn-sm btn-ghost job-greet"

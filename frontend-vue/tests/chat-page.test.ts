@@ -163,7 +163,8 @@ describe('提示条的语气与位置（用户 m01273）', () => {
     expect((w.vm as { note: string }).note).toBe('已是最新消息，点「刷新」可重新拉取。');
     const hint = w.find('[data-testid="chat-detach-hint"]');
     expect(hint.exists()).toBe(true);
-    expect(hint.text()).toBe('已是最新消息，点「刷新」可重新拉取。');
+    // 气泡区只说前半句：刷新按钮就在列表头顶，那里重复一遍会挤成两行。
+    expect(hint.text()).toBe('已是最新消息');
     // 顶部错误条不能出现这句话。
     expect(w.find('[data-testid="chat-note-detach"]').exists()).toBe(false);
     w.unmount();
@@ -475,7 +476,7 @@ describe('空态与错误态', () => {
     await flushPromises();
 
     expect(opened).toBe(1);
-    expect(openPayload).toEqual({ job_id: 'job-u1' });
+    expect(openPayload).toEqual({ jobId: 'job-u1' });
     // 必须拿**新** uid 再拉一次消息，而不是停在旧 uid 上。
     expect(asked).toEqual(['u1', 'u9']);
     // 不再把「列表里找不到」原文贴给用户，也不再多拉一次会话列表。

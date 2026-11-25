@@ -3,7 +3,7 @@
  * 全部是无副作用字符串变换，入参都是裸类型，**不依赖 api / 框架**（`lib_ui` 铁律）。
  */
 
-import { fmtTime, fmtTimeSecs } from './time';
+import { LOCAL_OFFSET_SECS, dateTimeMs, fmtTimeSecs, pad2, toMs } from './time';
 
 /** 运行日志的级别。`info` 同时承载「后端给了不认识的级别」。 */
 export type LogLevel = 'info' | 'warn' | 'error';
@@ -60,14 +60,30 @@ export function allLevels(): LogLevel[] {
  * 运行日志时间：`MM-DD HH:mm:ss`（与旧版 `web/` 日志框一致，带秒）。
  *
  * 后端 `LogRow.ts` 是**毫秒**。纯函数：不读系统时钟，单测环境同结果。
+ * 列表里这一列**不换行**（换行会把日期和时间拆成两行，读起来像没有时间戳）。
  */
 export function fmtLogTime(ts: number): string {
   return fmtTimeSecs(ts);
 }
 
-/** 决策记录时间：`created_at` 通常是 **Unix 秒**，展示成 `MM-DD HH:mm`。 */
+/**
+ * 完整时间戳 `YYYY-MM-DD HH:mm:ss`：列表放不下年份，跨年记录靠它（tooltip / 复制）
+ * 才认得出是哪一年。入参毫秒为常规，秒级也容忍（`toMs` 同一判据）。
+ */
+export function fmtLogStamp(ts: number): string {
+  if (ts === 0) return '—';
+  const dt = dateTimeMs(toMs(ts), LOCAL_OFFSET_SECS);
+  const date = `${dt.year}-${pad2(dt.month)}-${pad2(dt.day)}`;
+  const clock = `${pad2(dt.hour)}:${pad2(dt.minute)}:${pad2(dt.second)}`;
+  return `${date} ${clock}`;
+}
+
+/**
+ * 决策记录时间：`created_at` 是 **Unix 秒**，展示成 `MM-DD HH:mm:ss`。
+ * 决策是一串判定动作，只到分钟时同一分钟内的多条顺序不可辨，所以带秒。
+ */
 export function fmtDecisionTime(createdAt: number): string {
-  return fmtTime(createdAt);
+  return fmtTimeSecs(createdAt);
 }
 
 /** 分数变化方向。 */

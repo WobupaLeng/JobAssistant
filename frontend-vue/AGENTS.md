@@ -175,17 +175,3 @@ pages → features → components → lib_ui
 | `apple-design` | 动效与交互质感（框架无关） |
 
 ---
-
-## 8. Liquid Glass 三层分工
-
-| 层 | 手段 | 现状 |
-|---|---|---|
-| 第一层 CSS 玻璃 | `backdrop-filter: blur()` + 令牌 | ✅ 已完成（20 处 `backdrop-filter`，7 处 `-webkit-`） |
-| 第二层 湍流折射 | SVG `feTurbulence` + `feDisplacementMap`，**克隆层 + 普通 `filter: url(#id)`** | ❌ 已移除，不要再加回来 |
-| 第三层 卡片间真折射 | WebGL canvas 盖列表 / 气泡 | ❌ 已移除，不要再加回来 |
-
-**核心断言**：`backdrop-filter: url(#svg)` 在 Safari / Firefox 上是坏的，Chromium 也会**静默忽略**其中的 `url()`。第二层**必须**把背景克隆进镜头容器，再对**克隆容器**用普通 `filter: url()`。第三层 canvas 必须 `pointer-events: none`。
-
-**第二、三层已整层移除**（2026-11-25，用户裁决）：L2 克隆层要把整屏 DOM 复制一份并跟随滚动/内容变化重克隆，L3 透镜要每帧读几何跑 WebGL，代价与观感不成正比。克隆层与透镜层对 `transform` / `overflow` / 定位的约束是「玻璃面板被压到视口外」「透镜自激循环烧 CPU」那两笔账的源头，一并出掉了。`glass.test.ts` 随之删除——**前端测试文件数是降的，不是漏跑**。
-
-**要继续只留第一层**：`backdrop-filter: blur()` + 令牌就够了（20 处 `backdrop-filter`，7 处 `-webkit-`）。`tokens.css` 的 `--refract-edge`（14px / 5px）与 `--refract-turbulence`（0.008 / 0.006）保留但**引用数为 0**，是历史遗留，删前先确认无人引用。**不得**新增 `feTurbulence` / `feDisplacementMap` / WebGL / canvas 实现（零新依赖红线同等适用：禁 three / pixi / wgpu / html2canvas）。

@@ -72,8 +72,8 @@ function toggle(): void {
 }
 
 /**
- * 量触发按钮的位置，把面板钉在它下面。面板必须 Teleport 到 body：`.f-body` 是滚动容器、
- * 外层还带 backdrop-filter（新建包含块），留在原地会被裁成一条。
+ * 量触发按钮的位置，把面板钉在它下面。面板必须 Teleport 到 body：
+ * `.f-body` 是滚动容器，留在原地会被裁成一条。
  */
 function placePanel(): void {
   const anchor = triggerEl.value;

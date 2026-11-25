@@ -110,7 +110,6 @@ defineExpose({ listEl });
       <span v-if="unreadSum > 0" class="chip" :data-testid="ids.count">{{ unreadText(unreadSum) }}</span>
       <!-- 显式传入的未读数优先；组件内部不再自行统计，避免与页面口径出现两个数。 -->
       <span v-else-if="(props.unread ?? 0) > 0" class="chip" :data-testid="ids.count">{{ unreadText(props.unread ?? 0) }}</span>
-      <slot name="rail-head" />
       <span class="spacer" />
       <span class="rail-head-actions">
         <button
@@ -122,6 +121,12 @@ defineExpose({ listEl });
           刷新
         </button>
       </span>
+    </div>
+
+    <!-- 说明条（如「已是最新消息」）独占一行：塞进上面的 44px 标题行会被标题与
+         刷新按钮一起挤成两行，一句话断在中途。 -->
+    <div v-if="$slots['rail-head']" class="rail-fresh-row">
+      <slot name="rail-head" />
     </div>
 
     <div class="rail-search">

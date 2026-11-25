@@ -121,7 +121,10 @@ app/src-tauri/
 
 1. **48 条**：`commands_*.rs` 里 46 条 `pub fn` + `lib.rs` 里 2 条私有 `fn`；`generate_handler!` 注册同样 48 条，**零孤儿**。新增命令必须同时登记，否则前端 `invoke` 得到「命令不存在」，同时要在 `frontend-vue/` 的 api 层加封装与类型。
 2. **内联两条的理由**：`get_scoring_spec()` 返回壳层私有 struct `ScoringSpec`，口径常量只在 `lib.rs` 引入，放最靠近常量的位置免得命令层再抄一份；`app_info(paths)` 依赖 `env!("CARGO_PKG_VERSION")` 与 `setup` 填的 `AppPaths`，属 Shell 自述而非业务。
-3. **参数必须双向兼容**：前端发驼峰、Rust 字段蛇形，serde 对未知字段**不报错**。照 `ScrapeArgs` / `ScoreArgs` / `RescoreArgs` 加 `alias`，否则值被静默丢弃。⚠️ **平铺参数（参数列表里一个个写的）不支持 `#[serde(alias)]`**：写上去 `cargo check` 直接报 `error: cannot find attribute 'serde' in this scope`。这类命令只能让前端发蛇形键名（`chat_send` 的 `job_id` / `chat_send_resume` 的 `resume_id` / `chat_open` 的 `job_id` 就是这样）。
+3. **参数必须双向兼容**，但**结构体参数与平铺参数的键名规则相反**：
+   - **结构体参数**（`{ args }` 包装，如 `ScrapeArgs` / `ScoreArgs` / `RescoreArgs`）：前端发驼峰、Rust 字段蛇形，serde 对未知字段**不报错**，照这三个加 `alias`，否则值被静默丢弃。
+   - **平铺参数**（参数列表里一个个写的）：Tauri 宏按 **camelCase** 取键（`rename_all` 默认 `"camelCase"`，见 tauri-macros `src/lib.rs`）。Rust `job_id` ↔ 前端 `jobId`（`get_job` / `update_score` 即此）。平铺参数上写 `#[serde(alias)]` **无效**（`error: cannot find attribute 'serde' in this scope`）；确实要收蛇形只能给**该条命令**加 `#[tauri::command(rename_all = "snake_case")]`，前端随之必须发蛇形。
+   - ⚠️ **键名写错不会都被单测拦住**：必填平铺参数发错键 = 硬失败（界面贴 `invalid args '<camelKey>' … missing required key '<camelKey>'`）；`Option<T>` 平铺参数发错键 = **静默变 `None`**（`ipc/command.rs` 的 `deserialize_option` 缺键走 `visit_none`）。vitest 只断言前端发了什么，**验证不到 Tauri 的取键逻辑**。
 4. **配置写入分两条命令**：门槛与上限走 `set_limit`，其余键走 `set_app_config`。`min_score` **不在** `WRITABLE_KEYS` 里，塞进 `set_app_config` 会被静默跳过。
 5. **等远端（或等 sidecar 回执）的命令一律 `async`**。同步 `#[tauri::command]` 由 Tauri **在主线程上执行**（`Webview::on_message` → `Window::manager` 都是 `run_on_main_thread`），主线程上的 `recv_timeout` 会把 WebView2 的消息泵一起按停——窗口拖不动、按钮点不动，表现就是「程序无响应」，最长可达 `CHAT_TIMEOUT` 的 90 秒。判据只有一条：**函数体里有没有阻塞等待**。纯本地读库（`*_local`）与纯内存计算（`scrape_progress` 的锁内快照）保持同步即可。
    - ⚠️ 改成 `async` 后函数体仍在工作线程上同步执行，**同一时刻只跑一个任务**。会阻塞等回执的命令不要写成 `async fn` 里再去 `blocking_lock()` 之类的全局锁，排队会比原来更糟。

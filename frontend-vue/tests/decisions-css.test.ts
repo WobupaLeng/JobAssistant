@@ -23,11 +23,12 @@ describe('决策记录弹窗固定窗', () => {
   it('.decisions-modal 宽度 min(860px, calc(100vw - 64px))', () => {
     expect(blockOf('.decisions-modal')).toContain('width: min(860px, calc(100vw - 64px))');
   });
-  it('.dl-rows 是 flex:1 1 auto + min-height:0 + overflow-y:auto 的滚动容器', () => {
+  it('.dl-rows 是 flex:1 1 auto + min-height:0 + overflow-y:scroll 的滚动容器', () => {
     const b = blockOf('.dl-rows');
     expect(b).toContain('flex: 1 1 auto');
     expect(b).toContain('min-height: 0');
-    expect(b).toContain('overflow-y: auto');
+    // scroll 而不是 auto：overlay 滚动条不悬停时不可见，用户会以为这块不能滚
+    expect(b).toContain('overflow-y: scroll');
   });
   it('.dl-head 只定义一次（不重复）', () => {
     expect((css.match(/^\.dl-head\s*\{/gm) || []).length).toBe(1);
@@ -35,8 +36,11 @@ describe('决策记录弹窗固定窗', () => {
   it('.dl-head 不伸缩（flex:0 0 auto）', () => {
     expect(blockOf('.dl-head')).toContain('flex: 0 0 auto');
   });
-  it('.dl-row 四列网格 62px 66px 100px minmax(0,1fr)', () => {
-    expect(blockOf('.dl-row')).toContain('grid-template-columns: 62px 66px 100px minmax(0, 1fr)');
+  it('.dl-row 四列网格：时间列按内容、环节/结论有下限、理由吃剩余', () => {
+    // 62px 的定宽时间列装不下 `11-25 17:29:52`，会把日期和时分拆成两行
+    expect(blockOf('.dl-row')).toContain(
+      'grid-template-columns: max-content minmax(64px, max-content) minmax(64px, max-content) minmax(0, 1fr)',
+    );
   });
   it('入库绿 / 排除红走 tokens', () => {
     expect(blockOf('.dl-row.is-in > .dl-verdict')).toContain('color: var(--good)');

@@ -21,6 +21,8 @@
 
 **测试现状**：`npx vitest run` 全量全绿（数字以现场实跑为准，本文件不记用例数）。秒/毫秒判据已修为 `1e11`（见 §2.3）。
 
+**窗口标题带（2026-11-25 用户裁决）**：只有窗口最上方 20px 能拖窗口、双击最大化/还原；`.topbar` 的静态拖动区已撤，几何判据落在 `lib_ui/drag-allow.ts`（见 §2.4）。
+
 **后端抓取完成信号已通，前端零改动**（本轮后端 fix(sidecar)）：sidecar 新增 `scrape.finished` 事件，Rust 收到即清 `progress.running` 并写 `finished_reason`；Dashboard 每 tick 轮询 `scrape_progress`（`DashboardPage.vue` refreshProgress），下一 tick 顶条自动从「抓取中」转「空闲」，无需新事件接线、`api/types.ts` 既有 `running`/`finished_reason` 形状不变。真实 E2E CDP 取证通过（`%TEMP%\jt-running\t8\t8-05-ui.json`）。
 
 **几何契约补齐完成**（用户裁决「补齐实现，规格不动」）：原型 v7/v8 响应式几何已搬进 Vue——`tokens.css` 追加 `--ui-scale`（`lib_ui/canvas.ts` 的 `computeUiScale = clamp(1, innerWidth/1920, 1.5)`）+ 5 档 `--fs-{2xs,xs,sm,md,lg}`（11/12/13/15/20px × scale）；`lib_ui/use-canvas-scale.ts` 在 AppShell onMounted/resize（rAF 合并）按 `--ui-scale→--rail-w→--detach-w` 顺序写变量；**全部 174 处 font-size 声明用 var()，产物裸 px 字号归零**（vue 系 + 10 份契约 CSS 共享控件均收口）；三窗固定高乘 scale（config 640 / decisions 620 / sensitive 720），对话框宽 `clamp(600,50vw,80vw)` 不乘 scale，A54 job-greet 方块公式落地；`--detach-w` 单一来源（ChatPage 行内绑定已删，只留 syncCanvas + vue-chat.css 静态兜底）；敏感库居中窗规则从 vue-pages.css 覆写迁回 sensitive.css 本体。**残留非阻塞**：契约 CSS 160 处颜色字面量（vue 系已零，全量收口需另轮新增语义令牌）；非字号定值（.job-check/.score-box 等）原型本就是定值，未乘 scale。
@@ -99,6 +101,8 @@
 
 ---
 
+**聊天两处行为修正（2026-11-25 用户 m00145 / m00393）**：① **建会话不再挡住界面**——点还没打过招呼的岗位，`pick()` 不再 `await chat_open`（真机要开浏览器点「立即沟通」再等页面自己跳聊天页，实测 5–15 秒、上限 ~80 秒），只把占位行留在列表、挂「正在打开 Boss 会话…」就返回，用户可以继续点别的会话；真 uid 到了再回填那一行，人还停在上面就顺势进入并拉消息。同一行在飞的 Promise 记在 `ChatPage.vue` 的 `booting` 表里，连点 / 切走再切回只发一次 `chat_open`；失败时占位行留着、提示写在 `note`，再点即重试。② **`local_only` 行**——`chat_open` 给的是聊天页地址里的**加密 uid**，与 `chat_friends` 的**数字 uid** 不是一套（实库已证），只按 uid 合并会让刚建的会话被下一次刷新整条吃掉，故换 uid 时打 `local_only` 并记 `job_id`，`mergeFriends` 仅在远程按岗位 id / 公司名收录到同一条时让位。用例 `tests/chat-session-boot.test.ts`、`tests/chat-model.test.ts`。
+
 ## 2. 坑（踩过的，别再踩）
 
 ### 2.1 构建与工具链
@@ -129,6 +133,7 @@
 - **`styles/index.css` 的 14 份 CSS 顺序**：11 份契约序乱序会导致层级覆盖错误（`pages` 必须早于 `filter`）；3 份 Vue 追加（vue-dashboard/vue-chat/vue-pages）只许在末尾。
 - **CSS 里写 `//!` 或 `///` 会让整份样式表被静默丢弃**，表现为「变量生效、组件样式全无」。Leptos 版当前 0 违规。
 - **时间戳秒/毫秒判据是「`|ts| < 1e11`（10 位及以下）就当秒」**：`lib_ui/time.ts` 与 Leptos 的 `time.rs::to_ms` 同一判据（C14），**改一处必须同改另一处**。取 1e11 后秒覆盖到公元 5138 年、毫秒从 **1973-03-03** 起，`time.time()` 与 `Date.now()` 两个数据源都在各自区间内。**旧判据 1e12 有真缺陷**（2001-09-10 之前的毫秒戳被误乘 1000，例如 2000-02-29 显示成 32129 年），已随本轮修正，`tests/time.test.ts` 全绿。唯一判不了的是 1973 年以前的毫秒值（`|ts| < 1e11` 时与秒不可区分，信息已丢失），不要用「猜日期」的办法补救。
+- **会话副行的 `[送达]`/`[已读]` 靠两个独立字段，缺一个就永远只有裸文本**：`last_from_me`（方向）为真、且 `last_status` 为 `1`/`2` 才出词（`chat-model.ts` 的 `friendMsgTone`）。`last_status` **不是方向**，Boss 用 `0` 表示「对方发的」。发消息后由 `markFriendSent` 就地写 `last_status = 1`，**不许伪造 `2`（已读）**——已读只能等下一次真拉 `chat_friends`。发完也不要立刻重拉列表：那条命令要 reload 整个聊天页（秒级），会把「发出去立刻有反馈」的体感毁掉。
 
 ### 2.4 布局与视觉
 
@@ -140,6 +145,15 @@
 - **右栏错误「叠字」未证实**：测得关闭对话框时只有 1 个 `.rail-error`（`FriendList.vue:133`），`h=131` 是内容撑开的结果。截图叠字疑似 `rail-in` 入场动画截帧，未复现，暂不改标记。
 - **`FriendList` 会渲染两份**：页面右栏与对话框 `#rail` 槽各挂一份（`ChatPage.vue` 的 `prefix="chat-rail"` 与 `chat-detach-rail`，后者 `v-if="ui.chatOpen"`）。改错误/空态时两处都要生效。
 - **顶栏右组未溢出**：1440 视口下 `.tb-tail.right=1389`，`.topbar` 内容宽 1388，恰好放下。不要因此改顶栏宽度。
+- **窗口拖动 / 双击最大化只认最上方 20px**（用户裁决 2026-11-25）：`header.topbar` **不得**再挂静态 `data-tauri-drag-region`（那会让整条 46px 都能拖），改由 `lib_ui/drag-allow.ts` 在捕获阶段按 `ev.clientY < TITLE_STRIP_HEIGHT(20)` 给**命中元素**补属性；上一次的标记必须在下一次 pointerdown 时摘掉，否则该节点永久变成拖动区（曾经的「整窗都能拖」根因）。双击最大化由 Tauri 自带 `drag.js` 处理，**不要**自己再发 `window_toggle_maximize`，否则一次双击翻两次。回归：`tests/title-strip-drag.test.ts`。
+- **日志与决策记录的信息密度**（用户裁决 2026-11-25）：运行日志**正序**（第一行在最上面、新行追加到底部，`features/logs/model.ts::mergeRunRows` 按 `ts asc || seq asc` 排，**不要改回倒序**）；首屏停在第一行，只有用户自己滚到底之后才跟随新行，翻到中间时出现「回到最新」。级别只给**标签**上色（INFO 走 `--accent` / WARN 走 `--warn-*` / ERROR 走 `--bad-*`，正文一律 `--text-1`），整行染色会让满屏日志变成色块。时间列必须 `max-content + white-space: nowrap`：定宽列装不下 `MM-DD HH:mm:ss` 会把日期与时分折成两行（曾被误判成「没有时间戳」）。决策记录行多显示两样库里本就有的数据：`platform`（`platformName`，空串给 `—`）与带年份的 `timeTitle`（tooltip）。滚动条一律 `overflow-y: scroll` + `--scroll-thumb/--scroll-track`（overlay 滚动条不悬停时几乎不可见，曾被误判成「没有滚动条」）。回归：`tests/logs-cursor.test.ts` / `tests/logs-model.test.ts` / `tests/decisions-row.test.ts` / `tests/decisions-css.test.ts`。
+- **实心主按钮 / 品牌标不挂绿色外发光**（用户裁决 2026-11-25）：`.btn-primary` 只留 `inset 0 -1px 0` 内嵌暗线，悬停也只有 `.btn:hover` 的 1px 抬升；`.brand-mark` 同样只留内嵌暗线。绿色 box-shadow（原 `--btn-primary-shadow` / `--btn-primary-shadow-hover`，两枚令牌已删）叠在玻璃底上会散成一圈绿色光晕，被当成「玻璃折射高光」。登录（`PlatformCard`）、打招呼（`JobCard`）、开始抓取（`ScrapeBar`）都是 `.btn-primary`，一处改全改。复查口径：CDP 悬停前后比 `boxShadow` / `backdrop-filter` / `::before`·`::after`，现在只有 `transform` 变化。
+- **概览页日志卡要有内容、且贴底跟随**（用户裁决 2026-11-25）：日志卡原先只在「已登录 + 抓取运行中」才轮询，空闲态永远是空框，用户看到的是「滚下去没有操作信息，但决策记录里的运行日志能看到」。现在 `DashboardPage.vue::primeLogs` 在登录态一到就补一次 `list_logs` 快照（**只补一次**，`logPrimed` 守门；`list_logs` 只读 Rust 进程内 `LogRing`，不碰 sidecar、不导航浏览器），实时追加仍由 `startLogPolling` 的运行态闸门管——**空闲态依然一条定时 IPC 都不发**。`LogCard.vue` 的 `.log-rows` 加了贴底跟随（`stickBottom`，8px 容差，用户手动上翻后停止跟随）：卡高只放得下约 8 行，不跟随的话看到的永远是最早的几行。回归：`tests/dashboard-expect-passive.test.ts`（原「挂载时不轮询」用例改成「只补一次快照，空闲不轮询」）。
+- **日志弹窗：整块一个滚动区 + 筛选条吸顶 + 页签选中态**（用户裁决 2026-11-25）：
+  - `.tab.is-active` 的**本体**样式原先根本不存在（只有 `.tab.is-active .tab-num` 给计数换色），选中与未选中几乎看不出区别——用户报「选中的 tab 没有高亮」。现 `controls.css` 给 `.tab.is-active` 实心主色药丸（`--primary-soft` 底 + `inset 0 0 0 1px var(--primary)` 环），另加 `.tab:hover:not(.is-active)` 浅玻璃。**不要再只给 `.tab-num` 上色。**
+  - 运行日志与决策日志的筛选条已**移进滚动容器内部**：`.run-log-box` / `.dl-rows` 的第一个子节点，类名 `.log-tools.is-sticky`（`position: sticky; top: 0`，底色必须是不透明的 `--popup-surface`，否则滚过去的内容会从筛选条底下透出来）。整块内容只有一个滚动条，工具栏也不会被挤出可视区。
+  - 内容一律不截断：`.dl-row .dl-who` 去掉了 `nowrap + ellipsis`、`.dl-row .dl-why` 去掉了两行 clamp（用户口径「所有信息都写进滚屏，不要有遗漏」），行高随内容长。
+  - 筛选条件必须看得见：`logs-run-filter-state` / `logs-decision-filter-state`（主色 `--primary-text`）显示「筛选 级别 错误 / 关键字「xxx」」；`watch([levels, runKeyword])` 在条件变化时把列表滚回顶部。**排查提示**：级别筛选「行数不变」不等于没生效——当选中的那一档占满了全部日志时，行数本来就不变，先看筛选状态文字与「N / M 条」。
 - **未核实项**：日志栏与 `section.page-dashboard` 是否缺 `.dashboard` 类导致 `.app-body` 行布局错位（未运行态确认）；`controls.css` 的 `.btn-danger` 浅色主题覆盖（8 处调用，定义存在，覆盖未核）；`ScrapeBar` 的 `scrape-stop-btn` 初始 disabled、`chat-detach-close-btn` 文案（C5/C9，未核）；`.dashboard` padding-top 对齐（A2，未核）。
 
 ### 2.5 Boss 消息卡顿（一档 + 二档 4 + 三档 6 已落地；仅剩三档第 7 条待产品拍板）
@@ -233,8 +247,15 @@
 - 顺带修掉两个真缺陷：
   - `pick()` 的占位分支原本 `return pick(realUid)`，重建后 uid 变了但 `pick` 里 `switched` 判据用的是入参，会漏拉消息；改成直接 `await loadMessages(realUid !== '' ? realUid : uid)`。
   - `watch(() => ui.value.chatOpen, …)` 在 `pick()` 之后立刻又调一次 `loadMessages(旧 uid)`，导致 `chat_messages` 发两次、`chat_open` 重建两次。新增两道守卫：`if (loadingMessages.value) return;` 与 `if (feedUid.value !== friend?.uid) return;`。为此引入 `feedUid`（「屏上这屏消息属于哪条会话」），与 `ui.value.activeFriendsUid`（选中）分开记——重建会中途换 uid，两者不能等同。
-- 回归：`chat-page.test.ts` 新增「点开的会话在 Boss 上找不到 ⇒ 按岗位重建会话并重新拉消息」，断言 `chat_open` 只发一次、载荷是 `{ job_id: 'job-u1' }`、`chat_messages` 依次用旧 uid 和新 uid 各拉一次、界面不含后端原文。
+- 回归：`chat-page.test.ts` 新增「点开的会话在 Boss 上找不到 ⇒ 按岗位重建会话并重新拉消息」，断言 `chat_open` 只发一次、载荷是 `{ jobId: 'job-u1' }`、`chat_messages` 依次用旧 uid 和新 uid 各拉一次、界面不含后端原文。
 - 门禁：`vue-tsc --noEmit` exit 0；`vitest` 38 files / **652 passed**；`vite build` exit 0；`cargo test` 451 passed / 0 failed；`compileall` exit 0。
+
+**2026-11-25 五轮已落地 · 聊天三条命令键名纠偏（用户截图：建立会话失败 `missing required key jobId`，未跑门禁）**
+
+- 症状：点开未聊过的岗位 / 会话 uid 失效时，红条贴 `建立会话失败：invalid args 'jobId' for command 'chat_open': command chat_open missing required key jobId`；Boss 页另有一条自家 toast「该boss不在好友列表，无法沟通」（**不是本仓库产出**，属 Boss 服务端拒绝建会话，与键名无关）。
+- 根因：`#[tauri::command]` 的**平铺参数默认按 camelCase 取键**（tauri-macros 2.7.6 `src/lib.rs:63-64` 明写 `"camelCase"` (default)），而 `api/commands/chat.ts` 三条按旧注释发了蛇形。`chat_open.job_id` / `chat_send_resume.resume_id` 是必填 ⇒ 硬失败；`chat_send.job_id` 是 `Option<String>` ⇒ 缺键静默 `None`，「聊过就算投过」从未生效且无报错。
+- 修法（用户拍板 A 案：对齐 Tauri 默认与既有 `get_job` / `update_score`）：`api/commands/chat.ts` 三条键名改 `jobId` / `resumeId`，注释改成真口径；`tests/commands-payload.test.ts` 三条断言与 describe 说明同步；`tests/chat-page.test.ts` 的重建断言改 `{ jobId: 'job-u1' }`；`backend-tauri/AGENTS.md` §3.3 重写为「结构体参数蛇形 + 平铺参数驼峰」两条规则，并记下 `Option` 缺键静默失效这一坑。
+- 未验证：按用户要求本轮**不执行任何命令**（`vue-tsc` / `vitest` / `cargo test` / `tauri build` 均未跑），真机点一次「立即沟通」的 E2E 留待下一轮。
 
 **仍待产品拍板**：三档第 7 条（点击会话只读本地库、抓取延后台）未做——它直接决定「读到的消息有多新」。右栏 `ChatError: 在 Boss 会话列表里找不到这条会话` 的后端病灶已除（见下），三档第 7 条不再是它的前提。二档第 5 条（虚拟化）按原判断不做。
 
@@ -260,6 +281,7 @@
 - `vitest` 需完整文件访问（沙箱禁 spawn → esbuild `EPERM`）。
 - **playwright-skill 未安装**，无法做浏览器自动化验证；验证手段是 `vue-tsc` + `vitest` + 手工复测。
 - 改 CSS 前读本目录 `AGENTS.md`：分层顺序 tokens→layout→controls→jobs→drawer→motion→scrape→pages→sensitive→auto→filter；`vue-*` 禁颜色字面量；任何 CSS 文件不得含 `//!` 或 `///`（整份样式表被静默丢弃）。
+- **聊天的两套 uid 不通用**：`chat_open` 返回的 uid 取自聊天页地址 `?id=`，是加密串（如 `c83b66ecd36a48070X1-3ti-FFBZ`）；`chat_friends` 每条的 `uid` 是纯数字（实库 145 行全是数字，另有 `dom:0…` 垃圾行）。按 uid 做「新会话 ↔ 好友列表」匹配永远失败，判同一条只能靠岗位 id / 公司名（`mergeFriends` 的 `confirmedBy`）。`scraper/chat.py` 里「地址里的 id 就是 friends() 的 uid」那句注释是错的。
 
 ---
 

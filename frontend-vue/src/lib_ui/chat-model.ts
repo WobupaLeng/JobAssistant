@@ -334,6 +334,9 @@ export function pendingFriend(uid: string, company: string, title = ''): Friend 
  * 少了形态判据会把 Boss 真实会话误判成占位。
  */
 export function isPendingFriend(friend: Friend): boolean {
+  // 本机新建的真实会话（`local_only`）：uid 是 Boss 聊天页的加密 id，形态与占位行像，
+  // 但它已经能发消息、能拉历史——一旦误判成占位，输入框会消失、「移除」按钮会把它删掉。
+  if (friend.local_only === true) return false;
   if (friend.last_time !== '' || friend.unread !== 0) return false;
   if (friend.uid.startsWith(PENDING_UID_MARK)) return true;
   // 旧形态（`g` + 岗位标识）：光看前缀会把真实会话吃掉，所以补一条形态判据——
@@ -366,10 +369,10 @@ export function withPending(head: Friend[], pending: Friend | null): Friend[] {
  */
 export function sortFriends(friends: readonly Friend[]): Friend[] {
   const rank = (f: Friend): number => {
-    if (isPendingFriend(f)) return 0;
+    if (isPendingFriend(f) || f.local_only === true) return 0;
     return (f.last_ts ?? 0) > 0 ? 1 : 2;
   };
-  const ts = (f: Friend): number => (isPendingFriend(f) ? 0 : (f.last_ts ?? 0));
+  const ts = (f: Friend): number => (isPendingFriend(f) || f.local_only === true ? 0 : (f.last_ts ?? 0));
   return [...friends].sort((a, b) => {
     const ra = rank(a);
     const rb = rank(b);
@@ -380,6 +383,45 @@ export function sortFriends(friends: readonly Friend[]): Friend[] {
     }
     return a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0;
   });
+}
+
+/* ------------------------------------------------------------------ *
+ * 我发出一条消息：就地更新那一行（副行文本 + [送达]），不重拉整张列表。
+ * ------------------------------------------------------------------ */
+
+/**
+ * 刚给某位 Boss 发出一条消息：把会话列表里那一行改成「我刚发了这句」。
+ *
+ * 为什么不在发完立刻重拉 `chat_friends`：那条命令要 reload 整个聊天页（实测 0.7s 起步，
+ * 慢的时候几秒），只为一行状态把整张列表刷一遍不值当，用户看到的还是「卡」。
+ *
+ * `last_status = 1` 是 Boss 的「已送达」。**不许伪造 2（已读）**：已读只能等服务端
+ * 下次真拉列表时给；这里写成 2 就是骗用户。
+ *
+ * `unread` 清零：能发出消息说明这条会话正开着，未读标签该收起来（`friendMsgTone`
+ * 优先看 `unread`，不清零会让 `[送达]` 永远被 `[未读]` 盖住）。
+ */
+export function markFriendSent(
+  friends: readonly Friend[],
+  uid: string,
+  text: string,
+  now: Date = new Date(),
+): Friend[] {
+  return sortFriends(
+    friends.map((f) =>
+      f.uid === uid
+        ? {
+            ...f,
+            last_msg: text,
+            last_time: nowText(now),
+            last_ts: now.getTime(),
+            last_from_me: true,
+            last_status: 1,
+            unread: 0,
+          }
+        : f,
+    ),
+  );
 }
 
 /* ------------------------------------------------------------------ *
@@ -396,12 +438,26 @@ export function mergeFriends(current: readonly Friend[], remote: readonly Friend
   for (const f of current) byUid.set(f.uid, f);
   const remoteUids = new Set(remote.map((f) => f.uid));
   const pending = current.filter((f) => isPendingFriend(f) && !remoteUids.has(f.uid));
+  // 本机新建的真实会话：uid 与好友列表的 id 空间不同（加密 uid vs 数字 uid），
+  // 按 uid 一定匹配不上，只能靠「岗位 id 相同」或「公司名相同」判远程是否已收录。
+  const localOnly = current.filter(
+    (f) => f.local_only === true && !remoteUids.has(f.uid) && !remote.some((r) => confirmedBy(f, r)),
+  );
   const rows = remote.map((next) => {
     const prev = byUid.get(next.uid);
     if (prev !== undefined && sameFriend(prev, next)) return prev;
     return next;
   });
-  return sortFriends([...pending, ...rows]);
+  return sortFriends([...pending, ...localOnly, ...rows]);
+}
+
+/** 远程的这条是否就是本地新建的那条（岗位 id 优先，退一步按公司名）。 */
+function confirmedBy(local: Friend, remote: Friend): boolean {
+  const jobId = local.job_id ?? '';
+  if (jobId !== '' && (remote.job_id ?? '') === jobId) return true;
+  const a = normCompany(local.company);
+  const b = normCompany(remote.company);
+  return a !== '' && b !== '' && (a === b || a.startsWith(b) || b.startsWith(a));
 }
 
 function sameFriend(a: Friend, b: Friend): boolean {
@@ -414,6 +470,7 @@ function sameFriend(a: Friend, b: Friend): boolean {
     a.last_time === b.last_time &&
     a.unread === b.unread &&
     a.avatar === b.avatar &&
+    (a.local_only ?? false) === (b.local_only ?? false) &&
     (a.last_ts ?? 0) === (b.last_ts ?? 0)
   );
 }
@@ -471,6 +528,11 @@ function sameMessage(a: ChatMessage, b: ChatMessage): boolean {
 
 export const PENDING_STORAGE_KEY = 'chat.pendingFriends';
 
+/** 需要落 localStorage 的「本机独有行」：打招呼占位 + 本机新建、远程还没收录的真实会话。 */
+function isLocalRow(friend: Friend): boolean {
+  return isPendingFriend(friend) || friend.local_only === true;
+}
+
 /** 跨页联动键：当前展开聊天的 Boss 公司名（聊天页写，概览页读）。 */
 export const CHAT_ACTIVE_COMPANY_KEY = 'chat.activeCompany';
 /** 同页事件名：写入方在本标签页触发，概览页监听它（storage 事件对写入方不触发）。 */
@@ -485,7 +547,7 @@ export function loadPendingFriends(storage: Storage | null = safeStorage()): Fri
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
       (f): f is Friend =>
-        typeof f === 'object' && f !== null && typeof (f as Friend).uid === 'string' && isPendingFriend(f as Friend),
+        typeof f === 'object' && f !== null && typeof (f as Friend).uid === 'string' && isLocalRow(f as Friend),
     );
   } catch {
     return [];
@@ -495,7 +557,7 @@ export function loadPendingFriends(storage: Storage | null = safeStorage()): Fri
 export function savePendingFriends(friends: readonly Friend[], storage: Storage | null = safeStorage()): void {
   if (storage === null) return;
   try {
-    const pending = friends.filter(isPendingFriend);
+    const pending = friends.filter(isLocalRow);
     if (pending.length === 0) storage.removeItem(PENDING_STORAGE_KEY);
     else storage.setItem(PENDING_STORAGE_KEY, JSON.stringify(pending));
   } catch {
@@ -521,6 +583,11 @@ export const FRIENDS_FAIL_PREFIX = '读取会话失败：';
 export const MESSAGES_FAIL_PREFIX = '读取消息失败：';
 /** 跳过远端拉取时的提示：明确告诉用户「没新消息」，文案跟按钮统一叫「刷新」。 */
 export const MESSAGES_FRESH_NOTE = '已是最新消息，点「刷新」可重新拉取。';
+/**
+ * 消息流末尾只留前半句：刷新按钮就在列表头顶，气泡区里再教一遍只会把
+ * 一句灰字拉成两行。
+ */
+export const MESSAGES_FRESH_SHORT = '已是最新消息';
 export const SEND_FAIL_PREFIX = '发送失败：';
 export const RESUME_SENT_NOTE = '简历已发出';
 export const RECALL_DONE_NOTE = '已撤回上一条消息';

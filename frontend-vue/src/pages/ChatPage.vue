@@ -42,6 +42,7 @@ import {
   GREET_SENT_NOTE,
   MESSAGES_FAIL_PREFIX,
   MESSAGES_FRESH_NOTE,
+  MESSAGES_FRESH_SHORT,
   RECALL_DONE_NOTE,
   SEND_FAIL_PREFIX,
   SESSION_BOOTING_NOTE,
@@ -55,6 +56,7 @@ import {
   isPendingFriend,
   loadPendingFriends,
   makeMessagesMemo,
+  markFriendSent,
   mergeFriends,
   mergeMessages,
   OPENING_SESSION_NOTE,
@@ -121,8 +123,15 @@ const noteTone = computed<'bad' | 'hint'>(() => {
 });
 /** 顶部红条用的那句（只有真错误才占顶部）。 */
 const topNote = computed(() => (noteTone.value === 'bad' ? note.value : ''));
-/** 消息流末尾灰色说明条用的那句。 */
-const bottomNote = computed(() => (noteTone.value === 'hint' ? note.value : ''));
+/**
+ * 消息流末尾灰色说明条用的那句。
+ * 「已是最新消息，点「刷新」可重新拉取」在气泡区只用前半句：刷新按钮就在列表头顶，
+ * 对话框里重复一遍只会把一句灰字挤成两行。列表头顶仍是完整那句。
+ */
+const bottomNote = computed(() => {
+  if (noteTone.value !== 'hint') return '';
+  return note.value === MESSAGES_FRESH_NOTE ? MESSAGES_FRESH_SHORT : note.value;
+});
 /** 「已是最新消息」要出现**两处**：Boss 列表最上方 + 消息流末尾，都是灰色居中。 */
 const freshNote = computed(() => (note.value === MESSAGES_FRESH_NOTE ? note.value : ''));
 
@@ -220,11 +229,12 @@ async function loadFriends(allowOpenSession = false): Promise<void> {
   if (fresh.length > 0) friends.value = [...fresh, ...friends.value];
   // 本地缓存的会话列表：库里有就直接先渲染，远程拉到之后按 uid 就地合并。
   // 不读它，界面上就只剩「正在加载 + 一句报错」，本地数据等于白存。
-  // 只在列表还空的时候补：已有内容时不该被一份可能更旧的缓存盖一下。
-  if (friends.value.length === 0) {
+  // 判据是「还没有任何**真实**会话」：上面刚并进来的打招呼占位只是本机草稿，
+  // 它不算内容——只拿一条占位就跳过缓存，用户看到的就是「本地数据没加载」。
+  if (!friends.value.some((f) => !isPendingFriend(f))) {
     try {
       const cached = await chatFriendsLocal();
-      if (friends.value.length === 0 && cached.items.length > 0) {
+      if (cached.items.length > 0) {
         friends.value = mergeFriends(friends.value, cached.items);
       }
     } catch {
@@ -347,10 +357,19 @@ async function pick(uid: string): Promise<void> {
     // 去拉消息只会报「找不到这条会话」。先真去建会话，拿到服务端分配的 uid，
     // 再用真 uid 继续——占位行原地换掉。
     if (friend !== null && isPendingFriend(friend)) {
-      const realUid = await openSessionFor(friend);
-      // 拿到真 uid 后同样走 `loadMessages`（不递归 `pick`）：
-      // uid 没变时递归进去 `switched` 为 false，会连消息都不拉。
-      await loadMessages(realUid !== '' ? realUid : uid);
+      // 建会话要真的去 Boss 上点「立即沟通」再等页面自己跳聊天页（实测 5–15 秒，最坏 ~80 秒）：
+      // 选中不能卡在这一步（用户 m00393）。先把占位行留在列表里、挂上「建立中」提示就返回，
+      // 用户可以接着点别的会话；真 uid 到了再回填这一行，人还停在这一行上就顺势进入。
+      void ensureSession(friend).then((realUid) => {
+        // 失败提示已由 `openSessionFor` 写好，占位行留着可以再点一次。
+        if (realUid === '') return;
+        // 用户已经点到别处：只回填这一行的 uid，不抢选中。
+        if (ui.value.activeFriendsUid !== uid) return;
+        ui.value = pickFriend(ui.value, realUid);
+        // 拿到真 uid 后同样走 `loadMessages`（不递归 `pick`）：
+        // uid 没变时递归进去 `switched` 为 false，会连消息都不拉。
+        void loadMessages(realUid);
+      });
       return;
     }
     await loadMessages(uid);
@@ -373,13 +392,30 @@ async function rebindDeadSession(
     const reply = await chatOpen(jobId);
     const realUid = (reply.uid ?? '').trim();
     if (realUid === '') return null;
-    const rebound: Friend = { ...friend, uid: realUid };
+    // uid 是聊天页地址里的加密 id（与好友列表的数字 uid 不是一套），远程列表暂时认不出它，
+    // 打上 `local_only` 让刷新不再把这一行吃掉；岗位 id 一并记下，供远程收录后比对。
+    const rebound: Friend = { ...friend, uid: realUid, job_id: friend.job_id ?? jobId, local_only: true };
     friends.value = friends.value.map((f) => (f.uid === friend.uid ? rebound : f));
     savePendingFriends(friends.value);
     return { uid: realUid, friend: rebound };
   } catch {
     return null;
   }
+}
+
+/**
+ * 正在后台建会话的行（key 是**建之前的占位 uid**，建好后这一行的 uid 就变了）。
+ * 连点 / 双击同一行只发一次 `chat_open`：建一次会话要开浏览器点按钮，重复发就是重复开页面。
+ */
+const booting = new Map<string, Promise<string>>();
+
+/** 建会话；同一行在飞时复用同一个 Promise，调用方可以放心 await。 */
+function ensureSession(friend: Friend): Promise<string> {
+  const running = booting.get(friend.uid);
+  if (running !== undefined) return running;
+  const task = openSessionFor(friend).finally(() => booting.delete(friend.uid));
+  booting.set(friend.uid, task);
+  return task;
 }
 
 /**
@@ -408,10 +444,10 @@ async function openSessionFor(friend: Friend): Promise<string> {
     return '';
   }
   // 占位行原地换成真实会话：uid 变了，名字/公司沿用占位行（服务端还没回列表）。
+  // `local_only`：`chat_open` 给的是聊天页地址里的加密 uid，与好友列表的数字 uid 不是一套，
+  // 不打标记的话下一次 `chat_friends` 合并会把这行整条删掉（用户 m00145：刚打招呼的 Boss 消失）。
   friends.value = friends.value.map((f) =>
-    f.uid === friend.uid
-      ? { ...f, uid: realUid, last_time: f.last_time, unread: f.unread }
-      : f,
+    f.uid === friend.uid ? { ...f, uid: realUid, job_id: f.job_id ?? jobId, local_only: true } : f,
   );
   savePendingFriends(friends.value);
   note.value = '';
@@ -443,10 +479,21 @@ function removePending(uid: string): void {
 async function greetFor(uid: string): Promise<void> {
   if (generating.value) return;
   if (ui.value.activeFriendsUid !== uid) await pick(uid);
+  // 话术要发得出去才算数：占位行没有真 uid，`chat_send` 无从下手，所以这里必须等会话建完。
+  // 等待不影响界面操作——`pick` 已经把「建立中」提示挂上去了。
+  const friend = friends.value.find((f) => f.uid === uid) ?? null;
+  if (friend !== null && isPendingFriend(friend) && (await ensureSession(friend)) === '') return;
   await generateGreet();
 }
 
 /* ---------------------------------- 发送 ------------------------------------ */
+
+/** 发出一条消息后，把会话列表里那一行改成「刚发过」（副行文本 + `[送达]`）。 */
+function bumpRow(uid: string, text: string): void {
+  friends.value = markFriendSent(friends.value, uid, text);
+  // 本机新建的会话只在 localStorage 里活着，改了那一行要顺手落盘，否则刷新回到旧文案。
+  savePendingFriends(friends.value);
+}
 
 async function send(): Promise<void> {
   const friend = talkableFriend.value;
@@ -473,6 +520,8 @@ async function send(): Promise<void> {
     ], messages.value);
     draft.value = '';
     note.value = '消息已发送';
+    // 左侧那一行就地改成「我刚发了这句」：副行文字 + `[送达]` 立刻出现，不必等重拉列表。
+    bumpRow(friend.uid, outgoing);
     // 已用掉这次岗位标记：之后再发给同一 Boss 不得重复标记。
     if (jobId !== null) greetJob.value = null;
     // 发完消息主动请求一次自动投递状态（不计入 60~90 秒的心跳节拍）。
@@ -493,6 +542,7 @@ async function send(): Promise<void> {
         ], messages.value);
         draft.value = '';
         note.value = '消息已发送';
+        bumpRow(moved.uid, outgoing);
         if (jobId !== null) greetJob.value = null;
         if (beat !== null) void beat.start();
         return;
@@ -530,6 +580,8 @@ async function sendGreet(): Promise<void> {
       );
       savePendingFriends(friends.value);
     }
+    // 打招呼也是发消息：同样让那一行立刻显示 `[送达]`（否则只有右边对话有气泡）。
+    bumpRow(friend.uid, text);
     note.value = GREET_SENT_NOTE;
   } catch (e) {
     note.value = `发送失败：${errText(e)}`;
@@ -672,7 +724,9 @@ function consumeGreetDraft(): void {
   if (target !== null) {
     uid = target.uid;
   } else {
-    const placeholder = pendingFriend(intent.company, intent.company);
+    // uid 后缀必须是**岗位 id**（`pending:<job.id>`）：`openSessionFor` 会把这段当作
+    // `chat_open` 的 jobId 去 Boss 上建会话，填公司名必然建不出来。
+    const placeholder = pendingFriend(intent.jobId || intent.company, intent.company);
     friends.value = withPending(friends.value, placeholder);
     savePendingFriends(friends.value);
     uid = placeholder.uid;
@@ -1073,7 +1127,6 @@ defineExpose({
 
     <template #rail>
       <FriendList
-        v-if="ui.chatOpen"
         prefix="chat-detach-rail"
         :title="'Boss 列表'"
         :unread="unreadTotal(friends)"

@@ -95,6 +95,10 @@ CREATE TABLE IF NOT EXISTS chat_friends (
     avatar      TEXT,
     msg_count   INTEGER DEFAULT 0,
     last_ts     INTEGER,
+    -- 最后一条是不是我发的，以及我发的最后一条的送达态（1 已送达 / 2 已读）。
+    -- 界面靠这两列在会话副行加 `[送达]`/`[已读]`，缺它们就永远只有裸文本。
+    last_from_me INTEGER,
+    last_status  INTEGER,
     synced_at   INTEGER NOT NULL,
     PRIMARY KEY (platform, uid)
 );
@@ -123,7 +127,11 @@ CREATE INDEX IF NOT EXISTS idx_chat_friends_platform ON chat_friends(platform, s
 /// `last_ts` 是本轮新增（用户 m01539）：会话列表判新旧只看「最后聊天时刻」，
 /// 而 `last_time` 是给人看的文案（「昨天」「11-18」），没法比较大小。
 /// 旧库没有这一列时必须补上，否则新建的 UPSERT 语句会直接报 `no such column`。
-pub const CHAT_UPGRADE_COLUMNS: &[(&str, &str)] = &[("last_ts", "INTEGER")];
+pub const CHAT_UPGRADE_COLUMNS: &[(&str, &str)] = &[
+    ("last_ts", "INTEGER"),
+    ("last_from_me", "INTEGER"),
+    ("last_status", "INTEGER"),
+];
 
 /// 建索引语句。**必须在补列之后执行**。
 ///

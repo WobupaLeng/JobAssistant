@@ -1,12 +1,12 @@
 /**
- * 调色板：主题色联动。只改「强调色」一族令牌（主色、辅助色、主按钮与高亮文字），
- * 不碰布局几何。色值写在 `<html>` 行内 style 上覆盖 tokens.css 默认值，所以深浅切换后
- * 依然生效。存储键 `aja.palette`。
+ * 调色板：主题色联动。只改「强调色」一族令牌（主色、辅助色、主按钮与高亮文字）
+ * 与外壳染色，不碰布局几何。色值写在 `<html>` 行内 style 上覆盖 tokens.css
+ * 默认值，所以深浅切换后依然生效。存储键 `aja.palette`。
  */
 
 export const PALETTE_KEY = 'aja.palette';
 
-export type PaletteId = 'emerald' | 'ocean' | 'violet' | 'amber' | 'rose';
+export type PaletteId = 'cobalt' | 'teal' | 'moss' | 'marigold' | 'coral' | 'magenta' | 'iris';
 
 interface PaletteTone {
   primary: string;
@@ -14,18 +14,18 @@ interface PaletteTone {
   primarySoft: string;
   primaryBorder: string;
   primaryText: string;
+  /** 主按钮文字色：按按钮渐变最暗端算对比度，不随深浅一刀切。 */
+  primaryFg: string;
   accent: string;
   accentSoft: string;
-  glassTint: string;
-  glassTintStrong: string;
-  /** 页面背景的主色染色（径向光斑），随调色板变化。 */
+  /** 外壳左上角的主色径向光斑，随调色板变化。 */
   bgWash: string;
 }
 
 export interface PaletteDef {
   id: PaletteId;
   label: string;
-  /** 调色板圆点的展示色（取深色主色）。 */
+  /** 调色板圆点的展示色（取可辨识的亮色，不一定是按钮主色）。 */
   swatch: string;
   dark: PaletteTone;
   light: PaletteTone;
@@ -33,95 +33,89 @@ export interface PaletteDef {
 
 export const PALETTES: readonly PaletteDef[] = [
   {
-    id: 'emerald',
-    label: '翡翠',
-    swatch: '#10b981',
+    id: 'cobalt',
+    label: '钴蓝',
+    swatch: '#3b82f6',
     dark: {
-      primary: '#10b981',
-      primaryStrong: '#059669',
-      primarySoft: 'rgba(16, 185, 129, 0.16)',
-      primaryBorder: 'rgba(16, 185, 129, 0.4)',
-      primaryText: '#6ee7b7',
-      accent: '#2563eb',
-      accentSoft: 'rgba(37, 99, 235, 0.18)',
-      glassTint: 'rgba(16, 185, 129, 0.05)',
-      glassTintStrong: 'rgba(16, 185, 129, 0.10)',
-      bgWash: 'rgba(16, 185, 129, 0.22)',
+      primary: '#2563eb',
+      primaryStrong: '#1d4ed8',
+      primarySoft: 'rgba(37, 99, 235, 0.16)',
+      primaryBorder: 'rgba(37, 99, 235, 0.42)',
+      primaryText: '#93c5fd',
+      primaryFg: '#ffffff',
+      accent: '#06b6d4',
+      accentSoft: 'rgba(6, 182, 212, 0.18)',
+      bgWash: 'rgba(37, 99, 235, 0.22)',
     },
     light: {
-      primary: '#10b981',
-      primaryStrong: '#059669',
-      primarySoft: 'rgba(16, 185, 129, 0.14)',
-      primaryBorder: 'rgba(16, 185, 129, 0.4)',
-      primaryText: '#047857',
-      accent: '#2563eb',
-      accentSoft: 'rgba(37, 99, 235, 0.12)',
-      glassTint: 'rgba(16, 185, 129, 0.04)',
-      glassTintStrong: 'rgba(16, 185, 129, 0.08)',
-      bgWash: 'rgba(16, 185, 129, 0.14)',
+      primary: '#2563eb',
+      primaryStrong: '#1d4ed8',
+      primarySoft: 'rgba(37, 99, 235, 0.12)',
+      primaryBorder: 'rgba(37, 99, 235, 0.4)',
+      primaryText: '#1e40af',
+      primaryFg: '#ffffff',
+      accent: '#0891b2',
+      accentSoft: 'rgba(8, 145, 178, 0.12)',
+      bgWash: 'rgba(37, 99, 235, 0.14)',
     },
   },
   {
-    id: 'ocean',
-    label: '海蓝',
-    swatch: '#0ea5e9',
+    id: 'teal',
+    label: '青碧',
+    swatch: '#14b8a6',
     dark: {
-      primary: '#0ea5e9',
-      primaryStrong: '#0284c7',
-      primarySoft: 'rgba(14, 165, 233, 0.16)',
-      primaryBorder: 'rgba(14, 165, 233, 0.4)',
-      primaryText: '#7dd3fc',
-      accent: '#6366f1',
-      accentSoft: 'rgba(99, 102, 241, 0.18)',
-      glassTint: 'rgba(14, 165, 233, 0.05)',
-      glassTintStrong: 'rgba(14, 165, 233, 0.10)',
-      bgWash: 'rgba(14, 165, 233, 0.22)',
+      primary: '#14b8a6',
+      primaryStrong: '#0d9488',
+      primarySoft: 'rgba(20, 184, 166, 0.16)',
+      primaryBorder: 'rgba(20, 184, 166, 0.42)',
+      primaryText: '#5eead4',
+      primaryFg: '#04120c',
+      accent: '#38bdf8',
+      accentSoft: 'rgba(56, 189, 248, 0.18)',
+      bgWash: 'rgba(20, 184, 166, 0.20)',
     },
     light: {
-      primary: '#0ea5e9',
-      primaryStrong: '#0284c7',
-      primarySoft: 'rgba(14, 165, 233, 0.14)',
-      primaryBorder: 'rgba(14, 165, 233, 0.4)',
-      primaryText: '#0369a1',
-      accent: '#6366f1',
-      accentSoft: 'rgba(99, 102, 241, 0.12)',
-      glassTint: 'rgba(14, 165, 233, 0.04)',
-      glassTintStrong: 'rgba(14, 165, 233, 0.08)',
-      bgWash: 'rgba(14, 165, 233, 0.14)',
+      primary: '#0f766e',
+      primaryStrong: '#115e59',
+      primarySoft: 'rgba(15, 118, 110, 0.12)',
+      primaryBorder: 'rgba(15, 118, 110, 0.4)',
+      primaryText: '#115e59',
+      primaryFg: '#ffffff',
+      accent: '#0284c7',
+      accentSoft: 'rgba(2, 132, 199, 0.12)',
+      bgWash: 'rgba(15, 118, 110, 0.13)',
     },
   },
   {
-    id: 'violet',
-    label: '紫罗兰',
-    swatch: '#8b5cf6',
+    id: 'moss',
+    label: '苔绿',
+    swatch: '#84cc16',
     dark: {
-      primary: '#8b5cf6',
-      primaryStrong: '#7c3aed',
-      primarySoft: 'rgba(139, 92, 246, 0.16)',
-      primaryBorder: 'rgba(139, 92, 246, 0.42)',
-      primaryText: '#c4b5fd',
-      accent: '#ec4899',
-      accentSoft: 'rgba(236, 72, 153, 0.18)',
-      glassTint: 'rgba(139, 92, 246, 0.06)',
-      glassTintStrong: 'rgba(139, 92, 246, 0.11)',
-      bgWash: 'rgba(139, 92, 246, 0.24)',
+      primary: '#84cc16',
+      primaryStrong: '#65a30d',
+      primarySoft: 'rgba(132, 204, 22, 0.16)',
+      primaryBorder: 'rgba(132, 204, 22, 0.42)',
+      primaryText: '#bef264',
+      primaryFg: '#04120c',
+      accent: '#2dd4bf',
+      accentSoft: 'rgba(45, 212, 191, 0.18)',
+      bgWash: 'rgba(132, 204, 22, 0.20)',
     },
     light: {
-      primary: '#8b5cf6',
-      primaryStrong: '#7c3aed',
-      primarySoft: 'rgba(139, 92, 246, 0.14)',
-      primaryBorder: 'rgba(139, 92, 246, 0.42)',
-      primaryText: '#6d28d9',
-      accent: '#ec4899',
-      accentSoft: 'rgba(236, 72, 153, 0.12)',
-      glassTint: 'rgba(139, 92, 246, 0.04)',
-      glassTintStrong: 'rgba(139, 92, 246, 0.08)',
-      bgWash: 'rgba(139, 92, 246, 0.14)',
+      primary: '#4d7c0f',
+      primaryStrong: '#3f6212',
+      primarySoft: 'rgba(77, 124, 15, 0.12)',
+      primaryBorder: 'rgba(77, 124, 15, 0.38)',
+      primaryText: '#3f6212',
+      primaryFg: '#ffffff',
+      accent: '#0f766e',
+      accentSoft: 'rgba(15, 118, 110, 0.12)',
+      bgWash: 'rgba(77, 124, 15, 0.12)',
     },
   },
   {
-    id: 'amber',
-    label: '琥珀',
+    id: 'marigold',
+    label: '金盏',
     swatch: '#f59e0b',
     dark: {
       primary: '#f59e0b',
@@ -129,57 +123,107 @@ export const PALETTES: readonly PaletteDef[] = [
       primarySoft: 'rgba(245, 158, 11, 0.16)',
       primaryBorder: 'rgba(245, 158, 11, 0.42)',
       primaryText: '#fcd34d',
-      accent: '#f97316',
-      accentSoft: 'rgba(249, 115, 22, 0.18)',
-      glassTint: 'rgba(245, 158, 11, 0.05)',
-      glassTintStrong: 'rgba(245, 158, 11, 0.10)',
+      primaryFg: '#04120c',
+      accent: '#fb7185',
+      accentSoft: 'rgba(251, 113, 133, 0.18)',
       bgWash: 'rgba(245, 158, 11, 0.20)',
     },
     light: {
-      primary: '#f59e0b',
-      primaryStrong: '#d97706',
-      primarySoft: 'rgba(245, 158, 11, 0.14)',
-      primaryBorder: 'rgba(245, 158, 11, 0.42)',
+      primary: '#b45309',
+      primaryStrong: '#92400e',
+      primarySoft: 'rgba(180, 83, 9, 0.12)',
+      primaryBorder: 'rgba(180, 83, 9, 0.4)',
       primaryText: '#92400e',
-      accent: '#f97316',
-      accentSoft: 'rgba(249, 115, 22, 0.12)',
-      glassTint: 'rgba(245, 158, 11, 0.04)',
-      glassTintStrong: 'rgba(245, 158, 11, 0.08)',
-      bgWash: 'rgba(245, 158, 11, 0.13)',
+      primaryFg: '#ffffff',
+      accent: '#e11d48',
+      accentSoft: 'rgba(225, 29, 72, 0.12)',
+      bgWash: 'rgba(180, 83, 9, 0.13)',
     },
   },
   {
-    id: 'rose',
-    label: '玫瑰',
-    swatch: '#f43f5e',
+    id: 'coral',
+    label: '珊瑚',
+    swatch: '#fb7185',
     dark: {
-      primary: '#f43f5e',
-      primaryStrong: '#e11d48',
-      primarySoft: 'rgba(244, 63, 94, 0.16)',
-      primaryBorder: 'rgba(244, 63, 94, 0.42)',
+      primary: '#fb7185',
+      primaryStrong: '#f43f5e',
+      primarySoft: 'rgba(251, 113, 133, 0.16)',
+      primaryBorder: 'rgba(251, 113, 133, 0.42)',
       primaryText: '#fda4af',
+      primaryFg: '#04120c',
       accent: '#a855f7',
       accentSoft: 'rgba(168, 85, 247, 0.18)',
-      glassTint: 'rgba(244, 63, 94, 0.05)',
-      glassTintStrong: 'rgba(244, 63, 94, 0.10)',
-      bgWash: 'rgba(244, 63, 94, 0.20)',
+      bgWash: 'rgba(251, 113, 133, 0.20)',
     },
     light: {
-      primary: '#f43f5e',
-      primaryStrong: '#e11d48',
-      primarySoft: 'rgba(244, 63, 94, 0.14)',
-      primaryBorder: 'rgba(244, 63, 94, 0.42)',
+      primary: '#e11d48',
+      primaryStrong: '#be123c',
+      primarySoft: 'rgba(225, 29, 72, 0.12)',
+      primaryBorder: 'rgba(225, 29, 72, 0.4)',
       primaryText: '#be123c',
-      accent: '#a855f7',
-      accentSoft: 'rgba(168, 85, 247, 0.12)',
-      glassTint: 'rgba(244, 63, 94, 0.04)',
-      glassTintStrong: 'rgba(244, 63, 94, 0.08)',
-      bgWash: 'rgba(244, 63, 94, 0.13)',
+      primaryFg: '#ffffff',
+      accent: '#7e22ce',
+      accentSoft: 'rgba(126, 34, 206, 0.12)',
+      bgWash: 'rgba(225, 29, 72, 0.13)',
+    },
+  },
+  {
+    id: 'magenta',
+    label: '洋红',
+    swatch: '#d946ef',
+    dark: {
+      primary: '#c026d3',
+      primaryStrong: '#a21caf',
+      primarySoft: 'rgba(192, 38, 211, 0.16)',
+      primaryBorder: 'rgba(192, 38, 211, 0.42)',
+      primaryText: '#f0abfc',
+      primaryFg: '#ffffff',
+      accent: '#fb7185',
+      accentSoft: 'rgba(251, 113, 133, 0.18)',
+      bgWash: 'rgba(192, 38, 211, 0.22)',
+    },
+    light: {
+      primary: '#a21caf',
+      primaryStrong: '#86198f',
+      primarySoft: 'rgba(162, 28, 175, 0.12)',
+      primaryBorder: 'rgba(162, 28, 175, 0.4)',
+      primaryText: '#86198f',
+      primaryFg: '#ffffff',
+      accent: '#be123c',
+      accentSoft: 'rgba(190, 18, 60, 0.12)',
+      bgWash: 'rgba(162, 28, 175, 0.13)',
+    },
+  },
+  {
+    id: 'iris',
+    label: '鸢尾',
+    swatch: '#8b5cf6',
+    dark: {
+      primary: '#7c3aed',
+      primaryStrong: '#6d28d9',
+      primarySoft: 'rgba(124, 58, 237, 0.16)',
+      primaryBorder: 'rgba(124, 58, 237, 0.42)',
+      primaryText: '#c4b5fd',
+      primaryFg: '#ffffff',
+      accent: '#d946ef',
+      accentSoft: 'rgba(217, 70, 239, 0.18)',
+      bgWash: 'rgba(124, 58, 237, 0.24)',
+    },
+    light: {
+      primary: '#6d28d9',
+      primaryStrong: '#5b21b6',
+      primarySoft: 'rgba(109, 40, 217, 0.12)',
+      primaryBorder: 'rgba(109, 40, 217, 0.4)',
+      primaryText: '#5b21b6',
+      primaryFg: '#ffffff',
+      accent: '#a21caf',
+      accentSoft: 'rgba(162, 28, 175, 0.12)',
+      bgWash: 'rgba(109, 40, 217, 0.13)',
     },
   },
 ];
 
-const DEFAULT_PALETTE: PaletteId = 'emerald';
+const DEFAULT_PALETTE: PaletteId = 'cobalt';
 
 export function findPalette(id: string | null | undefined): PaletteDef {
   return PALETTES.find((p) => p.id === id) ?? PALETTES[0];
@@ -215,10 +259,6 @@ function savePalette(id: PaletteId): void {
   }
 }
 
-/**
- * 把调色板写成 `<html>` 的行内 CSS 变量，覆盖 tokens.css 的强调色默认值。
- * 深浅取对应分支，因此主题切换后再调用一次即可跟随。
- */
 export const FONT_SCALE_KEY = 'aja.font_scale';
 
 /** 文字大小档位：乘在 `--ui-scale` 上，作用于全部 `--fs-*` 令牌。 */
@@ -260,6 +300,10 @@ export function applyFontScale(id: FontScaleId): void {
   saveFontScale(id);
 }
 
+/**
+ * 把调色板写成 `<html>` 的行内 CSS 变量，覆盖 tokens.css 的强调色默认值。
+ * 深浅取对应分支，因此主题切换后再调用一次即可跟随。
+ */
 export function applyPalette(id: PaletteId, theme: 'dark' | 'light'): void {
   const def = findPalette(id);
   const tone = theme === 'light' ? def.light : def.dark;
@@ -272,8 +316,9 @@ export function applyPalette(id: PaletteId, theme: 'dark' | 'light'): void {
     st.setProperty('--primary-text', tone.primaryText);
     st.setProperty('--accent', tone.accent);
     st.setProperty('--accent-soft', tone.accentSoft);
-    st.setProperty('--glass-tint', tone.glassTint);
-    st.setProperty('--glass-tint-strong', tone.glassTintStrong);
+    st.setProperty('--palette-wash', tone.bgWash);
+    st.setProperty('--btn-primary-fg', tone.primaryFg);
+    st.setProperty('--btn-primary-border', tone.primaryBorder);
     st.setProperty('--palette-swatch', def.swatch);
     document.documentElement.setAttribute('data-palette', def.id);
   } catch {

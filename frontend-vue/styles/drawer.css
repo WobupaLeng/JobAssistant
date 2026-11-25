@@ -34,9 +34,6 @@
   background: var(--popup-surface);
   border: 1px solid var(--hairline-strong);
   box-shadow: var(--shadow-pop);
-  /* 磨砂口径走 layout.css 的 --panel-blur；自身几何与材质只在本文件定义。 */
-  -webkit-backdrop-filter: var(--panel-blur);
-  backdrop-filter: var(--panel-blur);
   /* 进场时长与曲线由 motion.css 第 6 段统一：展开 / 收起同一时长、同一条曲线
    （`.drawer-anim` 把 transform 补间到 none，`.is-closing` 补间回这里写的 24px）。 */
   /* 收起态只剩位移，不再压透明度：透明度归 motion.css 第 6 段管，那里只做 transform
@@ -142,7 +139,7 @@
   margin: 0;
   padding: 12px;
   border-radius: var(--radius-sm);
-  background: var(--glass-input);
+  background: var(--surface-input);
   border: 1px solid var(--hairline);
   max-height: 340px;
   overflow: auto;
@@ -191,9 +188,3 @@
   transition: transform var(--drawer-dur) var(--ease-out);
 }
 
-/* 关键帧保留供未接线的调用点使用，内容与 motion.css 的抽屉段一致，
- * 避免两处口径漂移（Vue 侧现已统一走 */
-@keyframes scrape-filter-in {
-  from { transform: translateX(-24px); }
-  to   { transform: none; }
-}

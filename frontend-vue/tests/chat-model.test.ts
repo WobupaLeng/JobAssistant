@@ -29,6 +29,7 @@ import {
   matchFriend,
   matchFriendByCompany,
   makeMessagesMemo,
+  markFriendSent,
   mergeFriends,
   mergeMessages,
   msgKey,
@@ -36,8 +37,10 @@ import {
   msgTestIdOrLocal,
   normCompany,
   pendingFriend,
+  loadPendingFriends,
   pickFriend,
   railWidth,
+  savePendingFriends,
   senderSlug,
   seedLocalMsgIds,
   sortFriends,
@@ -63,6 +66,25 @@ function friend(patch: Partial<Friend> = {}): Friend {
 
 function msg(patch: Partial<ChatMessage> = {}): ChatMessage {
   return { sender: 'hr', content: '在吗', time: '10:01', msg_id: 'm1', recalled: false, ...patch };
+}
+
+/** 只实现被测代码用到的那几个方法，省掉 jsdom 的 localStorage。 */
+function memStorage(): Storage {
+  const map = new Map<string, string>();
+  return {
+    get length() {
+      return map.size;
+    },
+    clear: () => map.clear(),
+    getItem: (k: string) => map.get(k) ?? null,
+    key: (i: number) => [...map.keys()][i] ?? null,
+    removeItem: (k: string) => {
+      map.delete(k);
+    },
+    setItem: (k: string, v: string) => {
+      map.set(k, v);
+    },
+  } as Storage;
 }
 
 describe('对话框宽度公式（SPEC §2.2 / §16.6，A49）', () => {
@@ -388,6 +410,70 @@ describe('线程渲染规则', () => {
     expect(replaced.map((f) => f.uid)).toEqual([p.uid]);
   });
 
+  it('本地新建的会话：远程列表还没收录时，刷新一次不许把它删掉', () => {
+    // 实库证据（用户 m00145）：`chat_open` 返回的是 Boss 聊天页地址里的**加密 uid**
+    // （如 `c83b66ecd36a48070X1-3ti-FFBZ`），而 `getGeekFriendList` 给的是**数字 uid**
+    // （如 `694553429`）。两个 id 空间不重叠，按 uid 匹配永远匹配不上——只靠 uid 合并，
+    // 这条刚建好的会话就会被下一次刷新整条吃掉，界面回空态。
+    const local = friend({
+      uid: 'c83b66ecd36a48070X1-3ti-FFBZ',
+      name: '广州星火无限游戏科技',
+      company: '广州星火无限游戏科技',
+      last_msg: '',
+      last_time: '',
+      local_only: true,
+    });
+    const remote = friend({ uid: '694553429', company: '别的公司', last_ts: 300 });
+    const merged = mergeFriends([local, remote], [remote]);
+    expect(merged.map((f) => f.uid)).toContain(local.uid);
+    // 它是**真实**会话：能发消息、不会被当成占位行、也不会被「移除」按钮删掉。
+    expect(isPendingFriend(local)).toBe(false);
+    expect(isSendableFriend(local)).toBe(true);
+    // 排序与占位同档置顶（最新建的会话不该沉到列表底部）。
+    expect(sortFriends([remote, local])[0]).toBe(local);
+    // 反复刷新也只留这一行，不会越攒越多。
+    expect(mergeFriends(merged, [remote])).toHaveLength(2);
+  });
+
+  it('远程收录到同一条会话后，本地副本让位——列表里不留两条', () => {
+    const local = friend({
+      uid: 'c83b66ecd36a48070X1-3ti-FFBZ',
+      name: '广州星火无限游戏科技',
+      company: '广州星火无限游戏科技',
+      last_msg: '',
+      last_time: '',
+      job_id: 'boss:8b99b45940dbd4240nx809m6FVRY',
+      local_only: true,
+    });
+    // 远程那条：同公司、岗位 id 也对上。
+    const listed = friend({
+      uid: '694553429',
+      company: '广州星火无限游戏科技',
+      job_id: 'boss:8b99b45940dbd4240nx809m6FVRY',
+      last_ts: 500,
+    });
+    expect(mergeFriends([local], [listed]).map((f) => f.uid)).toEqual(['694553429']);
+    // 只靠公司名对上（远程那条还没补上岗位 id）同样让位。
+    expect(mergeFriends([local], [friend({ uid: '694553429', company: '广州星火无限游戏科技' })])).toHaveLength(1);
+  });
+
+  it('local_only 行进 localStorage：刷新页面回来还在', () => {
+    const storage = memStorage();
+    const local = friend({
+      uid: 'c83b66ecd36a48070X1-3ti-FFBZ',
+      name: '广州星火无限游戏科技',
+      company: '广州星火无限游戏科技',
+      last_msg: '',
+      last_time: '',
+      local_only: true,
+    });
+    const draft = pendingFriend('job-1', '星瀚科技');
+    savePendingFriends([local, draft, friend({ uid: 'u9' })], storage);
+    const back = loadPendingFriends(storage);
+    expect(back.map((f) => f.uid).sort()).toEqual([draft.uid, local.uid].sort());
+    expect(back.find((f) => f.uid === local.uid)?.local_only).toBe(true);
+  });
+
   it('对话头副行：公司 · 岗位，都空则 —', () => {
     expect(headSub(friend())).toBe('星瀚科技 · 后端工程师');
     expect(headSub(friend({ title: '' }))).toBe('星瀚科技');
@@ -542,5 +628,41 @@ describe('AI 生成的对话上下文（用户 m01148）', () => {
 
   it('没有消息时给空串（后端据此走「首次打招呼」提示词）', () => {
     expect(aiReplyContext([])).toBe('');
+  });
+});
+
+describe('markFriendSent：发完消息那一行立刻显示送达', () => {
+   it('刚发出的这句成为副行，并排到列表最上面', () => {
+    const now = new Date('2026-11-25T19:30:00');
+    const list = [
+      friend({ uid: 'u1', last_msg: '旧的一句', last_ts: 100, last_time: '10:00', unread: 3 }),
+      friend({ uid: 'u2', last_msg: '别的会话', last_ts: 999, last_time: '11:00' }),
+    ];
+    const got = markFriendSent(list, 'u1', '明天方便聊聊吗', now);
+    expect(got[0].uid).toBe('u1');
+    expect(got[0].last_msg).toBe('明天方便聊聊吗');
+    expect(got[0].last_ts).toBe(now.getTime());
+    expect(got[0].last_time).toBe('19:30');
+    // 能回话说明会话正开着，未读该收起来，别让 [未读] 盖住 [送达]
+    expect(got[0].unread).toBe(0);
+    expect(friendMsgTone(got[0])).toBe('sent');
+  });
+
+  it('上一轮是「已读」，发出新消息后回到「已送达」，绝不伪造已读', () => {
+    const read = friend({ uid: 'u1', last_from_me: true, last_status: 2, last_ts: 100 });
+    const got = markFriendSent([read], 'u1', '再问一句', new Date('2026-11-25T19:31:00'));
+    expect(got[0].last_status).toBe(1);
+    expect(friendMsgTone(got[0])).toBe('sent');
+  });
+
+  it('没点中的行原样不动（同一个对象引用，免得整表重建卡刷新）', () => {
+    const other = friend({ uid: 'u2', last_msg: '别的会话', last_ts: 999 });
+    const got = markFriendSent([friend({ uid: 'u1', last_ts: 100 }), other], 'u1', '在吗');
+    expect(got.find((f) => f.uid === 'u2')).toBe(other);
+  });
+
+  it('uid 不在列表里时一条都不多出来', () => {
+    const list = [friend({ uid: 'u1', last_ts: 100 })];
+    expect(markFriendSent(list, 'nope', '在吗')).toHaveLength(1);
   });
 });

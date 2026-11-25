@@ -5,11 +5,9 @@
   position: fixed;
   inset: 0;
   z-index: 60;
-  background: var(--glass-0);
-  -webkit-backdrop-filter: blur(calc(var(--blur-pop) * 2.4));
-  backdrop-filter: blur(calc(var(--blur-pop) * 2.4));
+  background: var(--scrim);
   opacity: 1;
-  transition: opacity 220ms var(--ease-glass);
+  transition: opacity 220ms var(--ease-smooth);
 }
 
 /* 主体：居中固定窗。尺寸随 --ui-scale 放大，外层套 min() 与视口差值防止顶破窗口；
@@ -26,22 +24,18 @@
   flex-direction: column;
   min-height: 0;
   border-radius: var(--radius-lg);
-  /* 自身材质归本文件独占（用户口径：不需要透明）。用 --panel-solid 而不是
-   --popup-surface：后者与弹窗语义耦合，改弹窗底色会把面板一起带透。 */
+  /* 面板实底：取 --panel-solid（只转发 --popup-surface 的别名），
+   改弹窗底色时敏感库跟着走，不要再写第二份数值。 */
   background: var(--panel-solid);
   border: 1px solid var(--hairline-strong);
   box-shadow: var(--shadow-pop);
-  /* 底是实色，磨砂只会把面板边缘外的一圈内容反相透进来（实测表现为
-   * 「展开时右下角多出一块深色」），所以这一层关掉。 */
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
   transform: translate(-50%, -50%) scale(0.98);
   opacity: 0;
   /* 收起后节点可能仍在 DOM 里（等退场过渡）：不给 auto，否则一块看不见的
    * 面板会吃掉顶栏「配置 / 敏感库 / 主题」按钮的点击。 */
   pointer-events: none;
   will-change: transform, opacity;
-  transition: transform 220ms var(--ease-glass), opacity 220ms var(--ease-glass);
+  transition: transform 220ms var(--ease-smooth), opacity 220ms var(--ease-smooth);
 }
 
 /* 打开态：居中归位。收起态由基础规则承担（缩放 0.98 + 透明），
@@ -60,8 +54,6 @@
   animation: none;
 }
 
-/* 宿主同时挂 glass-l2 时，vue-glass.css（后加载）的 .glass-l2{position:relative}
-   同特异性覆盖掉 position:fixed，面板会被压到 body 底部、视口外（打不开）。 */
 /* 头部：左标题区可收缩，右侧「关闭」固定。 */
 .sensitive-head {
   flex: 0 0 auto;
@@ -94,14 +86,14 @@
   color: var(--text-3);
 }
 
-/* 工具行：搜索框吃掉剩余宽度，按钮与筛选胶囊不换行。 */
+/* 工具行：一行放下「搜索框 + 搜索/重置 + 筛选胶囊 + 全选/删除」，放不下才换行。 */
 .sensitive-tools {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 10px 18px 0;
+  padding: 8px 18px 0;
 }
 
 .sensitive-error {
@@ -115,13 +107,23 @@
   border-bottom: 1px solid var(--hairline);
 }
 
+/* 搜索框与「搜索 / 重置」同行：外层必须是 flex，.input 自带 width:100%，
+   放在普通块里会把两个按钮顶到下一行。输入框压到 24px，与小号按钮同高。 */
 .sensitive-search {
-  flex: 1 1 260px;
-  min-width: 180px;
-  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 320px;
+  min-width: 0;
 }
 
-/* 筛选胶囊的选中态：与 */
+.sensitive-search > .input {
+  flex: 1 1 auto;
+  min-width: 120px;
+  height: 24px;
+}
+
+/* 筛选胶囊：与工具行其它小号控件同高。 */
 .sensitive-filter {
   height: 24px;
   padding: 0 11px;
@@ -132,12 +134,6 @@
   border-color: rgba(16, 185, 129, 0.45);
   background: var(--primary-soft);
   color: var(--text-1);
-}
-
-/* 工具行：搜索框吃掉剩余宽度，按钮与筛选胶囊不换行。 */
-.sensitive-tools {
-  flex: 0 0 auto;
-  padding: 8px 18px 0;
 }
 
 /* 正文：唯一滚动容器。 */
@@ -163,20 +159,20 @@
   gap: 6px;
 }
 
-/* 卡片：比抽屉亮一档（--glass-2），让「卡片」与「面板」有层级差。 */
+/* 卡片底色与岗位卡同源（--surface-card），层级差靠描边与投影给出，不靠底色。 */
 .sensitive-card {
   /* 光斑层 .hl-light 是绝对定位，宿主必须是它的包含块。 */
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
-  padding: 9px 11px;
+  padding: 8px 12px;
   border-radius: var(--radius-sm);
-  background: var(--glass-2);
+  background: var(--surface-card);
   border: 1px solid var(--hairline);
   box-shadow: var(--shadow-near);
-  transition: border-color var(--dur-fast) var(--ease-glass);
+  transition: border-color var(--dur-fast) var(--ease-smooth);
 }
 
 .sensitive-card:hover {
@@ -186,13 +182,12 @@
 .sensitive-card-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 
 .sensitive-card-foot {
   gap: 8px;
-  margin-top: 2px;
 }
 
 /* 勾选框：系统控件只染强调色，不重画——重画会丢掉 WebView 的高对比度无障碍支持。 */
@@ -209,30 +204,32 @@
   flex: 0 0 auto;
 }
 
-/* 公司名：单行省略，完整名放 title。 */
+/* 公司名：与岗位卡的 .job-meta 同档同色，单行省略。 */
 .sensitive-company {
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--text-1);
+  font-size: calc(14px * var(--ui-scale));
+  color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
 }
 
-/* 薪资：右对齐加粗，等宽数字，避免相邻卡片数字宽度不一。 */
+/* 薪资：与岗位卡的 .job-salary 同档同色（主色 + 等宽数字）。 */
 .sensitive-salary {
   flex: 0 0 auto;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-lg);
   font-weight: 700;
-  color: var(--text-1);
+  color: var(--primary);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
   white-space: nowrap;
 }
 
 .sensitive-job {
-  font-size: var(--fs-xs);
-  color: var(--text-2);
+  font-size: var(--fs-md);
+  font-weight: 650;
+  line-height: 1.4;
+  color: var(--text-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -247,7 +244,7 @@
 }
 
 .sensitive-note {
-  font-size: var(--fs-2xs);
+  font-size: calc(14px * var(--ui-scale));
   color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -261,7 +258,7 @@
 }
 
 .sensitive-time {
-  font-size: var(--fs-2xs);
+  font-size: calc(14px * var(--ui-scale));
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }

@@ -11,5 +11,5 @@
 }
 
 .chip.as-btn.is-on:hover {
-    background: var(--glass-3);
+    background: var(--surface-3);
 }

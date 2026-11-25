@@ -38,8 +38,6 @@
   min-height: 0;
   border-radius: var(--radius);
   background: transparent;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   box-shadow: var(--shadow-card), var(--inner-light);
   overflow: hidden;
 }
@@ -89,6 +87,17 @@
   align-items: center;
   gap: 2px;
   margin-left: auto;
+}
+
+/* 标题行下方的说明条（「已是最新消息」之类）：独占一行、可正常换行。
+   插槽没内容时整行不占位（Vue 只留一个注释节点，:empty 仍然命中）。 */
+.rail-fresh-row {
+  flex: 0 0 auto;
+  padding: 2px 12px 6px;
+}
+
+.rail-fresh-row:empty {
+  display: none;
 }
 
 /* 收起对话框的把手：对话框左缘外侧、.app-body 列缝里的一条竖条（盒宽 = 列缝宽 6px，
@@ -214,7 +223,7 @@
   pointer-events: none;
   transition:
     opacity 160ms linear,
-    transform 300ms var(--ease-glass);
+    transform 300ms var(--ease-smooth);
 }
 
 .chat-detach-collapse:hover .chat-detach-chevrons,
@@ -322,11 +331,11 @@
   color: var(--text-1);
   text-align: left;
   cursor: pointer;
-  transition: background var(--dur) var(--ease-glass), border-color var(--dur) var(--ease-glass);
+  transition: background var(--dur) var(--ease-smooth), border-color var(--dur) var(--ease-smooth);
 }
 
 .friend:hover {
-  background: var(--glass-input);
+  background: var(--surface-input);
   border-color: var(--hairline);
 }
 
@@ -420,7 +429,7 @@
   flex: 0 0 auto;
   margin-left: auto;
   opacity: 0;
-  transition: opacity var(--dur) var(--ease-glass);
+  transition: opacity var(--dur) var(--ease-smooth);
 }
 
 .friend:hover .friend-acts,
@@ -439,11 +448,11 @@
   padding: 0;
   border-radius: var(--radius-pill);
   border: 1px solid var(--hairline);
-  background: var(--glass-0);
+  background: var(--surface-0);
   color: var(--text-2);
   white-space: nowrap;
   cursor: pointer;
-  transition: color var(--dur) var(--ease-glass), border-color var(--dur) var(--ease-glass);
+  transition: color var(--dur) var(--ease-smooth), border-color var(--dur) var(--ease-smooth);
 }
 
 /* 图标只画图形，无障碍名与提示都由文字标签承担。 */
@@ -464,7 +473,7 @@
   padding: 1px 7px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--hairline);
-  background: var(--glass-0);
+  background: var(--surface-0);
   color: var(--text-1);
   font-size: var(--fs-2xs);
   line-height: 16px;
@@ -575,8 +584,8 @@
   white-space: normal;
 }
 
-/* 逐字。只动 opacity/transform，走合成层，不触发 backdrop-filter
- * 每帧重算；减少动态效果由 controls.css 的全局媒体查询统一封顶，这里不重复。 */
+/* 只动 opacity/transform，走合成层，不触发每帧重排；
+ * 减少动态效果由 controls.css 的全局媒体查询统一封顶，这里不重复。 */
 @keyframes rail-in {
   from { opacity: 0; transform: translateY(-4px) scale(0.99); }
   to { opacity: 1; transform: none; }
@@ -587,39 +596,61 @@
   width: 100%;
   height: 10px;
   border-radius: var(--radius-pill);
-  background: var(--glass-2);
+  background: var(--surface-2);
 }
 
 /* ============================================================ *
    对话框：宽度走 flex-basis 过渡（禁止 translateX，A15 要求 position: static） */
 
 .chat-detach {
-  flex: 0 0 0;
-  width: 0;
+  /* 占位与盒宽分两条账：flex-basis 是让给它的列宽，盒宽跟着 basis 长，右缘恒贴列尾。
+     收起态右栏自己在流里占 rail + gap，本盒只用来叠在它正上方（同宽同高），
+     所以用等量负外边距把那两格让回去，否则岗位列表会凭空窄一列。
+     这条负外边距**不参与过渡**：开合两个接缝处它要瞬间翻转，补间会让岗位列表抖一下。 */
+  flex: 0 0 var(--rail-w);
+  width: var(--rail-w);
+  margin-left: calc(-1 * (var(--rail-w) + var(--app-gap)));
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  opacity: 0;
   display: flex;
   flex-direction: column;
   border-radius: var(--radius);
-  /* 底色与岗位列表卡片同用 --glass-0，改底色只改 tokens.css 这一处。 */
-  background: var(--glass-0);
-  backdrop-filter: blur(var(--blur-1)) saturate(var(--saturate-1));
-  -webkit-backdrop-filter: blur(var(--blur-1)) saturate(var(--saturate-1));
+  /* 底色与岗位列表卡片同用 --surface-0，改底色只改 tokens.css 这一处。 */
+  background: var(--surface-0);
   box-shadow: var(--shadow-card), var(--inner-light);
   transform-origin: right center;
-  transition: flex-basis var(--dur) var(--ease-glass), opacity var(--dur) var(--ease-glass);
+  /* 只补间宽度。看起来像「淡入」的那种半透明中途态一律不要：整列（含 Boss 列表）
+     先透明再显形，读起来就是「列表消失了一下」。可见性靠 [hidden] 的 visibility 瞬时切换。 */
+  transition:
+    flex-basis var(--detach-dur) var(--ease-smooth),
+    width var(--detach-dur) var(--ease-smooth),
+    visibility 0s linear 0s;
 }
 
+/* 展开态：占位 = 盒宽 = --detach-w，负外边距撤掉（右栏此刻已 display:none，
+   接缝两侧的岗位列表宽度相等，所以撤掉它不会让主列抖）。 */
 .chat-detach.is-open {
   flex-basis: var(--detach-w);
   width: var(--detach-w);
-  opacity: 1;
+  margin-left: 0;
 }
 
+/* 收起态留在文档流里（零宽 + 不可见 + 不吃指针），不能用 display: none：
+   同一帧 display 翻转会让宽度过渡永远不跑，抽屉就变成硬跳。语义由 inert 承接。
+   收起动画期间这条同时是「动画目标」：宽度补间走完才把 visibility 关掉，
+   中途保持完全不透明 —— 半透明的收缩会让人以为列表先隐身了。 */
 .chat-detach[hidden] {
-  display: none;
+  display: flex;
+  flex-basis: var(--rail-w);
+  width: var(--rail-w);
+  margin-left: calc(-1 * (var(--rail-w) + var(--app-gap)));
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    flex-basis var(--detach-dur) var(--ease-smooth),
+    width var(--detach-dur) var(--ease-smooth),
+    visibility 0s linear var(--detach-dur);
 }
 
 /* 展开态不再套第二层外框：
@@ -663,7 +694,9 @@
   display: flex;
   align-items: stretch;
   min-height: 0;
-  min-width: 0;
+  /* 定宽不塌：宽度补间期间内容保持整宽，由父级 overflow 裁掉右缘，
+     否则收起时整窗文字会跟着挤压回排。 */
+  min-width: var(--detach-w, 0);
   flex: 1 1 auto;
   overflow-y: hidden;
   /* 收起按钮悬停时向左侧外扩：横向裁切放开，箭头才能浮到对话框左缘之外；纵向仍裁，免得内容
@@ -679,6 +712,39 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Boss 列表底部的收起按钮：主题色、居中吸底，与右上角的 » 同一个出口。 */
+.chat-detach-rail-collapse {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 10px;
+  padding: 0 14px;
+  height: calc(var(--fs-sm) * 2.2);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chat-detach-rail-collapse:hover {
+  filter: brightness(1.08);
+}
+
+.chat-detach-rail-collapse:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.chat-detach-rail-collapse-chev {
+  font-size: var(--fs-md);
+  line-height: 1;
 }
 
 /* 左段（Boss 列表）与右段（聊天）之间的分隔线：不再让列表自己画 border-right，
@@ -786,9 +852,9 @@
   border-radius: inherit;
   background: linear-gradient(
     135deg,
-    var(--glass-0),
+    var(--surface-0),
     transparent 60%,
-    var(--glass-0)
+    var(--surface-0)
   );
   pointer-events: none;
 }
@@ -875,7 +941,8 @@
   padding: 7px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--hairline);
-  background: var(--glass-input);
+  /* 半透明压暗：整窗流光在外壳底层，不透明底会把这一条挖成一个黑洞。 */
+  background: color-mix(in srgb, var(--surface-input) 55%, transparent);
   flex-wrap: nowrap;
   min-width: 0;
   flex: 0 0 auto;
@@ -1078,14 +1145,12 @@
    标题行是 44px 定高 flex，提示跟在标题 / 未读徽标之后，靠 margin-left: auto 与
 /* 刷新按钮前的 spacer 并排右靠；放不下就省略号，不撑高标题行。 */
 .rail-fresh {
-  flex: 0 1 auto;
-  min-width: 0;
+  display: block;
   font-size: var(--fs-2xs);
   color: var(--text-3);
-  text-align: right;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* 这里原先有一段 @media (max-width: 900px) 把右栏与对话框堆成整行，已按交接表 H 行删除：

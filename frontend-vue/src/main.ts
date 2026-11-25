@@ -128,8 +128,10 @@ document.addEventListener('pointermove', (ev) => {
 document.addEventListener('pointerout', (ev) => {
   const from = (ev.target as HTMLElement | null)?.closest?.(HL_SURFACES) as HTMLElement | null;
   if (!from) return;
-  const to = ev.relatedTarget as HTMLElement | null;
-  if (to && from.contains(to)) return;
+  // 只比「最近的高光面」：指针进了嵌套的另一个面（岗位列表 → 岗位卡）时，外层这一圈也要还原，
+  // 否则外层默认弧停在 0、光斑又被内层卡片盖住，看起来就是外框光带永久消失。
+  const to = (ev.relatedTarget as HTMLElement | null)?.closest?.(HL_SURFACES) ?? null;
+  if (to === from) return;
   const st = stateOf(from);
   if (!st.lit) return;
   // 顺序要紧：先记账再取消补间，然后摘 .is-lit，最后挂两段淡出/淡入。
@@ -141,8 +143,9 @@ document.addEventListener('pointerout', (ev) => {
 });
 
 /**
- * 窗口拖动兜底：`data-tauri-drag-region` 只认被点到的那一个元素、不冒泡，
- * 顶栏里的可点物件会抢走 pointerdown。细节见 `lib_ui/drag-allow`，这里只挂上。
+ * 窗口标题带：只有窗口最上方 20px 能拖窗口 / 双击最大化，页面其余空白处不拖。
+ * `data-tauri-drag-region` 只认被点到的那一个元素、不冒泡，所以由 `lib_ui/drag-allow`
+ * 按按下坐标补属性。细节见该文件，这里只挂上。
  */
 installDragAllow(document);
 

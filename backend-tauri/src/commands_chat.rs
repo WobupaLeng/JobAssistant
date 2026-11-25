@@ -243,6 +243,10 @@ fn friend_to_row(f: &Friend) -> ChatFriendRow {
         // 判新旧用的时间戳（毫秒）：sidecar 在 `chat.friends` 里给。
         // 缺省为 `None`（DOM 兜底路径取不到时间），落库时保留库里已有的值。
         last_ts: f.last_ts.filter(|v| *v > 0),
+        // 送达态同样原样落库：界面靠它给会话副行加 `[送达]`/`[已读]`。
+        // `last_status` 为 0 视同没有（Boss 用 0 表示「对方发的」）。
+        last_from_me: f.last_from_me,
+        last_status: f.last_status.filter(|v| *v > 0),
     }
 }
 
@@ -257,6 +261,8 @@ fn row_to_friend(r: &ChatFriendRow) -> Friend {
         unread: Some(r.unread),
         avatar: r.avatar.clone(),
         last_ts: r.last_ts,
+        last_from_me: r.last_from_me,
+        last_status: r.last_status,
         // 由 `fill_job_ids` 从库里补；缓存表里没有这一列。
         job_id: None,
     }

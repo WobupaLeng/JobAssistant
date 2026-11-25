@@ -3,7 +3,7 @@
 
 /* ---------- 按钮 ----------
    默认是「次级玻璃」：比卡片亮一档但仍在同一材质族里。
-   过渡用 --ease-glass 且只过渡 transform/shadow/color——过渡 background 会让 */
+   过渡用 --ease-smooth 且只过渡 transform/shadow/color——过渡 background 会让 */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -13,7 +13,7 @@
   padding: 0 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--hairline);
-  background: var(--glass-3);
+  background: var(--surface-3);
   color: var(--text-1);
   font-size: var(--fs-xs);
   font-weight: 550;
@@ -21,12 +21,12 @@
   cursor: pointer;
   box-shadow: var(--shadow-near);
   transition:
-    transform var(--dur-fast) var(--ease-glass),
-    box-shadow var(--dur-fast) var(--ease-glass),
-    color var(--dur-fast) var(--ease-glass),
-    border-color var(--dur-fast) var(--ease-glass),
-    background-color var(--dur-fast) var(--ease-glass),
-    opacity var(--dur-fast) var(--ease-glass);
+    transform var(--dur-fast) var(--ease-smooth),
+    box-shadow var(--dur-fast) var(--ease-smooth),
+    color var(--dur-fast) var(--ease-smooth),
+    border-color var(--dur-fast) var(--ease-smooth),
+    background-color var(--dur-fast) var(--ease-smooth),
+    opacity var(--dur-fast) var(--ease-smooth);
 }
 
 .btn:hover:not(:disabled) {
@@ -61,21 +61,20 @@
   font-size: var(--fs-md);
 }
 
-/* 主按钮：渐变两端同色系，纯色会让高光边看起来像贴纸边。 */
+/* 主按钮：渐变两端同色系，纯色会让高光边看起来像贴纸边。
+   不挂绿色外发光：绿 shadow 叠在玻璃底上会散成一圈绿色光晕，看着像折射高光，
+   用户 2026-11-25 明确要求删掉（登录 / 打招呼 / 开始抓取 都是主按钮）。 */
 .btn-primary {
   border-color: var(--btn-primary-border);
   background: var(--primary-gradient);
   color: var(--btn-primary-fg);
   font-weight: 650;
-  box-shadow:
-    0 2px 10px var(--btn-primary-shadow),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.16);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.16);
 }
 
+/* 悬停不发绿光也不投大阴影：只留 .btn:hover 的 1px 抬升。 */
 .btn-primary:hover:not(:disabled) {
-  box-shadow:
-    0 4px 18px var(--btn-primary-shadow-hover),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.16);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.16);
 }
 
 .btn-danger {
@@ -92,7 +91,7 @@
 }
 
 .btn-ghost:hover:not(:disabled) {
-  background: var(--glass-input);
+  background: var(--surface-input);
   border-color: var(--hairline);
   box-shadow: none;
   color: var(--text-1);
@@ -108,12 +107,12 @@
   padding: 0 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--hairline);
-  background: var(--glass-input);
+  background: var(--surface-input);
   color: var(--text-1);
   font-size: var(--fs-sm);
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.22);
-  transition: border-color var(--dur-fast) var(--ease-glass),
-    box-shadow var(--dur-fast) var(--ease-glass);
+  transition: border-color var(--dur-fast) var(--ease-smooth),
+    box-shadow var(--dur-fast) var(--ease-smooth);
 }
 
 .textarea {
@@ -208,12 +207,12 @@
   width: 30px;
   height: 17px;
   border-radius: var(--radius-pill);
-  background: var(--glass-input);
+  background: var(--surface-input);
   border: 1px solid var(--hairline);
   position: relative;
   cursor: pointer;
-  transition: background var(--dur) var(--ease-glass),
-    border-color var(--dur) var(--ease-glass);
+  transition: background var(--dur) var(--ease-smooth),
+    border-color var(--dur) var(--ease-smooth);
 }
 
 /* 滑块本体：带内高光的白色小玻璃球 */
@@ -227,7 +226,7 @@
   border-radius: 50%;
   background: linear-gradient(180deg, #fff 0%, #cfd8e3 100%);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
-  transition: transform var(--dur) var(--ease-glass);
+  transition: transform var(--dur) var(--ease-smooth);
 }
 
 .switch input:checked {
@@ -251,7 +250,7 @@
   gap: 2px;
   padding: 2px;
   border-radius: var(--radius-sm);
-  background: var(--glass-input);
+  background: var(--surface-input);
   border: 1px solid var(--hairline);
 }
 
@@ -269,10 +268,28 @@
   font-weight: 520;
   white-space: nowrap;
   cursor: pointer;
-  transition: background var(--dur) var(--ease-glass),
-    color var(--dur) var(--ease-glass),
-    box-shadow var(--dur) var(--ease-glass);
+  transition: background var(--dur) var(--ease-smooth),
+    color var(--dur) var(--ease-smooth),
+    box-shadow var(--dur) var(--ease-smooth);
 }
+
+/* 悬停：未选中的页签给一层浅玻璃，鼠标扫过时知道自己停在哪个上。 */
+.tab:hover:not(.is-active):not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+/* 选中态本体：实心主色药丸 + 主色描边。原先这里只有 `.tab.is-active .tab-num`
+   （计数变色），本体没有规则，选中与未选中几乎看不出区别——用户 2026-11-25 报
+   「选中的 tab 没有高亮」。颜色一律走令牌，深浅两套主题各自成立。 */
+.tab.is-active {
+  background: var(--primary-soft);
+  color: var(--text-1);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+/* 键盘/读屏之外，选中态还要能被 `::after` 以外的状态（aria-pressed）验证，
+   所以这条只上色、不改几何：页签高度恒定，切换不抖。 */
 
 /* 页签里的分档条数：全库计数（后端 decision_counts），不是已加载行数。 */
 .tab-num {
@@ -304,7 +321,7 @@
   padding: 0 8px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--hairline);
-  background: var(--glass-input);
+  background: var(--surface-input);
   color: var(--text-2);
   font-size: var(--fs-2xs);
   white-space: nowrap;
@@ -376,7 +393,7 @@
 .dot.is-running {
   background: var(--primary);
   box-shadow: 0 0 0 3px var(--primary-soft);
-  animation: dot-pulse 1.8s var(--ease-glass) infinite;
+  animation: dot-pulse 1.8s var(--ease-smooth) infinite;
 }
 
 .dot.is-idle {
@@ -486,10 +503,20 @@
   background: var(--dot);
   cursor: pointer;
   box-shadow: var(--inner-light);
-  transition: transform var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 .palette-dot:hover {
   transform: scale(1.15);
+}
+.palette-dot:active {
+  transform: scale(0.94);
+}
+.palette-dot:focus-visible {
+  outline: 2px solid var(--primary-text);
+  outline-offset: 2px;
 }
 .palette-dot.is-active {
   border-color: var(--text-1);

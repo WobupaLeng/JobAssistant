@@ -33,7 +33,18 @@ describe('decisionRowFromRecord — 四列视图模型', () => {
     expect(v.rowClass).toBe('dl-row is-in');
     expect(v.reason).toBe('光蕴科技 · java开发工程师 · 达标');
     expect(v.reasonEmpty).toBe(false);
-    expect(v.time).toMatch(/^\d{2}-\d{2} \d{2}:\d{2}$/);
+    // 列表列到秒，tooltip 带年份（created_at 是 Unix 秒 → 1_700_000_000 = 2023-11-15 06:13:20 @ UTC+8）
+    expect(v.time).toBe('11-15 06:13:20');
+    expect(v.timeTitle).toBe('2023-11-15 06:13:20');
+    // 平台以前只存不显：现在并进「环节」列
+    expect(v.platform).toBe('Boss直聘');
+    // why 只放原因（不含公司/岗位），行内两层展示用
+    expect(v.why).toBe('达标');
+  });
+
+  it('platform 空串 → 「—」，未知 id 原样回显', () => {
+    expect(decisionRowFromRecord(rec({ platform: '' })).platform).toBe('—');
+    expect(decisionRowFromRecord(rec({ platform: 'lagou' })).platform).toBe('lagou');
   });
 
   it('排除行：两列皆 null 且 reason 无分数 → 「—」，绝不 0 → 0，红行', () => {

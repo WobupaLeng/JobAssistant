@@ -1,5 +1,5 @@
 /* 动效：列表与分数变化的过渡。曲线用 `--ease-out`，时长 180~260ms。
- * 只动 opacity / transform：走合成层，不会让 backdrop-filter 每帧重算。 */
+ * 只动 opacity / transform：走合成层，不会触发每帧重排。 */
 
 
 @keyframes list-fade {
@@ -101,7 +101,7 @@
 }
 
 /* 浮层从侧下方略微抬起并放大到位；**不含透明度**——
- * 浮层本身就是不透明玻璃，缩放到位已经足够交代「从哪来」。 */
+ * 浮层本身就是不透明底，缩放到位已经足够交代「从哪来」。 */
 @keyframes pan-pop {
   from {
     transform: translateY(-6px) scale(0.94);
@@ -214,15 +214,7 @@
 }
 
 /* ---------- 5. 窗口级切换：聊天对话框展开 / 收起 / 换页 ----------
-   收起必须是 `display: none`：零宽盒仍是 fixed 定位的盒子，会压住右栏与列表右侧的
-   指针事件，表现为「点卡片没反应」。展开时 `flex-basis` 从 0 长到 `--detach-w`， */
-.chat-detach {
-  transition:
-    flex-basis var(--detach-dur) var(--ease-glass),
-    width var(--detach-dur) var(--ease-glass),
-    padding var(--detach-dur) var(--ease-glass),
-    border-width var(--detach-dur) var(--ease-glass);
-}
+   对话框的宽度补间归 styles/vue-chat.css（几何唯一写者），本文件不重复声明。 */
 
 /* 换页（概览 ↔ 配置 ↔ 日志）：页面节点是 v-if 直换，补一次落定。
  * 同样是轻微位移，不用透明度。 */
@@ -292,8 +284,8 @@
 }
 
 /* ---------- 6.1 敏感库：本段只留补间 ----------
-   `.sensitive-panel` 的底色 / 磨砂 / 层级 / pointer-events 全归 sensitive.css，本文件只管
-   transform 的起止与时长。同一元素的几何与材质只允许一个文件定义， */
+   `.sensitive-panel` 的底色 / 层级 / pointer-events 全归 sensitive.css，本文件只管
+   transform 的起止与时长。同一元素的几何与材质只允许一个文件定义。 */
 .sensitive-panel {
   transition: none;
 }

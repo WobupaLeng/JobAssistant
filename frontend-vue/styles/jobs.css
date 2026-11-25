@@ -38,7 +38,7 @@
 .job-sort.is-active {
   color: var(--text-1);
   font-weight: 560;
-  background: var(--glass-input);
+  background: var(--surface-input);
 }
 
 /* 箭头固定 10px 宽：不占位时按钮宽度会跳，三个排序键会左右抖动 */
@@ -143,9 +143,7 @@
   font-weight: 560;
   color: var(--text-3);
   white-space: nowrap;
-  background: var(--glass-2);
-  backdrop-filter: blur(var(--blur-3)) saturate(var(--saturate-2));
-  -webkit-backdrop-filter: blur(var(--blur-3)) saturate(var(--saturate-2));
+  background: var(--surface-2);
   border-bottom: 1px solid var(--hairline);
 }
 
@@ -163,11 +161,11 @@
 
 /* 行悬停：只提亮底色，不做位移（表格里行高变化会引起整表重排） */
 .table tbody tr {
-  transition: background var(--dur-fast) var(--ease-glass);
+  transition: background var(--dur-fast) var(--ease-smooth);
 }
 
 .table tbody tr:hover {
-  background: var(--glass-input);
+  background: var(--surface-input);
 }
 
 .table tbody tr.is-selected {

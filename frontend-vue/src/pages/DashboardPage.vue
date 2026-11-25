@@ -198,6 +198,8 @@ const feed = shallowRef<FeedLine[]>([]);
 
 const logLines = shallowRef<LogLine[]>([]);
 const logSince = ref<number>(0);
+/** 首屏历史日志是否已补过一次（只补一次，避免每次挂载都重读整环）。 */
+const logPrimed = ref(false);
 
 const sensitiveOpen = ref(false);
 /**
@@ -437,6 +439,28 @@ async function loadLogs(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * 日志卡首屏补一次历史日志。日志卡原先只在「已登录 + 抓取运行中」才轮询，
+ * 于是空闲态永远是空框（用户报「滚动看不到操作信息，但运行日志里能看到」）。
+ * 这里只读 Rust 内存环（`LogRing`，不碰 sidecar、不导航浏览器），补完交给
+ * `startLogPolling` 的闸门继续追新增。失败不重试（`loadLogs` 自己吞错）。
+ */
+async function primeLogs(): Promise<void> {
+  if (logPrimed.value || !isLoggedIn()) return;
+  logPrimed.value = true;
+  await loadLogs();
+}
+
+// 登录态一到位就补一次历史日志：`refreshLogin` / `login-state` 都不经过 `syncTick`，
+// 只挂在 `syncTick` 里会漏掉「空闲态下登录态才回来」的常见路径。
+watch(
+  () => login.value?.state,
+  (state) => {
+    if (state === 'logged_in') void primeLogs();
+  },
+  { immediate: true },
+);
 
 /**
  * 日志轮询的唯一闸门：**已登录 + 抓取运行中**才允许继续轮询。
@@ -1242,11 +1266,9 @@ watch(
         @empty-filter="openFilter()"
         @empty-start="onStart"
       />
-      <!-- 筛选抽屉：盖在岗位列表原位置上（展开大小 = 列表大小），
-           不再把列表和日志卡往下顶，页面外层也就不出现滚动条。
-           展开 / 收起与岗位详情、敏感库走同一套（lib_ui/pan.ts + motion.css 第 6 段）：
-           `filterOpen = false` 当帧摘掉 `.is-open` → 位移回程立刻开播，
-           节点留到过渡跑完才卸载。 -->
+      <!-- 筛选抽屉：浮在窗口左侧、盖住岗位列表原位置，列表与日志卡不被挤动。
+           面板节点常驻：开合只切 `.is-open`，由 src/app.css 补间位移与透明度；
+           收起态 visibility: hidden + pointer-events: none，`inert` 兜住焦点与读屏。 -->
       <div
         v-show="filterOpen"
         class="filter-backdrop"
@@ -1254,12 +1276,12 @@ watch(
         @click="closeFilter"
       ></div>
       <div
-        v-show="filterOpen"
         id="scrape-filter-bar"
         ref="filterBar"
         class="drawer scrape-filter-bar is-floating"
         :class="{ 'is-open': filterOpen }"
         data-testid="scrape-filter-bar"
+        :inert="!filterOpen"
         @click.stop
       >
         <FilterPanel

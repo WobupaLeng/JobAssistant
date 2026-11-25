@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 对话框外壳（`.chat-detach`）：只负责骨架、宽度与 Esc/收起。宽度过渡靠 `is-open` 切换时补间
- * `flex-basis`（禁止 translateX）。收起态的 `[hidden]` 在 `styles/motion.css` 里是零宽盒而不是
+ * `flex-basis`（禁止 translateX）。收起态的 `[hidden]` 在 `styles/vue-chat.css` 里是零宽盒而不是
  * `display: none`，否则同一帧 display 翻转会让过渡永远不跑，语义由 `inert` 承接。
  */
 import type { Friend } from '../../api/types';
@@ -37,9 +37,6 @@ const emit = defineEmits<{ (e: 'close'): void }>();
       <div class="chat-detach-head-row">
         <span class="card-title" data-testid="chat-detach-title">
           {{ CHAT_DETACH_TITLE }}
-          <!-- 未读数徽标已移走（用户）：原先这里显示的是「会话数」，与「Boss 消息」这个
-               标题语义不符；未读总数现在挂在对话框左段「Boss 列表」标题旁
-               （chat-detach-rail-count，由 ChatPage 按远端会话列表的未读总和传入）。 -->
         </span>
         <span class="chat-detach-sub" data-testid="chat-detach-sub">{{ headSub(props.friend) }}</span>
         <slot name="head-sub" />
@@ -51,6 +48,16 @@ const emit = defineEmits<{ (e: 'close'): void }>();
       <div class="chat-detach-rail" data-testid="chat-detach-rail">
         <span class="sr-only">{{ CHAT_DETACH_RAIL_TITLE }}</span>
         <slot name="rail" />
+        <button
+          v-if="props.open"
+          class="chat-detach-rail-collapse"
+          type="button"
+          data-testid="chat-detach-rail-collapse"
+          aria-label="收起对话框"
+          @click="emit('close')"
+        >
+          收起<span class="chat-detach-rail-collapse-chev" aria-hidden="true">»</span>
+        </button>
       </div>
       <slot />
     </div>

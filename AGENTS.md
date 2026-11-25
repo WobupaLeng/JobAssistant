@@ -161,3 +161,6 @@ python -m compileall -q scraper
 3. **`set_limit` 夹值语义未定**：`max_jd > 500` 时返回错误而非静默夹住，表现为「保存失败但上限已生效」。
 4. **`tests/sidecar_smoke.rs` 常年 `#[ignore]`**（需真实 Chrome + 登录态），是唯一未被门禁覆盖的集成路径。
 5. **「从未聊过的岗位」建会话**：已实现（`chat_open` / `ChatOpen{job_id}` / `chat.ChatClient.ensure()`，前端占位行点开时先建会话再换真 uid）。新 uid 取自点「立即沟通」后跳转 URL 的 `id` 参数，**不要**改成前后拉两次列表求差集。`ChatOpen` 语义已从「按公司名找会话」换成「按 jobId 建会话」，改动动过 `protocol.rs` 与 `scraper/sidecar.py` 两个高冲突单点。细节见 [`scraper/HANDOFF.md`](scraper/HANDOFF.md) §2.4.4。
+
+禁止主动编译行为，要编译之前要问过客户，得到允许后才能编译
+所有关于兜底的策略开始写之前，要得到用户的允许

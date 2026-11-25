@@ -173,6 +173,17 @@ pub struct Friend {
     /// `chat.friends` 接口路径会给；DOM 兜底路径取不到，留 `None`。
     #[serde(default)]
     pub last_ts: Option<i64>,
+    /// 最后一条是不是我发的（`lastMessageInfo.fromId` 不等于对方 uid）。
+    ///
+    /// 界面靠它在副行前加 `[送达]` / `[已读]`（`chat-model.ts` 的 `friendMsgTone`）。
+    /// 缺省 `None` = 不知道是谁发的，按「对方发的」渲染，不加状态词。
+    #[serde(default)]
+    pub last_from_me: Option<bool>,
+    /// 我发的最后一条的送达态：`1` 已送达、`2` 已读；`0`/缺省不显示。
+    ///
+    /// **不是方向**：它只在对端已接收/已读时有值，方向看 `last_from_me`。
+    #[serde(default)]
+    pub last_status: Option<u32>,
     /// 这条会话对应的岗位 id（`job_queue.job_id`，形如 `boss:xxx`）。
     ///
     /// Boss 的会话列表**不带**岗位 id。它由 Rust 命令层从库里补上（见

@@ -40,7 +40,9 @@ defineExpose({ syncCanvas: canvas.sync });
 
 <template>
   <div class="app-shell" :class="{ 'is-chat-open': props.isChatOpen }" data-testid="app-root">
-    <header class="topbar" data-testid="topbar" data-tauri-drag-region>
+    <!-- 顶栏本身**不**挂拖动区：整条 46px 都能拖会让内容区跟着整个窗口跑。
+         拖动 / 双击最大化只认窗口最上方 20px 那条横带，由 `lib_ui/drag-allow` 按坐标补属性。 -->
+    <header class="topbar" data-testid="topbar">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">职</span>
         <span class="brand-name">AI 求职助手</span>

@@ -42,7 +42,7 @@ const props = withDefaults(
     tokensScore: 0,
     sensitiveOpen: false,
     themeLabel: '深色',
-    paletteId: 'emerald',
+    paletteId: 'cobalt',
     palettes: () => PALETTES,
     fontScaleId: 'm',
     fontScales: () => FONT_SCALES,
@@ -68,7 +68,7 @@ const emit = defineEmits<{
 const llmActive = computed(() => props.segs.some((s) => s.key === 'llm' && s.active));
 
 /* ---------------- 主题面板（调色板 + 字号）
- * 面板 teleport 到 body：顶栏带 backdrop-filter 会新建包含块，留在原地会被 46px 的带子裁掉。
+ * 面板 teleport 到 body：顶栏只有 46px 高，留在原地会被这条带子裁掉。
  * 开合状态归本组件自己（面板挂在 body 上，跟按钮不在同一棵子树）。根节点带
  * `data-overlay="popover"` 供全局 pointerdown 放行。 */
 interface PanelBox {

@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   DECISION_FILTERS,
   LOG_VIEWS,
+  countLevels,
   decisionCountLabel,
   decisionFilterAccepts,
   filterRuns,
+  levelCountsText,
   rowsFromReply,
   runCountLabel,
   toggleLevel,
@@ -56,6 +58,25 @@ describe('计数文案', () => {
   it('decisionCountLabel 同口径', () => {
     expect(decisionCountLabel(1, 3, true)).toBe('1 / 3 条');
     expect(decisionCountLabel(3, 3, false)).toBe('3 条');
+  });
+});
+
+describe('countLevels / levelCountsText — 级别分档条数', () => {
+  const rows = rowsFromReply([
+    row(1, 1000, 'info', 'a'),
+    row(2, 1001, 'warning', 'b'),
+    row(3, 1002, 'ERROR', 'c'),
+    row(4, 1003, 'info', 'd'),
+  ]);
+
+  it('按归一化级别分三档（warning/ERROR 也计入）', () => {
+    expect(countLevels(rows)).toEqual({ error: 1, warn: 1, info: 2 });
+  });
+  it('空日志三档皆 0', () => {
+    expect(countLevels([])).toEqual({ error: 0, warn: 0, info: 0 });
+  });
+  it('文案：错误 N · 警告 N · 信息 N', () => {
+    expect(levelCountsText({ error: 1, warn: 1, info: 2 })).toBe('错误 1 · 警告 1 · 信息 2');
   });
 });
 

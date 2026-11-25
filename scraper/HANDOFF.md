@@ -82,6 +82,8 @@ Response.text: Connection closed while reading from the driver
 - 唯一可靠判据：`from.uid == 自己的 uid` → `me`。自己的 uid 由 `_note_me(msgs, peer_uid)` 反推 —— `peer_uid` 是调用方给的对端，发件人不是对端时收件人就是自己。
 - `type in (3,4,7)` 是简历卡片 / 系统行，`sender='system'`，不要当正文解析。
 
+**会话列表的送达态同理**：`normalize_friend()` 给的是 `last_from_me`（方向，判据同上面 `from.uid`）与 `last_status`（`1` 已送达 / `2` 已读 / `0` 或缺失 = 不显示）。`last_status` **不要拿来判方向**，Boss 用 `0` 表示「最后一条是对方发的」。这两个字段曾整条链路丢过：sidecar 给了、Rust `Friend` 没声明、`chat_friends` 表没列，serde 与 SQL 各自静默丢弃，界面上就永远没有 `[送达]`/`[已读]`。
+
 ### 2.4.2 会话列表 DOM 与接口是两套数据，不能混用
 
 - 接口给 **100 条**，DOM 虚拟滚动只渲染 **40 行**。
@@ -132,6 +134,28 @@ SQL 口径：`SELECT job_id FROM job_queue WHERE company = ?1 ORDER BY CASE WHEN
 
 **这不是设计洁癖**：没有它，前端拿到的每条会话都没有岗位身份，「按岗位重建会话」只能对占位行生效（占位行的 jobId 编在 uid 里）。
 
+### 2.4.5 发消息前必须真的打开那条会话（`send()` 不许无视 `_open_conversation` 的返回值）
+
+用户报障（m00417）：点发送弹
+
+```
+发送失败：TimeoutError: Locator.wait_for: Timeout 15000ms exceeded.
+Call log:
+  - waiting for locator("#chat-input").first to be visible
+```
+
+**根因不是 `#chat-input` 选择器失效**，而是 `send()` 把 `_open_conversation()` 的返回值丢了。会话列表在 DOM 里是虚拟滚动的（§2.4.2：DOM 约 40 行 / 接口 100 条），目标会话排到后面时那一行**根本没渲染**，`_open_conversation` 找不到就 `return False`、什么也不点，页面仍停在列表页；接着等 `#chat-input` 只能耗满 15 秒，最终弹给用户的是一句裸 Playwright 超时。
+
+现在 `chat.py::send()` 的三道闸：
+
+1. 点中了行 ⇒ 直接发。
+2. 没点中但 `#chat-input` 已可见（`_input_ready()`）= 会话本来就开着（`ensure()` 刚建的那条）⇒ 不打断页面，直接发。
+3. 没点中且没有输入框 ⇒ 按 uid 直接打开 `CHAT_URL?id=<uid>`（地址格式同 `ensure()` 从跳转 URL 里读出来的那条），不依赖会话行在不在。
+
+打开后仍没有输入框 ⇒ 抛 `ChatError("Boss 聊天页没有出现输入框（这条会话可能打不开，或页面结构已变），消息没有发出")`，**不再漏裸 `TimeoutError`**；同时日志留一条 warn——人已经在聊天页却没有 `#chat-input`，那才是选择器真的变了，重试没有意义。
+
+已补离线用例 `tests/test_chat_send_open.py`（覆盖上述四条分支：行缺失按 uid 打开 / 行存在不导航 / 会话已开着不导航 / 打不开只报中文错）。本轮按用户新规**未执行**任何编译与测试，等客户自验。
+
 ### 2.5 导航失败与提示文案（用户 m02288）
 
 - **`page.goto` 的原始异常不许进界面**。Playwright 的 `Error: Page.goto: net::ERR_ABORTED at …` 后面还跟着多行 `Call log: - navigating to …`，前端直接贴出来会撑掉半块对话框，用户以为程序卡死。所有导航统一走 `ChatClient._goto(page, url, what)`：失败只保留首行，并翻成「打不开 + 下一步怎么办」的人话。
@@ -142,6 +166,12 @@ SQL 口径：`SELECT job_id FROM job_queue WHERE company = ?1 ORDER BY CASE WHEN
   ```powershell
   python -c "import sys; sys.path.insert(0,'scraper/tests'); import test_chat_goto as t; names=[n for n in dir(t) if n.startswith('test_')]; [getattr(t,n)() for n in names]; print('passed:', len(names))"
   ```
+
+### 2.5.1 聊天要留「操作日志」（用户 m00505）
+
+- **每一次真导航都写一行**：`_goto()` 成功即 `self.log("info", f"{what}：{url}")`。用户报「切会话时浏览器刷了两次，第一次是 /web/geek/chat、第二次带 bossid」时，靠这一行才能分清哪次是本程序发的、哪次是 Boss 页面自己跳的——以前 `_goto` 只在失败时说话，日志里一片空白。
+- **每个用户动作一对行**：`messages()` 开头「打开会话：<HR（公司）>」、结尾「会话消息 N 条」；`send()` 开头「发送消息给 …」、结尾「已发送消息给 …」；`friends()` 成功「会话列表已刷新：N 条」。会话怎么称呼见 `_friend_label()`（姓名→公司名→uid），**别在日志里只写 uid**，数字串看不出是哪位 Boss。
+- **`scraper/tests/test_chat_send_open.py` 在 HEAD 就是红的**（`FakeLocator.first` 是方法、`send()` 按属性用），不是本轮引入，也不许拿它当门禁。别照它改 `send()`。
 
 ### 2.6 反爬
 

@@ -335,10 +335,12 @@ function salaryCodeLabel(code: string): string {
 
       <!-- 薪资 -->
       <div class="f-group">
-        <span class="f-glabel">薪资</span>
-        <span class="f-glabel-sub">多选，命中任一档即可</span>
-        <div class="f-gbody">
+        <div class="f-ghead">
+          <span class="f-glabel">薪资</span>
           <span class="f-count" data-testid="filter-salary-count">已选 {{ draft.salaries.length }}</span>
+          <span class="f-glabel-sub">多选，命中任一档即可</span>
+        </div>
+        <div class="f-gbody">
           <div class="f-chips" data-testid="filter-group-salary">
             <button
               v-for="([code, name], i) in SALARY_OPTIONS"
@@ -394,9 +396,11 @@ function salaryCodeLabel(code: string): string {
 
       <!-- 工作经验 -->
       <div class="f-group">
-        <span class="f-glabel">工作经验</span>
-              <span class="f-glabel-sub" data-testid="filter-exp-count">{{ draft.experiences.length }}</span>
-        <span class="f-glabel-sub">多选</span>
+        <div class="f-ghead">
+          <span class="f-glabel">工作经验</span>
+          <span class="f-count" data-testid="filter-exp-count">已选 {{ draft.experiences.length }}</span>
+          <span class="f-glabel-sub">多选</span>
+        </div>
         <div class="f-gbody">
           <div class="f-chips" data-testid="filter-group-exp">
             <button
@@ -420,8 +424,11 @@ function salaryCodeLabel(code: string): string {
 
       <!-- 学历 -->
       <div class="f-group">
-        <span class="f-glabel">学历</span>
-        <span class="f-glabel-sub">多选</span>
+        <div class="f-ghead">
+          <span class="f-glabel">学历</span>
+          <span class="f-count" data-testid="filter-edu-count">已选 {{ draft.degrees.length }}</span>
+          <span class="f-glabel-sub">多选</span>
+        </div>
         <div class="f-gbody">
           <div class="f-chips" data-testid="filter-group-edu">
             <button
@@ -442,9 +449,11 @@ function salaryCodeLabel(code: string): string {
 
       <!-- 公司规模 -->
       <div class="f-group">
-        <span class="f-glabel">公司规模</span>
-              <span class="f-glabel-sub" data-testid="filter-scale-count">{{ draft.scales.length }}</span>
-        <span class="f-glabel-sub">多选</span>
+        <div class="f-ghead">
+          <span class="f-glabel">公司规模</span>
+          <span class="f-count" data-testid="filter-scale-count">已选 {{ draft.scales.length }}</span>
+          <span class="f-glabel-sub">多选</span>
+        </div>
         <div class="f-gbody">
           <div class="f-chips" data-testid="filter-group-scale">
             <button
@@ -468,8 +477,11 @@ function salaryCodeLabel(code: string): string {
 
       <!-- 融资阶段 -->
       <div class="f-group">
-        <span class="f-glabel">融资阶段</span>
-        <span class="f-glabel-sub">多选</span>
+        <div class="f-ghead">
+          <span class="f-glabel">融资阶段</span>
+          <span class="f-count" data-testid="filter-stage-count">已选 {{ draft.stages.length }}</span>
+          <span class="f-glabel-sub">多选</span>
+        </div>
         <div class="f-gbody">
           <div class="f-chips" data-testid="filter-group-finance">
             <button
@@ -490,8 +502,11 @@ function salaryCodeLabel(code: string): string {
 
       <!-- 行业 -->
       <div class="f-group">
-        <span class="f-glabel">行业</span>
-        <span class="f-glabel-sub">多选；也可直接填行业代码</span>
+        <div class="f-ghead">
+          <span class="f-glabel">行业</span>
+          <span class="f-count" data-testid="filter-industry-count">已选 {{ draft.industries.length }}</span>
+          <span class="f-glabel-sub">多选；也可直接填行业代码</span>
+        </div>
         <div class="f-gbody">
           <div class="f-chips" data-testid="filter-group-industry">
             <button
@@ -600,7 +615,7 @@ function salaryCodeLabel(code: string): string {
         </div>
         <div class="f-veto-line">
           <span class="f-glabel-inline">可多选，点一下即否决</span>
-          <span class="f-veto-count" :data-testid="'filter-veto-count'">{{ draft.veto_degrees.length }} / {{ DEGREE_VETO_OPTIONS.length }}</span>
+          <span class="f-veto-count" :data-testid="'filter-veto-count'">已选 {{ draft.veto_degrees.length }} / {{ DEGREE_VETO_OPTIONS.length }}</span>
         </div>
         <div class="f-chips" data-testid="filter-group-veto">
           <button

@@ -328,10 +328,10 @@ describe('commands_scrape', () => {
 });
 
 describe('commands_chat', () => {
-  // 平铺参数的键名**必须等于 Rust 参数名**（蛇形）：Tauri 不支持在单个函数参数上
-  // 写 `#[serde(alias)]`，发驼峰会被当成未知键静默丢弃——那会让「聊过就算投过」
-  // 永远不生效，且没有任何报错可查。
-  it('chat_send：job_id 空/空白时丢掉该键', async () => {
+  // 平铺参数的键名**是驼峰**：Tauri 的 `#[tauri::command]` 默认 `rename_all = "camelCase"`，
+  // Rust `job_id` 对应前端 `jobId`。发蛇形时必填参数直接报 `missing required key`，
+  // `Option<String>` 参数则静默变 `None`（「聊过就算投过」会无声失效）。
+  it('chat_send：jobId 空/空白时丢掉该键', async () => {
     await chat.chatSend('u1', '你好', '');
     expect(last()).toEqual({ cmd: 'chat_send', payload: { uid: 'u1', text: '你好' } });
     calls = [];
@@ -339,17 +339,17 @@ describe('commands_chat', () => {
     expect(last()).toEqual({ cmd: 'chat_send', payload: { uid: 'u1', text: '你好' } });
     calls = [];
     await chat.chatSend('u1', '你好', 'job-1');
-    expect(last()).toEqual({ cmd: 'chat_send', payload: { uid: 'u1', text: '你好', job_id: 'job-1' } });
+    expect(last()).toEqual({ cmd: 'chat_send', payload: { uid: 'u1', text: '你好', jobId: 'job-1' } });
   });
 
-  it('chat_send_resume：蛇形 resume_id', async () => {
+  it('chat_send_resume：驼峰 resumeId', async () => {
     await chat.chatSendResume('u1', 'r1');
-    expect(last()).toEqual({ cmd: 'chat_send_resume', payload: { uid: 'u1', resume_id: 'r1' } });
+    expect(last()).toEqual({ cmd: 'chat_send_resume', payload: { uid: 'u1', resumeId: 'r1' } });
   });
 
-  it('chat_open：蛇形 job_id', async () => {
+  it('chat_open：驼峰 jobId', async () => {
     await chat.chatOpen('boss:abc');
-    expect(last()).toEqual({ cmd: 'chat_open', payload: { job_id: 'boss:abc' } });
+    expect(last()).toEqual({ cmd: 'chat_open', payload: { jobId: 'boss:abc' } });
   });
 
   it('chat_messages / chat_recall：平铺 { uid }', async () => {

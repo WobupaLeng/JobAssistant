@@ -38,7 +38,7 @@ describe('配置弹窗固定窗', () => {
     expect(blockOf('.cfg-head')).toContain('flex: 0 0 auto');
     expect(blockOf('.cfg-foot')).toContain('flex: 0 0 auto');
   });
-  it('弹窗内 config-card 用统一弹层底色（覆盖 pages.css 的 glass-1）', () => {
+  it('弹窗内 config-card 用统一弹层底色（覆盖 pages.css 的 surface-1）', () => {
     expect(blockOf('.config-modal .config-card')).toContain('background: var(--popup-surface)');
   });
 });

@@ -1,6 +1,5 @@
-/* 设计令牌：Liquid Glass 的玻璃由亚克力（Rust 侧 window-vibrancy）、
-   `backdrop-filter` 模糊、高光描边与内外阴影合成，颜色全部收敛在这里。
-   深浅两套**只共用变量名，不共用数值**：深色靠边缘发光立起来，浅色靠投影分层， */
+/* 设计令牌：表面色、高光描边与内外阴影全部收敛在这里。
+   深浅两套**只共用变量名，不共用数值**：深色靠边缘发光立起来，浅色靠投影分层。 */
 
 :root {
   /* ---------- 设计基准与等比缩放 ----------
@@ -8,6 +7,10 @@
    `syncUiScale()` 写进 `<html>` 行内 style，公式 clamp(1, innerWidth / 1920, 1.5)，
    只放大不缩小。字号 / 侧栏 / 抽屉 / 三窗尺寸全部乘它，否则大屏上「字放大、框不放大」。 */
   --ui-scale: 1;
+
+  /* 主列与右栏之间的列缝：`.app-body` 的 gap 与对话框展开时的让位负边距共用这一枚。
+     两处各写一遍数值时，展开首帧的 Boss 列表会错开一条缝宽。 */
+  --app-gap: calc(6px * var(--ui-scale));
 
   /* ---------- 字号令牌：5 档 ----------
    2xs 11px 说明与时间戳 · xs 12px 次要正文 · sm 13px 正文基准
@@ -27,31 +30,26 @@
   --fs-md: calc(15px * var(--ui-scale) * var(--font-scale));
   --fs-lg: calc(20px * var(--ui-scale) * var(--font-scale));
 
-  /* ---------- 玻璃底色 ----------
-   * 层号越大越亮；alpha 全部 < 0.8，否则亚克力透不出来。 */
-  --glass-0: rgba(10, 15, 26, 0.30);
-  --glass-1: rgba(18, 24, 38, 0.52);
-  --glass-2: rgba(30, 39, 58, 0.58);
-  --glass-3: rgba(42, 53, 76, 0.70);
-  --glass-input: rgba(8, 12, 20, 0.40);
+  /* ---------- 表面底色（不透明） ----------
+   * 层号越大越亮：0 = 外壳与卡片，1/2/3 = 逐层抬升的容器，input = 下沉的输入框。 */
+  --surface-0: #0d1422;
+  --surface-1: #121a2b;
+  --surface-2: #182238;
+  --surface-3: #1f2b44;
+  --surface-input: #080c14;
+  /* 卡片底色：岗位卡 / 敏感库卡 / 配置卡共用这一枚，卡片之间不得各写各的层号。 */
+  --surface-card: var(--surface-0);
+  /* 外壳底层中性染色：深色用黑，浅色用白，不跟主题色。 */
+  --shell-tint: rgba(0, 0, 0, 0.5);
+  /* 主题色 wash 仍由 applyPalette 写入，保留给未来玻璃层；当前外壳底层不消费。 */
+  --palette-wash: transparent;
 
-  /* 弹层实底：抽屉 / 敏感库 / 配置卡 / 决策记录 / 筛选条共用，盖在内容之上且字要看得清。
-   两枚都必须有定义，缺了会算成 unset，面板直接变透明。 */
+  /* 弹层实底：抽屉 / 敏感库 / 配置卡 / 决策记录 / 筛选条共用，盖在内容之上且字要看得清。 */
   --popup-surface: #0b1220;
-  --panel-solid: #0b1220;
-
-  /* ---------- 模糊强度 ----------
-   * 分层递减：底板糊得狠才藏得住桌面细节，越靠上的层越清晰。 */
-  --blur-0: 18px;
-  --blur-1: 24px;
-  --blur-3: 12px;
-  --blur-pop: 30px; /* 抽屉 / 弹层：脱离页面，糊得更狠 */
-
-  /* ---------- 饱和度补偿 ----------
-   * backdrop-filter 模糊会把颜色往灰里带，饱和度要补回来，否则透出来的是「脏雾」。 */
-  --saturate-0: 1.4;
-  --saturate-1: 1.6;
-  --saturate-2: 1.5;
+  /* 旧别名，只转发一次转手；两枚都必须是已定义值，缺了算 unset，面板会变透明。 */
+  --panel-solid: var(--popup-surface);
+  /* 浮层遮罩：只压暗底下的页面，绝不能用不透明底，否则弹层之外整片空白。 */
+  --scrim: rgba(4, 8, 16, 0.55);
 
   /* ---------- 高光 ----------
    `--spec-top` 是迎光上边缘，`--spec-bottom` 是背光下边缘。 */
@@ -74,7 +72,7 @@
   --text-3: rgba(232, 238, 247, 0.48);
 
   /* ---------- 配色 ----------
-   * 玻璃下对比度已被 backdrop 压掉一档，主色与辅助色取值都相应提亮。 */
+   * 主色与辅助色按深底上的可读性取值，纯色底比半透明背景更容易压对比。 */
   --primary: #10b981;
   --primary-strong: #059669;
   --primary-soft: rgba(16, 185, 129, 0.16);
@@ -111,6 +109,14 @@
   --bad-bg-strong: rgba(255, 107, 107, 0.3);
   --bad-border: rgba(255, 107, 107, 0.42);
 
+  /* ---------- 常显滚动条 ----------
+   * Chromium 的 overlay 滚动条不悬停时几乎透明，日志区会被当成「不能滚」。
+   * 三道保险：容器 overflow-y: scroll + scrollbar-color + 下面这组 thumb/track 色。
+   * 颜色由 --primary 派生，切换色板后自动跟随；样式表只引用变量。 */
+  --scroll-thumb: color-mix(in srgb, var(--primary) 62%, transparent);
+  --scroll-thumb-hover: color-mix(in srgb, var(--primary) 86%, transparent);
+  --scroll-track: color-mix(in srgb, var(--primary) 14%, transparent);
+
   /* ---------- 圆角 ----------
    * 比常规 UI 大：玻璃边缘要留出高光宽度，8px 圆角配 1px 高光等于没有厚度。 */
   --radius-sm: 10px;
@@ -143,11 +149,10 @@
 
   /* ---------- 按钮配色（语义令牌）----------
    三种实心按钮的前景与描边按 C7 深浅各一套，控件样式表只消费 var()。
-   --btn-danger-fg 与 --bad-text-soft 同值不同义：前者是按钮前景，后者是错误条正文， */
+   --btn-danger-fg 与 --bad-text-soft 同值不同义：前者是按钮前景，后者是错误条正文。
+   主按钮不设外发光令牌：绿色辉光在玻璃底上会散成折射感光晕，用户 2026-11-25 要求删除。 */
   --btn-primary-fg: #04120c;
   --btn-primary-border: rgba(16, 185, 129, 0.45);
-  --btn-primary-shadow: rgba(16, 185, 129, 0.32);
-  --btn-primary-shadow-hover: rgba(16, 185, 129, 0.42);
   --btn-danger-fg: #ffb4b0;
   --btn-danger-border: rgba(248, 81, 73, 0.42);
   --btn-warn-fg: #f0c674;
@@ -157,42 +162,37 @@
 
   /* ---------- 动效 ----------
    * 慢且带惯性：320-420ms 非线性；低于 200ms 会像老式 UI 的瞬时跳变。 */
-  --ease-glass: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-smooth: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-fast: 160ms;
   --dur: 320ms;
+  /* 对话框展开/收起：比 --dur 短一档，宽度补间走满 320ms 会显得迟钝。 */
 
   --font-sans: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
   --font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
 }
 
-/* 浅色主题：与深色只共用变量名。浅底没有暗部托住，玻璃靠加重投影与投影分层立起来。 */
+/* 浅色主题：与深色只共用变量名。浅底没有暗部托住，靠加重投影与投影分层立起来。 */
 [data-theme='light'] {
-  --glass-0: rgba(255, 255, 255, 0.24);
-  --glass-1: rgba(255, 255, 255, 0.62);
-  --glass-2: rgba(255, 255, 255, 0.74);
-  --glass-3: rgba(255, 255, 255, 0.86);
-  --glass-input: rgba(255, 255, 255, 0.70);
+  --surface-0: #f4f7fc;
+  --surface-1: #fbfcfe;
+  --surface-2: #ffffff;
+  --surface-3: #ffffff;
+  --surface-input: #ffffff;
+  /* 浅色外壳底层用白色薄染，压住 surface-0 自带的冷蓝。 */
+  --shell-tint: rgba(255, 255, 255, 0.7);
   /* 弹层实底：与深色同一条规则，只是提亮。 */
   --popup-surface: #f4f7fb;
-  --panel-solid: #f4f7fb;
+  --panel-solid: var(--popup-surface);
+  --scrim: rgba(15, 23, 42, 0.32);
 
-  /* 浅底更刺眼：模糊与饱和度都要更狠 */
-  --blur-0: 24px;
-  --blur-1: 30px;
-  --blur-3: 16px;
-  --blur-pop: 36px;
-  --saturate-0: 1.7;
-  --saturate-1: 1.8;
-  --saturate-2: 1.7;
-
-  /* 高光改色不改量：浅底用近白但不纯白，纯白高光在白卡上等于没有 */
-  --spec-top: rgba(255, 255, 255, 0.95);
-  --spec-bottom: rgba(15, 23, 42, 0.04);
-  --spec-side: rgba(15, 23, 42, 0.05);
+  /* 高光带取主题色：白底上近白高光等于没有，浅色档改跟 --primary，明暗次序与深色档一致。 */
+  --spec-top: color-mix(in srgb, var(--primary) 62%, transparent);
+  --spec-bottom: color-mix(in srgb, var(--primary) 14%, transparent);
+  --spec-side: color-mix(in srgb, var(--primary) 34%, transparent);
   --spec-strength: 0.7;
-  /* 峰值色两档同值：浅底上高光靠 --spec-strength 压到 0.7 就够，不需要换色。 */
-  --spec-peak: #ffffff;
+  /* 峰值色（对角弧与指针光斑的起点）同族取主题色本色。 */
+  --spec-peak: var(--primary);
 
   --hairline: rgba(15, 23, 42, 0.10);
   --hairline-strong: rgba(15, 23, 42, 0.16);
@@ -228,11 +228,14 @@
   --bad-bg-strong: rgba(255, 107, 107, 0.3);
   --bad-border: rgba(255, 107, 107, 0.42);
 
-  /* 按钮配色浅色覆盖：前景压深、描边加深、投影减淡（浅底重影会显脏）。 */
+  /* 常显滚动条：浅底提高主色占比，半透明滑块在白底上才看得见。 */
+  --scroll-thumb: color-mix(in srgb, var(--primary) 68%, transparent);
+  --scroll-thumb-hover: color-mix(in srgb, var(--primary) 90%, transparent);
+  --scroll-track: color-mix(in srgb, var(--primary) 16%, transparent);
+
+  /* 按钮配色浅色覆盖：前景压深、描边加深。 */
   --btn-primary-fg: #fff;
   --btn-primary-border: rgba(5, 150, 105, 0.55);
-  --btn-primary-shadow: rgba(16, 185, 129, 0.26);
-  --btn-primary-shadow-hover: rgba(16, 185, 129, 0.36);
   --btn-danger-fg: #b91c1c;
   --btn-danger-border: rgba(185, 28, 28, 0.38);
   --btn-warn-fg: #92650a;
@@ -251,7 +254,9 @@
 
 /* ---------- 基础重置 ---------- */
 
-{
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
@@ -273,7 +278,7 @@ body,
 }
 
 body {
-  /* 必须透明：窗口的亚克力由 Rust 侧合成，这里任何不透明底色都会把它吃掉 */
+  /* 必须透明：整页唯一的底面由 .app-shell 画，这里任何不透明底色都会盖住它 */
   background: transparent;
   color: var(--text-1);
   font-family: var(--font-sans);
@@ -300,14 +305,22 @@ select {
   height: 9px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--scroll-track);
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--hairline-strong);
+  background: var(--scroll-thumb);
   border-radius: var(--radius-pill);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.55);
+  background: var(--scroll-thumb-hover);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 非 WebKit 内核 / 未命中上面伪元素的滚动容器，从根节点继承主题色。 */
+html {
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
 }
 
 /* 无障碍：读屏可见、肉眼不可见。

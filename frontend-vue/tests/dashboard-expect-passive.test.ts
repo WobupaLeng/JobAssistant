@@ -102,14 +102,18 @@ describe('求职期望被动化', () => {
     expect(listExpectations).toHaveBeenCalledTimes(1);
   });
 
-  it('挂载时不轮询日志（listLogs 不被调用，即使已登录）', async () => {
+  // 日志卡首屏补一次快照（`primeLogs`）：`list_logs` 只读 Rust 进程内的 `LogRing`，
+  // 不碰 sidecar、不导航浏览器，所以「已登录就补一次」是安全的；但**仍然不轮询**——
+  // 空闲态的定时器一条 IPC 都不该发（这是原先「挂载时不拉取」的约束，只放宽了首屏那一次）。
+  it('挂载后只补一次日志快照，空闲时不轮询', async () => {
     loginStatus.mockResolvedValue(LOGGED_IN);
     vi.useFakeTimers();
     mount(DashboardPage);
     await flushPromises();
+    expect(listLogs).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(60_000);
     await flushPromises();
-    expect(listLogs).not.toHaveBeenCalled();
+    expect(listLogs).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 

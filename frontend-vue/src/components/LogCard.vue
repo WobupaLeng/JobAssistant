@@ -4,7 +4,7 @@
  * 空格（并列，不是页签）。进度两套都渲染：可见 Stat 五段给眼睛，sr-only 五段给读屏与 E2E。
  * 日志用 `setTimeout` 轮询，挂起时不触发，恢复时靠游标补齐。
  */
-import { computed } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import {
   lastTitleText,
   srSummary,
@@ -43,6 +43,29 @@ const last = computed(() => lastTitleText(props.progress.last_title));
 const spec = computed(() =>
   props.scoreMax === null ? '—' : `满分 ${props.scoreMax} · 门槛 ${props.minScore ?? '—'}`,
 );
+
+/**
+ * 日志行区贴底跟随：新行追加在末尾，只有用户手动往上翻过才停止跟随，
+ * 否则卡里永远是最早的几行（卡高只放得下约 8 行），看着像「没有操作信息」。
+ */
+const rowsBox = ref<HTMLOListElement | null>(null);
+const stickBottom = ref(true);
+
+function onRowsScroll(): void {
+  const el = rowsBox.value;
+  if (el === null) return;
+  stickBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= 8;
+}
+
+watch(
+  () => props.lines.length,
+  async () => {
+    if (!stickBottom.value) return;
+    await nextTick();
+    const el = rowsBox.value;
+    if (el !== null) el.scrollTop = el.scrollHeight;
+  },
+);
 </script>
 
 <template>
@@ -61,7 +84,7 @@ const spec = computed(() =>
     </div>
     <div class="card-body">
       <p class="sr-only" data-testid="scrape-sr-summary" aria-live="polite">{{ summary }}</p>
-      <ol class="log-rows" data-testid="log-rows">
+      <ol ref="rowsBox" class="log-rows" data-testid="log-rows" @scroll.passive="onRowsScroll">
         <li v-if="lines.length === 0" class="empty" data-testid="log-empty">
           尚无事件。点击「开始抓取」后这里会滚动显示进度。
         </li>
