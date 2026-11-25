@@ -609,9 +609,13 @@ def _run_chat(cmd: dict[str, Any]) -> None:
             _with_chat(lambda ctx: client.recall(ctx, uid))
             data = {"uid": uid, "ok": True}
         elif name == "chat.open":
-            # chat.open 在旧版是「按公司/HR 名找到会话」，新版由前端在
-            # chat.friends 的列表里本地匹配——列表本来就在手上，没必要再开一枪
-            raise ValueError("chat.open 已并入 chat.friends，请用列表匹配")
+            # 按岗位在 Boss 上建立会话（「还没打过招呼」的岗位走这里）。
+            # 旧版是按公司/HR 名在已有会话里找，对没聊过的岗位永远找不到；
+            # 现在改成真去岗位页点「立即沟通」，拿到服务端分配的会话 uid。
+            job_id = str(cmd.get("job_id") or "")
+            if not job_id:
+                raise ValueError("缺少 job_id")
+            data = _with_chat(lambda ctx: client.ensure(ctx, job_id))
         else:
             raise ValueError(f"未知聊天命令：{name}")
         emit({"id": cid, "ok": True, "data": data})
