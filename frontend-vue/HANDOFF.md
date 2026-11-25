@@ -55,7 +55,7 @@
 - **F 顶栏**：llm seg title 逐字「大模型打分暂未开放，当前只支持规则打分」；token 读数两份 DOM（`token-total` 落 `<b>`、`token-total-chip` 折叠 chip，文案「累计 N token」，L1400-1406/A32），`.tb-token-chip` 死规则接上；**theme 锚点保持 `theme-toggle`**（SPEC-001 AC10 + 基线 L157 明文，原型 `shell-theme-toggle` 为异名，不改）。
 - **H 日志卡/降级**：`log-card` 定高 220/min160 + `.log-card>.card-body` flex column 滚动、`log-rows` 去 180px 二次限高（L943/L1024）；删 `vue-dashboard` 两处 + `vue-chat` 一处 `@media(max-width:900px)` 降级（原型 L1339-1341 硬约束：最小宽 1200，不做落底/单列降级）；`LogCard` 标题「决策日志 / 运行日志」（基线 K9/文案表，斜杠两侧各一空格）。
 - **ExpectRow 退役**（Rev3/Rev5）：删 `ExpectRow.vue` + `ChatPage` 引用/`loadExpectations`/`expectations` 状态 + `.expect-row` CSS + `chat-contract` SOURCES 行；`chat-expect-*` 锚点全站 0（`qa-testids` 新增断言守）。期望数据仍由概览筛选面板「读取期望职位」承载，`api/commands/chat.ts` 的 `list_expectations` 封装与契约面不动。
-- **红线 8 令牌化**：原型字面色值一律新增语义令牌——`--spec-avatar-top`（头像高光 .5，比 `--spec-top` 亮一档）、`--btn-pause-border/-hover/-bg/-fg`（深浅两套）；`.chat-rail::before` 玻璃描边随族住 `layout.css`（`#000` 遮罩 alpha，vue 系禁字面量）。
+- **红线 8 令牌化**：原型字面色值一律新增语义令牌——`--spec-avatar-top`（头像高光 .5，比 `--spec-top` 亮一档）、`--btn-pause-border/-hover/-bg/-fg`（深浅两套）；`.chat-rail::before` 的高光描边随族住 `layout.css`（`#000` 遮罩 alpha，vue 系禁字面量）。
 
 **M2 锚点增删清单（QA 重锚用）**：
 - 退役：`chat-expect-row` / `chat-expect-loading` / `chat-expect-error` / `chat-expect-empty` / `chat-expect-<code>`（ExpectRow 整组）、`.expect-row` class。
@@ -66,7 +66,7 @@
 
 **M3 视觉收尾完成**（SPEC-001 Rev6 路由①③ + §3.3 #7 动效候选；纯 CSS + 测试守卫，零逻辑改动、零锚点增删）：
 - **<1200 横向滚动不裁剪**（Rev6 偏差③，基线 §2.3「最小宽度是契约」）：`vue-dashboard.css` 在 `.app-shell{min-width:1200px}` 旁新增 `body{overflow-x:auto;overflow-y:hidden}`——契约宿主 tokens.css 的 `overflow:hidden` 会把 1200 外壳裁掉，横向出口为 Vue 侧覆盖，纵向仍锁死（各列自己滚），防首帧闪白内联规则只匹配挂载前不受影响。实测（Edge headless + vite preview 8091）：1150×800 scrollWidth 1200 / clientWidth 1150，滚到右缘 `shell-config-btn` right=1058 可达；1200/1440 scrollWidth==clientWidth 无溢出；scrollHeight==clientHeight 无纵向滚动条。
-- **入场动效补齐**（原型真值、Vue 此前缺失）：`.rail-error` 补 `animation: rail-in var(--dur) var(--ease-out)`（原型 L1179/L1187 逐字）、`.chat-detach-chat .bubble` 补 `bubble-in`（L1196/L1201 逐字），两组 keyframes 住 `vue-chat.css`；只动 opacity/transform（合成层，不触发 backdrop-filter 每帧重算）；新节点创建即播一次，keyed v-for 保住既有气泡不重播，零 JS 接线。实测真实 rail-error 节点 animationName=rail-in / 0.32s；reduced-motion 由 controls.css 全局封顶生效（0.01ms）。
+- **入场动效补齐**（原型真值、Vue 此前缺失）：`.rail-error` 补 `animation: rail-in var(--dur) var(--ease-out)`（原型 L1179/L1187 逐字）、`.chat-detach-chat .bubble` 补 `bubble-in`（L1196/L1201 逐字），两组 keyframes 住 `vue-chat.css`；只动 opacity/transform（走合成层，不触发每帧重排重绘）；新节点创建即播一次，keyed v-for 保住既有气泡不重播，零 JS 接线。实测真实 rail-error 节点 animationName=rail-in / 0.32s；reduced-motion 由 controls.css 全局封顶生效（0.01ms）。
 - **chat-head 三按钮裁量＝零改动**（Rev6 偏差①）：已走标准 `btn btn-sm btn-ghost`（controls.css hover 抬 1px / press scale 0.985 / disabled 0.4 齐备），不新造样式。
 - **不接线、待裁决**：C17 其余三类 `list-fade`/`row-in`/`token-bump` 常量保住（契约满足）但原型零命中，接线会发明超出冻结设计的动效，待设计/架构裁决；`.job-card.is-leaving` 同样无原型真值。`transitionend`/`animationend` 无消费方需要（CSS 入场动画节点创建即播，无需事件清理）。
 - **门禁**：typecheck 0 错；vitest 34 文件 572 全绿（新增 2 守卫：chat-contract 入场动效 + geometry body 横向出口）；build 产物 76.04 kB，`{` 计数 738 = M2 731 + 新增 7 块，新规则逐条可达；槽位 A cargo 独占 `%TEMP%\jt-m3-polish` exit 0 + compileall 0。证据 `%TEMP%\jt-m3-polish\m3-{1150-right-edge,1440}.png`。
@@ -78,24 +78,15 @@
 - **数据真实性**：Rust 核心无累计写入路径（偏差②更正），读数为旧库遗留值（无 Tauri 预览下为 0），前端不造数；后端补累计排 M4 之后（Chief 顺序）。
 - **门禁**：typecheck 0 错；vitest 34 文件 573 全绿；build 76.39 kB，`{` 计数 743 = 738 + 新增 5 块，分项规则与 1360–1599 媒体块可达；槽位 A cargo 独占 `%TEMP%\jt-m3b-polish` exit 0 + compileall 0。实测 1600 分项可见（text-1/650）、1440 分项与分隔线隐藏、1150 chip title 全量三值且横向出口仍生效。证据 `%TEMP%\jt-m3-polish\m3b-1600-stats.png`。
 
-**Liquid Glass L2 完成**（SPEC-003 裁定 1–7，上游规格 `d39bae4` 冻结；根 §7.2 #3 第二层落地）：
-- **L2-0 闸门 PASS**：真 WebView2（Chrome/157）探针实证 `filter:url()` 湍流像素差 >0、`feImage data:` 生效、webgl2 可用——最高风险项确证，无需 `data-l2` 降级。探针在 `%TEMP%\jt-glass-l23\`（红线 7 禁入 src）。
-- **L2-1 基础**：`index.html` 加 svg defs（`lg-turb-dark` 0.008/3/scale10、`lg-turb-light` 0.006/2/scale5，seed 同 11）；`styles/vue-glass.css` 第 15 份追加 `index.css` @import 链末尾；`lib_ui/glass.ts` ThemeParams 与 `tokens.css` 折射令牌同源（vitest 断言）。
-- **L2-2 抽屉/敏感库 P0**（裁定 6）：`GlassClone.vue` backdrop 模式 + `use-glass-clone.ts`——面板背后窗内内容非交互副本（剥全部 id/data-testid、剥既有克隆层防递归、排除叠层、aria-hidden/inert/pointer-events:none），`computeGlassOffset` 反平移 rect+scroll，按面板 rect 预裁剪 +20px 出血，内容变更节流 200ms 重克隆、滚动只更新反平移。
-- **L2-3 卡片 P1**（裁定 7）：material 模式克隆卡自身玻璃 tint（card-local 不反平移，链 1 滤镜）+ `use-glass-budget.ts` IntersectionObserver 限 ≤12 可见卡施滤镜；`use-glass-support.ts` 运行时探针不支持则 `<html data-l2="off">` 整层降级。
-- **映射/红线**：Leptos `glass.rs`→`glass.ts`、`shell.rs`→`AppShell.vue`（L3 `glass_canvas.rs`→`GlassCanvas.vue` 见下段）；`.card` 补 `overflow:hidden`（规格铁律 3，`layout.css` 只加这一条）；零新依赖（禁 three/pixi/wgpu/html2canvas），颜色全运行时读 token、TS/CSS 零字面量；jsdom 无 IO/RO 加能力守卫（真实 WebView2 照常）。
-- **门禁**：typecheck 0；vitest 35 文件 589 全绿；build CSS 77.61 kB `{` 758（glass 规则全可达、`.card overflow:hidden` present）、JS 241.76 kB（L2 增量远低于 A9 40KB 预算）；C4 @import 15、vue 系 CSS 4 份零字面量守卫绿。**真窗口视觉验收（规格 5.2/5.3 A2–A8）与槽位 C 冒烟按 Chief 裁定搁置至统一验收**。
+**Liquid Glass L2/L3（已作废，仅存档）**：曾实现「L2 折射克隆层 + L3 WebGL 透镜」两层玻璃，随后按用户裁决整层移除（提交 `b5a9062`），本轮又把 CSS 玻璃材质一并删除（见下段）。被删的代码与验收记录从 git 历史取回：`GlassClone.vue` / `use-glass-clone.ts` / `glass.ts` / `GlassCanvas.vue` / `use-glass-l3.ts` / `vue-glass.css` / `glass.test.ts`；`docs/ui/UI-SPEC-liquid-glass-l2-l3.md` 与 `docs/specs/SPEC-003-legacy-liquid-glass-l2-l3.md` 仅作存档，**不是可施工依据**。
+> 契约变化：C4 回到 **14 条**、红线 8 的 `VUE_CSS` 回到 **3 份**、新增红线 9（禁 CSS 玻璃材质）。§2.1「敏感库面板被压到视口外」与「已修」表里的 L3 自激循环、L2 克隆层节流都随代码消失，不再是待办。
 
-**Liquid Glass L3 完成**（SPEC-003 裁定 3/4/5，上游规格 §3；根 §7.2 #3 第三层落地，L2/L3 收口）：
-- **GlassCanvas 抽屉透镜**：`components/GlassCanvas.vue`（canvas `data-testid="glass-l3-canvas"`，reduced-motion/reduced-transparency 时 `v-if` 根本不创建＝A8）+ `lib_ui/use-glass-l3.ts` 裸 WebGL2 渲染器（零新依赖）：每帧读 ≤64 张可见 `.job-card` 几何/底色（运行时 computed style）实例化画进 FBO，再画覆盖抽屉矩形的透镜，片元就地算 squircle SDF + Snell 法线偏移 UV 采样 FBO，混 `--glass-3` tint + 边缘高光；`glass.ts` 落 L3 光学纯函数（`snellDeflection`/`squircleSDF`/`bevelSlope`/`clampDpr` + `GLASS_L3` 常量，vitest 单测）。挂 `AppShell.vue` `.app-body` 之后（裁定 5：`position:fixed inset:0 z-index:40 pointer-events:none`，DOM 序盖过同层遮罩、低于抽屉面板 41）。
-- **预算降级**（规格 §3.4）：抽屉关/被上层叠层（config/decisions）或敏感库盖住 → 停 rAF 清屏；静止 500ms 停 rAF 保留最终 draw；visibility hidden 停；dpr≤2；实例≤64；webgl2 创建/着色器编译失败 → `<html data-l3="off">`（第二层照常）。
-- **映射偏差（记此，类裁定 7 适配非契约冲突）**：① Vue 透明底（C5）→ canvas 不画规格 §3.3 step3 的 body 不透明 quad（会挡亚克力），FBO/默认帧透明清屏、透镜只绘折射卡片其余全透明；② 进度＝抽屉真实 computed opacity（Vue 抽屉是 24px 微移 + 淡入，opacity 0→1 即动画真值），替代规格 §3.6 字面公式 `1-r.right/innerWidth`（预设整屏滑入对本抽屉恒≈0），原则照 §3.6 每帧读真实几何不猜动画。敏感库栈 50/51 在 canvas 上、与抽屉互斥 → 敏感库开时透镜 inactive（裁定 5 v1＝抽屉透镜）。
-- **L3 施工探针 PASS**（真 WebView2 WebGL 2.0，复用冒烟产物 + CDP，不 build Tauri）：从 `use-glass-l3.ts` 逐字提取 4 段 shipped GLSL 编译/链接全过、FBO complete、透镜绘 50256/60000 像素、有折射(edge14) vs 无折射(edge0) 像素差 815/max31 >0 证 Snell UV 偏移生效、glError 0。探针 `%TEMP%\jt-glass-l23\probe-l3.mjs`（红线 7 禁入 src），冒烟实例用后已关。
-- **门禁**：typecheck 0；vitest 35 文件 606 全绿；build CSS 77.99 kB `{` 766（L2 758+8，canvas 规则全可达）、JS 252.89 kB；**A9 实测**：pre-Glass 基线 237.61 kB（worktree@dcd5e66~1 独立 build）→ L2+L3 总增量 15.28 kB ≤ 40KB ✓；C4 @import 仍 15（无新样式表）、vue 系 CSS 4 份零字面量、`glass-l3-canvas` 全站恰 1 处守卫绿。**真窗口视觉验收（规格 5.2/5.3 A2–A8）与槽位 C 冒烟按 Chief 裁定搁置至统一验收**。
-
-> **⚠️ 以上 L2/L3 段落已作废（2026-11-25，用户裁决整层移除，提交 `b5a9062`）。** 保留作历史：删掉的正是 L2 克隆层（`GlassClone.vue` / `use-glass-clone.ts` / `glass.ts` / `vue-glass.css`）与 L3 透镜（`GlassCanvas.vue` / `use-glass-l3.ts` / `glass.test.ts`），以及 `index.html` 里的 svg defs、`AppShell` 的挂载点。**只留第一层 `backdrop-filter` 玻璃。**
->
-> 移除后的契约变化（已同步进 `AGENTS.md`）：C4 回到 **14 条**、红线 8 的 `VUE_CSS` 回到 **3 份**、前端测试文件数由 39 降为 38（少的是 `glass.test.ts`，**不是漏跑**）。§2.1「敏感库面板被压到视口外」那条坑与「已修」表里的 L3 自激循环、L2 克隆层节流，都因代码删除而**不再适用**——不是结论错了，是病灶没了。
+**材质改版：CSS 玻璃整体移除**（2026-11-25 用户裁决「不需要玻璃材质的设定」，本轮落地）：
+- 令牌换血：`--glass-0…3` / `--glass-input` / `--glass-tint(-strong)` → 不透明阶梯 `--surface-0…3` / `--surface-input`；卡片底色收成单一出口 `--surface-card`（岗位卡 / 敏感库卡 / 配置卡同源，层级差靠描边与投影给），弹层实底 `--popup-surface`（`--panel-solid` 只转手一次）；浮层遮罩独立成 `--scrim`（半透明，只压暗底下的页面）。
+- `backdrop-filter` / `-webkit-backdrop-filter` 全仓 28 处清零；`--panel-blur` / `--blur-*` / `--saturate-*` 令牌与 `palette.ts` 的 `glassTint*` 字段删除。**红线 9 由此新增**：CSS 不再引入玻璃材质；窗口级系统模糊仍在 Rust 侧（`SetWindowCompositionAttribute`），那是窗口属性、不在 CSS 里复刻。
+- 整窗主题流光改由 `.app-shell` 的 `::before` / `::after`（负 z-index + `isolation: isolate`）承担。流光在内容**之后**，任何不透明 `--surface-*` 底都会把它挡掉——需要透光的块（如 `.auto-apply-bar`）用 `color-mix(in srgb, var(--surface-input) 55%, transparent)`。
+- 顺带修掉：浅色主题的默认光带改用主题色（`--spec-top/side/bottom` 走 `color-mix`）；岗位列表外框光带在指针移入内层卡片时不再永久消失（`main.ts` 的 `pointerout` 改比「最近的高光面」而非「是否同源」）。
+- 清理结果：15 份 CSS **死规则 0**（`.table` 家族、`.auto-toggle`、`.job-tab.is-active`、`.chat-grid` 媒体块等整段删除；`is-*` 家族是动态拼的，判死前必须看 `senderSlug` / `friendMsgTone` / `ScoreTier` 等生产者）、**死令牌 0**（`--palette-wash` / `--hl-restore-ms` / `--win-corner-cut` / `--btn-warn-*` / `--warn-bg*` 删除，未定义的 `--text-soft` 改 `--text-3`）、**CSS 与 TS 侧 >5 行注释 0**、注释里的材质比喻与「用户 m0xxxx / 用户裁决」溯源 0。
 
 **单休小批完成**（SPEC-004 §三，独立提交不混 Glass；后端三档 `009c643` 已先合，两端字面量集对齐）：`lib_ui/options.ts` `WEEKEND_OPTIONS` 3→4 档（新增 `single`「单休」＝单休+大小周+双休只排除无休；`no_bigweek` 矛盾 hint 校正为「找大小周+双休；排除单休/无休（未标注按双休含）」；`double` hint 与可见名维持）；`api/types.ts` `ScrapeDefaultsArgs.workWeekend` `unknown`→`'any'|'double'|'no_bigweek'|'single'` union（回读 `scrape_defaults` 仍 `Record<string,unknown>` 不动）；`FilterPanel.vue`/`scrape-filter-model.ts` 选项表驱动零改动。门禁：typecheck 0；vitest 35 文件 608 全绿（字面量集断言＋`single` 经 decode/applyBackend 两条路校验用例）；build JS 253.00 kB（+0.11，`value:"single"` 与新 hint 可达、旧矛盾 hint 0 残留）、CSS 不变。
 
@@ -126,6 +117,8 @@
 ### 2.3 契约与文案
 
 - **驼峰参数写错名字不会有任何提示**：serde 对未知字段静默不报错。
+- **「替用户发消息」的命令要带 `jobId`，否则岗位不进已投递**：`greet_one` 与 `chat_send` 都是发完消息才调 `mark_delivered`（顺序不能反）。打招呼的 `jobId` 有两个来源——从概览页卡片进来时后端记在 `greetJob`（会话可能还是占位行，身上没有 `job_id`），从聊天页对着已有会话打招呼时用 `friend.job_id`；发成功后必须清掉 `greetJob`，否则同一 Boss 再发一次会重复标记（用户报：打招呼后没进已投递列表）。
+- **会话副行三种状态的上色口径（用户 m01052 裁定）**：新消息红（`--bad-text`）、已读绿（`--good`）、已送达不处理（`--text-3`）。状态词只描述「我发的最后一条」，对方发的不加词；未读数角标另走 `--bad`。改这三条要同时看 `styles/vue-chat.css` 的 `.friend-msg.is-*` 与 `lib_ui/chat-model.ts` 的 `friendMsgTone`。
 - **载荷形状按 tauri 2 参数规则**：struct 参数（`score_job`/`scrape_start`/`set_limit`/`rescore_jobs` 等）需 `args` 包裹（`invokeArgs`）；标量参数平铺、键名取参数名 lowerCamelCase（`passes_threshold` 门槛键 `minScore`、`auto_greet_pause` 平铺）；`ScoreArgs` 内层字段蛇形（`rename_all`）。**照抄后端真源签名，不要「统一化」**。
 - **`min_score` 只能走 `set_limit`**：塞进 `set_app_config` 会被静默跳过。
 - **配置保存只提交 diff**：后端 `null` 语义是「删除该键」，整份回传等于每次保存清空未设置项。
@@ -134,23 +127,24 @@
 - **CSS 里写 `//!` 或 `///` 会让整份样式表被静默丢弃**，表现为「变量生效、组件样式全无」。Leptos 版当前 0 违规。
 - **时间戳秒/毫秒判据是「`|ts| < 1e11`（10 位及以下）就当秒」**：`lib_ui/time.ts` 与 Leptos 的 `time.rs::to_ms` 同一判据（C14），**改一处必须同改另一处**。取 1e11 后秒覆盖到公元 5138 年、毫秒从 **1973-03-03** 起，`time.time()` 与 `Date.now()` 两个数据源都在各自区间内。**旧判据 1e12 有真缺陷**（2001-09-10 之前的毫秒戳被误乘 1000，例如 2000-02-29 显示成 32129 年），已随本轮修正，`tests/time.test.ts` 全绿。唯一判不了的是 1973 年以前的毫秒值（`|ts| < 1e11` 时与秒不可区分，信息已丢失），不要用「猜日期」的办法补救。
 - **会话副行的 `[送达]`/`[已读]` 靠两个独立字段，缺一个就永远只有裸文本**：`last_from_me`（方向）为真、且 `last_status` 为 `1`/`2` 才出词（`chat-model.ts` 的 `friendMsgTone`）。`last_status` **不是方向**，Boss 用 `0` 表示「对方发的」。发消息后由 `markFriendSent` 就地写 `last_status = 1`，**不许伪造 `2`（已读）**——已读只能等下一次真拉 `chat_friends`。发完也不要立刻重拉列表：那条命令要 reload 整个聊天页（秒级），会把「发出去立刻有反馈」的体感毁掉。
+- **登录/连接类提示只许出一条**：`note`（读消息/发送失败）与 `autoNote`（心跳、自动投递）是两条通道，sidecar 没起来时两边会各说一遍（「浏览器未连接：请先登录」+「读取消息失败：sidecar 尚未启动…」），并排就是同一件事说两遍。渲染统一走 `ChatPage.vue` 的 `extraNote`：与 `note` 逐字相同、或两者都属登录/连接类（`isSessionNote` → `needsSession` 的 `尚未启动`/`没有会话` 或 `LOGIN_NOTE_PREFIXES`）时不再补第二条。新增此类文案要么进 `LOGIN_NOTE_PREFIXES`，要么带 `尚未启动`/`没有会话`，否则右栏与对话框里会重新出现两条。
+- **概览页日志卡是「运行日志 + 决策」混排，不是两份列表**（用户 m01229 / m01321）：页签「全部 / 错误 / 警告 / 信息 / 决策」排在 `.card-head` 里、`log-decisions-btn` 的紧左边；合并逻辑全在 `lib_ui/log-mix.ts`（纯函数，`tests/log-mix.test.ts` 守着）。两个坑：①决策记录的 `created_at` 是 **Unix 秒**、运行日志是**毫秒**，`decisionMs()` 不乘 1000 决策行会掉到 1970；②`list_decisions` 的回包要 `Array.isArray` 过一遍——`null` 会盖掉 prop 默认值，`for..of` 直接把整块渲染炸掉（`tests/login-page.test.ts` 的桩就返回 `null`）。`pages/LogsPage.vue` 那份「决策记录」覆盖页**没动**，两处口径要一起改时先看这条。
 
 ### 2.4 布局与视觉
 
-- **页面背景不透明 = 毛玻璃失效**：`tokens.css` 的 `body` 有 `background: transparent`，不要覆盖它。
+- **页面背景不透明 = 窗口圆角与系统模糊被一层实底盖死**：`tokens.css` 的 `body` 有 `background: transparent`，不要覆盖它（`tests/geometry.test.ts` 守着）。
 - **首帧闪白**：靠 `index.html` 的 3 条内联 `<style>` 压住，不要挪到外部 CSS 文件。
-- **敏感库面板被压到视口外**：`vue-glass.css:8` 的 `.glass-l2 { position: relative }` 后加载，同特异性会覆盖 `sensitive.css` 的 `position: fixed`，面板落到 body 底部（实测 `y=774`，超出 900px 视口）。已用 `styles/sensitive.css` 的 `.sensitive-panel.glass-l2 { position: fixed; }` 钉回（提交 `6b1ae9c`）。改动 `.glass-l2` 或面板定位时必须复测。
 - **CDP 实测方法**：用 headless Chrome `--remote-debugging-port=9333 --no-sandbox` 打开 `http://127.0.0.1:5173/`，经 `/json/list` 取页面 ws，用 `Runtime.evaluate` 读 `getBoundingClientRect` / `getComputedStyle`。注意每次加载都是新页面，重复点击会切换开关，判断前先确认初始状态。
 - **无 Tauri 后端时的表现**：所有 `invoke` 报 `__TAURI_INTERNALS__ 不可用`，列表与右栏均为错误态，只能验证结构，不能验证 Boss 列表数据与日志栏内容。
 - **右栏错误「叠字」未证实**：测得关闭对话框时只有 1 个 `.rail-error`（`FriendList.vue:133`），`h=131` 是内容撑开的结果。截图叠字疑似 `rail-in` 入场动画截帧，未复现，暂不改标记。
-- **`FriendList` 会渲染两份**：页面右栏与对话框 `#rail` 槽各挂一份（`ChatPage.vue` 的 `prefix="chat-rail"` 与 `chat-detach-rail`，后者 `v-if="ui.chatOpen"`）。改错误/空态时两处都要生效。
+- **`FriendList` 会渲染两份**：页面右栏与对话框 `#rail` 槽各挂一份（`ChatPage.vue` 的 `prefix="chat-rail"` 与 `chat-detach-rail`）。面板里那份**常驻不卸载**——收起时面板会靠 `visibility` 多留 `--detach-dur` 盖在原位，此时卸载会让列表「瞬间消失」。改错误/空态时两处都要生效。
 - **顶栏右组未溢出**：1440 视口下 `.tb-tail.right=1389`，`.topbar` 内容宽 1388，恰好放下。不要因此改顶栏宽度。
 - **窗口拖动 / 双击最大化只认最上方 20px**（用户裁决 2026-11-25）：`header.topbar` **不得**再挂静态 `data-tauri-drag-region`（那会让整条 46px 都能拖），改由 `lib_ui/drag-allow.ts` 在捕获阶段按 `ev.clientY < TITLE_STRIP_HEIGHT(20)` 给**命中元素**补属性；上一次的标记必须在下一次 pointerdown 时摘掉，否则该节点永久变成拖动区（曾经的「整窗都能拖」根因）。双击最大化由 Tauri 自带 `drag.js` 处理，**不要**自己再发 `window_toggle_maximize`，否则一次双击翻两次。回归：`tests/title-strip-drag.test.ts`。
 - **日志与决策记录的信息密度**（用户裁决 2026-11-25）：运行日志**正序**（第一行在最上面、新行追加到底部，`features/logs/model.ts::mergeRunRows` 按 `ts asc || seq asc` 排，**不要改回倒序**）；首屏停在第一行，只有用户自己滚到底之后才跟随新行，翻到中间时出现「回到最新」。级别只给**标签**上色（INFO 走 `--accent` / WARN 走 `--warn-*` / ERROR 走 `--bad-*`，正文一律 `--text-1`），整行染色会让满屏日志变成色块。时间列必须 `max-content + white-space: nowrap`：定宽列装不下 `MM-DD HH:mm:ss` 会把日期与时分折成两行（曾被误判成「没有时间戳」）。决策记录行多显示两样库里本就有的数据：`platform`（`platformName`，空串给 `—`）与带年份的 `timeTitle`（tooltip）。滚动条一律 `overflow-y: scroll` + `--scroll-thumb/--scroll-track`（overlay 滚动条不悬停时几乎不可见，曾被误判成「没有滚动条」）。回归：`tests/logs-cursor.test.ts` / `tests/logs-model.test.ts` / `tests/decisions-row.test.ts` / `tests/decisions-css.test.ts`。
-- **实心主按钮 / 品牌标不挂绿色外发光**（用户裁决 2026-11-25）：`.btn-primary` 只留 `inset 0 -1px 0` 内嵌暗线，悬停也只有 `.btn:hover` 的 1px 抬升；`.brand-mark` 同样只留内嵌暗线。绿色 box-shadow（原 `--btn-primary-shadow` / `--btn-primary-shadow-hover`，两枚令牌已删）叠在玻璃底上会散成一圈绿色光晕，被当成「玻璃折射高光」。登录（`PlatformCard`）、打招呼（`JobCard`）、开始抓取（`ScrapeBar`）都是 `.btn-primary`，一处改全改。复查口径：CDP 悬停前后比 `boxShadow` / `backdrop-filter` / `::before`·`::after`，现在只有 `transform` 变化。
+- **实心主按钮 / 品牌标不挂绿色外发光**（用户裁决 2026-11-25）：`.btn-primary` 只留 `inset 0 -1px 0` 内嵌暗线，悬停也只有 `.btn:hover` 的 1px 抬升；`.brand-mark` 同样只留内嵌暗线。绿色 box-shadow（原 `--btn-primary-shadow` / `--btn-primary-shadow-hover`，两枚令牌已删）会散成一圈绿色光晕，曾被误当成高光。登录（`PlatformCard`）、打招呼（`JobCard`）、开始抓取（`ScrapeBar`）都是 `.btn-primary`，一处改全改。复查口径：CDP 悬停前后比 `boxShadow` / `::before`·`::after`，现在只有 `transform` 变化。
 - **概览页日志卡要有内容、且贴底跟随**（用户裁决 2026-11-25）：日志卡原先只在「已登录 + 抓取运行中」才轮询，空闲态永远是空框，用户看到的是「滚下去没有操作信息，但决策记录里的运行日志能看到」。现在 `DashboardPage.vue::primeLogs` 在登录态一到就补一次 `list_logs` 快照（**只补一次**，`logPrimed` 守门；`list_logs` 只读 Rust 进程内 `LogRing`，不碰 sidecar、不导航浏览器），实时追加仍由 `startLogPolling` 的运行态闸门管——**空闲态依然一条定时 IPC 都不发**。`LogCard.vue` 的 `.log-rows` 加了贴底跟随（`stickBottom`，8px 容差，用户手动上翻后停止跟随）：卡高只放得下约 8 行，不跟随的话看到的永远是最早的几行。回归：`tests/dashboard-expect-passive.test.ts`（原「挂载时不轮询」用例改成「只补一次快照，空闲不轮询」）。
 - **日志弹窗：整块一个滚动区 + 筛选条吸顶 + 页签选中态**（用户裁决 2026-11-25）：
-  - `.tab.is-active` 的**本体**样式原先根本不存在（只有 `.tab.is-active .tab-num` 给计数换色），选中与未选中几乎看不出区别——用户报「选中的 tab 没有高亮」。现 `controls.css` 给 `.tab.is-active` 实心主色药丸（`--primary-soft` 底 + `inset 0 0 0 1px var(--primary)` 环），另加 `.tab:hover:not(.is-active)` 浅玻璃。**不要再只给 `.tab-num` 上色。**
+  - `.tab.is-active` 的**本体**样式原先根本不存在（只有 `.tab.is-active .tab-num` 给计数换色），选中与未选中几乎看不出区别——用户报「选中的 tab 没有高亮」。现 `controls.css` 给 `.tab.is-active` 实心主色药丸（`--primary-soft` 底 + `inset 0 0 0 1px var(--primary)` 环），另加 `.tab:hover:not(.is-active)` 提亮一档。**不要再只给 `.tab-num` 上色。**
   - 运行日志与决策日志的筛选条已**移进滚动容器内部**：`.run-log-box` / `.dl-rows` 的第一个子节点，类名 `.log-tools.is-sticky`（`position: sticky; top: 0`，底色必须是不透明的 `--popup-surface`，否则滚过去的内容会从筛选条底下透出来）。整块内容只有一个滚动条，工具栏也不会被挤出可视区。
   - 内容一律不截断：`.dl-row .dl-who` 去掉了 `nowrap + ellipsis`、`.dl-row .dl-why` 去掉了两行 clamp（用户口径「所有信息都写进滚屏，不要有遗漏」），行高随内容长。
   - 筛选条件必须看得见：`logs-run-filter-state` / `logs-decision-filter-state`（主色 `--primary-text`）显示「筛选 级别 错误 / 关键字「xxx」」；`watch([levels, runKeyword])` 在条件变化时把列表滚回顶部。**排查提示**：级别筛选「行数不变」不等于没生效——当选中的那一档占满了全部日志时，行数本来就不变，先看筛选状态文字与「N / M 条」。
@@ -165,8 +159,7 @@
 
 | 热点 | 病灶 | 处置 |
 |---|---|---|
-| L3 透镜自激循环 | `use-glass-l3.ts` 的 `moBody` 监听 `document.body` 的 `style`，帧末 `setOpacity` 写入又触发自己 → rAF 永不停止；`start()` 无条件重置 `lastSig`/`idleSince`，500ms 静止降频永久失效 | MutationObserver 只留 `attributeFilter:['class']`；`setOpacity` 用模块级 `appliedOpacity` 字符串比较；`frame()` 末尾 `scheduleNext(wait)` 按 `GLASS_L3.frameMinMs`(33ms) 限帧；`onScroll` 加 `activeDrawer() === null` 门控。实测渲染进程 CPU 371s/5s → 2.2s/5s |
-| L2 克隆层深度复制 | `use-glass-clone.ts` 的 `contentMo` 监听 `{childList, subtree, characterData}` + 200ms 节流，任何文本变化都整屏 `cloneNode(true)` | `RECLONE_THROTTLE_MS` 200 → 1500，observe 去掉 `characterData` |
+| ~~L3 透镜自激循环~~ / ~~L2 克隆层深度复制~~ | 病灶代码已随 Liquid Glass 整层移除而删除 | 无需再排查 |
 | 已排除 | `main.ts` 卡片高光（仅 `pointermove` 读 rect）、`use-canvas-scale.ts`（仅 resize 时 rAF）、`main.ts` resize 的 140ms 落定加类 | 非热点，勿再查 |
 
 **根因（两条链路，同一病灶：远程数据整体替换 → 节点全量重建）**
@@ -214,7 +207,7 @@
 | 点 40 条消息的会话 | 可感知卡顿消失，或降到 < 50ms |
 | 点刷新（40 个 Boss） | 同上 |
 | 气泡动画 | 切换会话仍见一次淡入；数据刷新**不重播** |
-| 门禁 | `vue-tsc --noEmit` exit 0；`vitest run` 全绿（基线 39 files / 657 tests） |
+| 门禁 | `vue-tsc --noEmit` exit 0；`vitest run` 全绿 |
 | 回归 | 抽屉开合、Esc 分层、长按多选、右栏提示不受影响 |
 
 **2026-11-25 二轮已落地 · 一档 + 二档 4 + 三档 6（未提交）**
@@ -291,10 +284,10 @@
 
 1. **QA 只读验收**：✅ 已完成（qa-verify 判 QA_FAILED → 用户裁决全部修 → 修复轮落地，474 用例全绿，见 §1）。
 2. **几何契约补齐**：✅ 已完成（用户裁决「补齐实现」，见 §1）——`--ui-scale` + 5 档 `--fs-*` 落地，174 处 font-size 全 var()、产物裸 px 归零，三窗 scale + 敏感库 720 居中窗 + A54，`--detach-w` 单一来源。残留：契约 CSS 160 处颜色字面量全量收口（非阻塞，另轮）。
-3. **槽位 C 产物冒烟**（根 AGENTS §5.3 / ARCH-003 §6 R5，用户已授权 release lane）：先删 CSP `'wasm-unsafe-eval'`（ARCH-003:248 阶段 4 遗漏，WASM 已不存在），再 `cd backend-tauri && npx tauri build --no-bundle`（独占 `CARGO_TARGET_DIR=%TEMP%\jt-release`），产物拷到**工作区外**启动，确认 Vue 真渲染（CSP 白屏唯一实测点）。
+3. **槽位 C 产物冒烟**：✅ 已完成（`tauri build --no-bundle` 产物拷到工作区外启动 + CDP 取证，见 §1「最终集成产物冒烟通过」）。
 4. **登出入口接线**：✅ 已完成（`login-state` emit + 前端订阅 + 保存/退出按钮，见 §1）。
 5. **M1 同屏编排合并**：✅ 已完成（ADR-004 / SPEC-001，见 §1 的锚点增删清单）。**M2 像素对齐** ✅（`9a60d3f`）、**M3 视觉收尾** ✅（见 §1）。下一手：**QA** 按清单重锚 + 零 Mock 验收；分项 token 展示接线 ✅（M3 后续批，见 §1）；后端补累计写入排 M4 之后（Chief 顺序）。
-6. ~~**Liquid Glass L2/L3**~~ **已整层移除**（2026-11-25，用户裁决，提交 `b5a9062`）。原先「已完成但真窗口视觉验收搁置」的账一笔勾销——没有代码就没有待验收项。只留第一层 `backdrop-filter` 玻璃，见 `AGENTS.md` §8。**单休小批已完成**（SPEC-004 §三：`options.ts` 加 `single` 档＋校 `no_bigweek` 矛盾 hint、`types.ts` `workWeekend` union 四值、字面量集断言＋`single` 经 decode/applyBackend 选项表驱动校验用例；`FilterPanel.vue`/`scrape-filter-model.ts` 选项表驱动零改动；后端三档 `009c643` 已先合，两端字面量集对齐，无静默无效窗口）。
+6. ~~**Liquid Glass L2/L3**~~ **已整层移除**（2026-11-25 用户裁决）；随后 **CSS 玻璃材质也全部删除**（见 §1「材质改版」与红线 9），原先的验收账一笔勾销。**单休小批已完成**（SPEC-004 §三：`options.ts` 加 `single` 档＋校 `no_bigweek` 矛盾 hint、`types.ts` `workWeekend` union 四值、字面量集断言＋`single` 经 decode/applyBackend 选项表驱动校验用例；`FilterPanel.vue`/`scrape-filter-model.ts` 选项表驱动零改动；后端三档 `009c643` 已先合，两端字面量集对齐，无静默无效窗口）。
 7. 后端未决项（根 §7.2 #1/#4/#5）与 QA 低#1-3 alias 缺口，单独路由 legacy/backend lane。
 
 ### 3.2 需要拍板的开放项
@@ -309,13 +302,10 @@
 
 ### 3.3 可独立开工的小项（与迁移无关）
 
-1. **补最后一个 testid**：`features/config/form.rs:23` 的折叠标题按钮缺 `{test_id}-toggle` 派生。
-2. **`index.html:20` 的过期注释**：写「其余三份消费它们」，实际是 11 份。
-3. **`tests/fixtures/dashboard_contract.html` 有 `auto-bar`**，代码里不存在（`auto/panel.rs:124` 只有 `auto-toggle`，父节点是 `.scrape-bar`）。
-4. **`tests/test_gui_e2e.py:45` 必 `ImportError`**：按路径加载已删除的 `tools/gui_e2e.py`。要么删掉这个测试，要么重写。
-5. **两处同层横向依赖**（见 `AGENTS.md` 2.1）：`features/jobs/cards.rs:17`、`features/scrape/panel.rs:23`。
-6. **登出入口未接线**：`login_status` / `login_save` / `logout` 调用点为 0。事件链断了——`sidecar.py:263/272/297/303` emit `login.state` → `codec.rs:89` 解析 → **主进程未 emit 给 WebView**。这是后端 + 前端两边的活。
-7. **动效接线现状**（M3 更新）：`drawer-in-play` 已接（JobDetailDrawer）；`rail-in` / `bubble-in` M3 已接（CSS 驱动、节点创建即播，无需 `transitionend`/`animationend` 消费方）；C17 其余三类 `list-fade`/`row-in`/`token-bump` 常量保住、原型零真值，接线待裁决；`.job-card.is-leaving` 仍未实现（无原型真值）。
+1. **`tests/fixtures/dashboard_contract.html` 有 `auto-bar`**，代码里不存在（状态条实为 `vue-chat.css` 的 `.auto-apply-bar` / `.auto-apply-label`）。
+2. **`tests/test_gui_e2e.py` 必 `ImportError`**：按路径加载已删除的 `tools/gui_e2e.py`。要么删掉这个测试，要么重写。
+3. **`--surface-*` 是否整体带 alpha**：整窗流光在内容之后，目前只有 `.auto-apply-bar` 一处显式 `color-mix` 透光。要让流光铺满所有表面就得把不透明阶梯本身改成带 alpha —— 会改变全部面板观感，须产品拍板。
+4. **动效接线现状**（M3 更新）：`drawer-in-play` 已接（JobDetailDrawer）；`rail-in` / `bubble-in` 已接（CSS 驱动、节点创建即播，无需 `transitionend` / `animationend` 消费方）；C17 其余三类 `list-fade` / `row-in` / `token-bump` 常量保住、原型零真值，接线待裁决；`.job-card.is-leaving` 仍未实现（无原型真值）。
 
 ### 3.4 代码注释里的失效引用
 

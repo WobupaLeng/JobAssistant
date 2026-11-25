@@ -93,9 +93,8 @@ export const INITIAL_CURSOR: LogCursor = { afterSeq: 0, since: null };
 
 /**
  * 合并增量：只收 seq > afterSeq 的新行，按时间**正序**（同毫秒按 seq 正序）。
- * 正序即「第一行在最上面、新行追加在底下」：日志是顺着时间读的，
- * 倒序会让每条新行把整屏往上顶，视线永远追不上。
- * 没有新行时原样返回旧数组的副本（不触发无谓的重排）。
+ * 正序即新行追加在底下；倒序会让每条新行把整屏往上顶，视线追不上。
+ * 没有新行时返回旧数组的副本，不触发无谓重排。
  */
 export function mergeRunRows(
   old: readonly RunRow[],

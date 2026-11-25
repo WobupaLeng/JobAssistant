@@ -37,8 +37,17 @@ export function greetDraft(params: {
 
 /**
  * 把一段话术发给某个 HR，返回**真正发出去的正文**（后端可能按截断规则改写）。
- * 平铺 `{ uid, text }`。
+ * 平铺 `{ uid, text, jobId? }`。`jobId` 非空时后端顺带把该岗位标记为**已投递**
+ * （不带就得用户去岗位列表手动标一次，见用户报「打招呼后没进已投递列表」）。
+ *
+ * 键名必须是驼峰：发蛇形 `job_id` 会被当成未知键，而它是 `Option<String>`，
+ * 静默变 `None` —— 消息照发，岗位永远不进已投递，没有任何报错。
  */
-export function greetOne(uid: string, text: string): Promise<string> {
-  return invokeFlat<string>('greet_one', { uid, text });
+export function greetOne(uid: string, text: string, jobId?: string | null): Promise<string> {
+  const trimmed = jobId?.trim() ?? '';
+  return invokeFlat<string>('greet_one', {
+    uid,
+    text,
+    jobId: trimmed.length > 0 ? trimmed : undefined,
+  });
 }

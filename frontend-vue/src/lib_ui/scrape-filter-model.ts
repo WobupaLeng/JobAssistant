@@ -32,6 +32,12 @@ import {
 /** 草稿存储键。**不要改**：老版本写下的草稿要能被新版本读出来。 */
 export const DRAFT_KEY = 'aja.scrape_filter_draft';
 
+/**
+ * 搜索关键词的本地存储键。关键词进 `scrape_start.keywords`，**不进** 后端
+ * `scrape_defaults`（那是筛选条件），所以只能由界面自己落盘，否则 F5 一次就清了。
+ */
+export const KEYWORDS_KEY = 'aja.scrape_keywords';
+
 /** 防抖窗口（毫秒）。`filter.rs:56`。 */
 export const SAVE_DEBOUNCE_MS = 400;
 
@@ -600,4 +606,25 @@ export function normalizeKeywords(raw: readonly string[]): string[] {
  */
 export function searchKeywords(keywords: readonly string[]): string[] {
   return normalizeKeywords(keywords);
+}
+
+/** 关键词落盘：JSON 数组，读回时统一过 `normalizeKeywords`。 */
+export function encodeKeywords(list: readonly string[]): string {
+  return JSON.stringify(normalizeKeywords(list));
+}
+
+/** 读本地关键词。坏数据 / 旧版逗号串都尽量救回来，救不回给空表。 */
+export function decodeKeywords(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return normalizeKeywords(parsed.filter((v): v is string => typeof v === 'string'));
+    }
+    if (typeof parsed === 'string') return normalizeKeywords([parsed]);
+    return []; // 是合法 JSON 但形状不对：不拿它去猜逗号
+  } catch {
+    /* 不是 JSON：按旧版逗号串读 */
+  }
+  return normalizeKeywords(raw.split(/[,，\n]/));
 }

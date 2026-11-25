@@ -28,9 +28,10 @@ import { scrapeDrain, scrapeProgress, scrapeStart, scrapeStop } from '../api/com
 import { getAppConfig, setAppConfig, setLimit, setScrapeDefaults } from '../api/commands/config';
 import { sensitiveList, sensitiveRemove } from '../api/commands/sensitive';
 import { loginStart, loginStatus } from '../api/commands/scrape';
-import { loginAck, loginSave, logout } from '../api/commands/scrape';
+import { loginAck, logout } from '../api/commands/scrape';
 import { listenLoginState, type UnlistenFn } from '../api/events';
 import { listExpectations } from '../api/commands/chat';
+import { setWindowTheme } from '../api/commands/window';
 import type {
   AppConfigReply,
   Job,
@@ -55,6 +56,12 @@ import {
   type ListTab,
   type SortField,
 } from '../lib_ui/job-list-model';
+import {
+  clearLivePatches,
+  livePatches,
+  pushFreshJobs,
+  resetCountDelta,
+} from '../lib_ui/job-live';
 import {
   clickBlank,
   clickCard,
@@ -86,7 +93,7 @@ import {
   searchKeywords,
   type FilterDraft,
 } from '../lib_ui/scrape-filter-model';
-import { loadDraft, saveDraft } from '../features/scrape/filter';
+import { loadDraft, loadKeywords, saveDraft, saveKeywords } from '../features/scrape/filter';
 import { parseLogLevel } from '../lib_ui/logfmt';
 import { readInitialTheme, applyTheme } from '../lib_ui/theme';
 import {
@@ -189,12 +196,17 @@ const draft = ref<FilterDraft>(createDraft());
 const savedKnown = ref<Record<string, unknown>>({});
 const saving = ref(false);
 const filterNote = ref('');
-/** 搜索关键词：进 `scrape_start.keywords`，**不进** `set_scrape_defaults`。 */
-const keywords = ref<string[]>([]);
+/**
+ * 搜索关键词：进 `scrape_start.keywords`，**不进** `set_scrape_defaults`。
+ * 后端不存这份，只能落本地，否则 F5 一次就清空。
+ */
+const keywords = ref<string[]>(loadKeywords());
 const expects = shallowRef<readonly Expectation[]>([]);
 
 /** 抓取事件流（`scrape_drain` 增量），入库行首 `✔`（C9）。 */
 const feed = shallowRef<FeedLine[]>([]);
+/** 事件行的全局递增序号：混排后给每条一个稳定 key。 */
+let feedN = 0;
 
 const logLines = shallowRef<LogLine[]>([]);
 const logSince = ref<number>(0);
@@ -231,7 +243,7 @@ const loginBusy = ref(false);
 /** 全窗浮层的挂载根（`index.html` 里那个空 div）；独立挂载页面时为空，就地渲染。 */
 const overlayRoot = ref<HTMLElement | null>(null);
 
-/** 最近一次「保存登录 / 退出登录」还没回来（两个按钮共用，防连点）。 */
+/** 最近一次「退出登录」还没回来（防连点）。 */
 const loginActionBusy = ref(false);
 /** `login-state` 的退订函数；未订阅/已退订时为 `null`。 */
 let unlistenLogin: UnlistenFn | null = null;
@@ -264,11 +276,15 @@ function onPickThemeMode(mode: 'dark' | 'light'): void {
   applyTheme(mode);
   themeLabel.value = mode === 'dark' ? '深色' : '浅色';
   applyPalette(paletteId.value, mode);
+  // 窗口模糊底色分深浅两档：深色档是深蓝黑，浅色必须换成近白，否则整窗发灰。
+  void setWindowTheme(mode);
 }
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let logTimer: ReturnType<typeof setTimeout> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+/** 上一次看到的「已入库条数」；`null` = 还没基线（首帧只记基线，不补行）。 */
+let insertedSeen: number | null = null;
 
 /**
  * 打分方式与初筛线都落 `app_config`（`score_mode` / `llm_prefilter`，两者都在
@@ -348,6 +364,32 @@ const PAGE_SIZE = 50;
 const hasMore = ref(true);
 const pageLoading = ref(false);
 
+/**
+ * 列表实际渲染的行 = 服务端这一页 + 抓取中就地补的几条 − 刚自动投出去的那几条。
+ * 分页 `offset` 仍以 `jobs` 为准，补进来的行不参与，避免翻页错位。
+ */
+const shownJobs = computed<Job[]>(() => {
+  const { sentIds, freshJobs } = livePatches();
+  const hidden = new Set(sentIds);
+  const rows = jobs.value.filter((j) => !hidden.has(j.job_id));
+  if (freshJobs.length === 0) return rows;
+  const have = new Set(rows.map((j) => j.job_id));
+  const extra = freshJobs.filter((j) => !hidden.has(j.job_id) && !have.has(j.job_id));
+  return extra.length === 0 ? rows : [...extra, ...rows];
+});
+
+/** 页签数字带同一份补丁；后端一给权威计数，补丁就归零（见 `resetCountDelta`）。 */
+const shownCounts = computed<JobTabCounts>(() => {
+  const { pendingDelta, deliveredDelta } = livePatches();
+  if (pendingDelta === 0 && deliveredDelta === 0) return counts.value;
+  const c = counts.value;
+  return {
+    pending: Math.max(0, c.pending + pendingDelta),
+    delivered: Math.max(0, c.delivered + deliveredDelta),
+    rejected: c.rejected,
+  };
+});
+
 function listArgs(offset: number) {
   return {
     include_rejected: showAll.value || tabIncludeRejected(tab.value),
@@ -384,6 +426,7 @@ async function refreshList(): Promise<void> {
     jobs.value = items;
     hasMore.value = items.length === PAGE_SIZE;
     counts.value = c;
+    clearLivePatches();
   } catch (e) {
     listError.value = errText(e);
     fail(`岗位列表加载失败：${listError.value}`, 'list_jobs', { label: '重试', run: () => void refreshList() });
@@ -396,8 +439,33 @@ async function refreshList(): Promise<void> {
 async function refreshCounts(): Promise<void> {
   try {
     counts.value = await jobTabCounts();
+    resetCountDelta();
   } catch {
     /* 轮询失败不打断用户：下一轮自会重试 */
+  }
+}
+
+/**
+ * 抓取刚入库几条：拉最新一页里对应的行，先补进列表（`freshJobs`），不等整份重拉。
+ * 只补「未投递」口径——其它页签不该出现刚抓来的岗位；失败就等用户主动刷新。
+ */
+async function pullFreshJobs(count: number): Promise<void> {
+  if (count <= 0) return;
+  if (!showAll.value && tab.value !== 'pending') return;
+  try {
+    const rows = await listJobs({
+      include_rejected: showAll.value,
+      rejected_only: false,
+      ascending: false,
+      limit: Math.min(count, PAGE_SIZE),
+      offset: 0,
+      sort: 'created',
+      tab: showAll.value ? undefined : 'pending',
+      order: 'desc',
+    });
+    pushFreshJobs(rows);
+  } catch {
+    /* 增量显示是锦上添花：失败等下一次进度或手动刷新 */
   }
 }
 
@@ -406,6 +474,18 @@ async function refreshProgress(): Promise<void> {
     progress.value = fromProgress(await scrapeProgress());
   } catch {
     /* 同上：进度是辅助信息 */
+  }
+  const inserted = progress.value.inserted;
+  if (insertedSeen === null) {
+    // 首帧只记基线：挂载时库里已有多少条不该被当成「刚抓到」。
+    insertedSeen = inserted;
+  } else if (inserted > insertedSeen) {
+    const delta = inserted - insertedSeen;
+    insertedSeen = inserted;
+    void pullFreshJobs(delta);
+  } else if (inserted < insertedSeen) {
+    // 新一轮抓取从 0 起算。
+    insertedSeen = inserted;
   }
   // 运行中才拉事件流；停了立刻不再拉（与 drain 定时器同口径）。
   if (progress.value.running) await drainFeed();
@@ -441,10 +521,9 @@ async function loadLogs(): Promise<boolean> {
 }
 
 /**
- * 日志卡首屏补一次历史日志。日志卡原先只在「已登录 + 抓取运行中」才轮询，
- * 于是空闲态永远是空框（用户报「滚动看不到操作信息，但运行日志里能看到」）。
- * 这里只读 Rust 内存环（`LogRing`，不碰 sidecar、不导航浏览器），补完交给
- * `startLogPolling` 的闸门继续追新增。失败不重试（`loadLogs` 自己吞错）。
+ * 日志卡首屏补一次历史日志。日志卡原先只在「已登录 + 抓取运行中」才轮询，空闲态永远是空框。
+ * 这里只读 Rust 内存环（`LogRing`，不碰 sidecar），补完交给 `startLogPolling` 的闸门追新增。
+ * 失败不重试（`loadLogs` 自己吞错）。
  */
 async function primeLogs(): Promise<void> {
   if (logPrimed.value || !isLoggedIn()) return;
@@ -457,17 +536,23 @@ async function primeLogs(): Promise<void> {
 watch(
   () => login.value?.state,
   (state) => {
-    if (state === 'logged_in') void primeLogs();
+    if (state === 'logged_in') {
+      void primeLogs();
+      startLogPolling();
+    } else {
+      stopLogPolling();
+    }
   },
   { immediate: true },
 );
 
 /**
- * 日志轮询的唯一闸门：**已登录 + 抓取运行中**才允许继续轮询。
- * 挂载时不启动；读失败（sidecar 不可用 / 管道关闭）即停，不循环重试。
+ * 日志轮询的唯一闸门：**已登录**即可轮询。
+ * 日志来自 Rust 内存环（不碰浏览器），空闲态也要能看见登录/聊天产生的日志；
+ * 读失败（sidecar 不可用 / 管道关闭）即停，不循环重试。
  */
 function canPollLogs(): boolean {
-  return isLoggedIn() && progress.value.running;
+  return isLoggedIn();
 }
 
 let logPollStopped = false;
@@ -511,7 +596,9 @@ async function drainFeed(): Promise<void> {
           'scrape_risk', { label: '恢复', run: () => void onStart() });
         continue;
       }
-      const line = toFeedLine(u);
+      // 事件不带时间戳：用一次 drain 的接收时刻补上，与运行日志同一刻度后混排。
+      feedN += 1;
+      const line = toFeedLine(u, Date.now(), feedN);
       if (line) lines.push(line);
     }
     if (lines.length > 0) feed.value = trimFeed([...feed.value, ...lines]);
@@ -554,6 +641,12 @@ function onDraft(next: FilterDraft): void {
   saveDraft(next); // 本地兜底立刻写，不等防抖
   if (saveTimer !== null) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => void persistDraft(), SAVE_DEBOUNCE_MS);
+}
+
+/** 关键词只落本地：改一次写一次，F5 之后原样回来。 */
+function onKeywords(next: readonly string[]): void {
+  keywords.value = [...next];
+  saveKeywords(next);
 }
 
 /** 只发 diff：`{}` 一律不发（发空写会清空后端的其它项）。 */
@@ -858,29 +951,6 @@ async function onLogin(id: string): Promise<void> {
 }
 
 /**
- * 「保存登录」：只写一个本机标记（cookie 由持久化 profile 管）。成功/失败都刷新一次权威
- * 状态（`saved` 与 `message` 只有查询里有）；失败进错误队列且可重试。
- */
-async function onSaveLogin(): Promise<void> {
-  if (loginActionBusy.value) return;
-  loginActionBusy.value = true;
-  try {
-    const reply = await loginSave(platform.value);
-    if (!reply.ok) {
-      filterNote.value = reply.error === '' ? '保存登录失败' : `保存登录失败：${reply.error}`;
-      fail(filterNote.value, 'login_save', { label: '重试', run: () => void onSaveLogin() });
-    } else {
-      filterNote.value = reply.saved ? '登录状态已保存' : '没有可保存的登录状态';
-    }
-  } catch (e) {
-    fail(`保存登录失败：${errText(e)}`, 'login_save', { label: '重试', run: () => void onSaveLogin() });
-  } finally {
-    loginActionBusy.value = false;
-    await refreshLogin();
-  }
-}
-
-/**
  * 「退出登录」：清标记，运行中的会话会让 sidecar 一起关掉
  * （`LogoutReply.closed`）。退出后立刻把徽标拉回权威状态。
  */
@@ -1068,7 +1138,6 @@ async function removeSensitive(ids: number[]): Promise<void> {
   }
 }
 
-
 /**
  * 概览业务尾段（平台卡 + `.tb-tail`）有没有落位进壳的那一行。`AppShell` 在 header 里留了
  * 一个 `display: contents` 的 `.tb-embed`：数据归本页，DOM 归顶栏那一行。单测直接
@@ -1113,6 +1182,8 @@ function onGlobalPointerDown(ev: PointerEvent): void {
 
 onMounted(() => {
   overlayRoot.value = document.querySelector('#app-overlay-root');
+  // 首帧主题来自 index.html 脚本，Rust 不知道；挂载时补一次，让窗口底色与界面一致。
+  void setWindowTheme(readInitialTheme());
   tailInTopbar.value = document.querySelector('.tb-embed') !== null;
   highlightCompany.value = readHighlightCompany();
   window.addEventListener('storage', onStorageHighlight);
@@ -1177,7 +1248,6 @@ watch(
         :action-busy="loginActionBusy"
         @pick="onPickPlatform"
         @login="onLogin"
-        @save="onSaveLogin"
         @logout="onLogout"
       />
 
@@ -1236,8 +1306,8 @@ watch(
 
     <div class="job-fill">
       <JobListView
-        :jobs="jobs"
-        :counts="counts"
+        :jobs="shownJobs"
+        :counts="shownCounts"
         :tab="tab"
         :show-all="showAll"
         :sort-field="sortField"
@@ -1258,7 +1328,7 @@ watch(
         @check-blank="onCheckBlank"
         @refresh="refreshList()"
         @toggle="selection = { ...selection, checked: toggleChecked(selection.checked, $event) }"
-        @check-all="(checked: boolean) => (selection = setChecked(checked ? jobs.map((j) => j.job_id) : []))"
+        @check-all="(checked: boolean) => (selection = setChecked(checked ? shownJobs.map((j) => j.job_id) : []))"
         @batch="batch"
         @greet="onGreet"
         @allow="onAllowJob"
@@ -1291,7 +1361,7 @@ watch(
           :saving="saving"
           :note="filterNote"
           @update:draft="onDraft"
-          @update:keywords="keywords = $event"
+          @update:keywords="onKeywords"
           @apply="onApplyFilter"
           @cancel="closeFilter"
           @reset="resetFilter"

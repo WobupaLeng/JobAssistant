@@ -20,6 +20,8 @@ export interface PlatformCardView {
   readonly title: string;
   readonly checked: boolean;
   readonly loginVisible: boolean;
+  /** 已登录：这一格不再给「登录」，改由红色的「退出」接手（换账号走退出）。 */
+  readonly loggedIn: boolean;
   readonly loginLabel: string;
   /** 登录按钮禁用原因（`null` = 可点）。原型里 Boss 是「登录功能接线中」，本轮接线后放开。 */
   readonly loginDisabled: boolean;
@@ -65,14 +67,10 @@ export function platformCardView(
     title: ready ? p.name : '未接入',
     checked,
     loginVisible: ready && checked,
-    loginLabel: loggedIn ? '已登录' : loginBusy ? '登录中…' : '登录',
-    // 已登录恒禁用（不因 busy 与否放开）；未登录时只有 busy 禁用。
-    loginDisabled: loggedIn || loginBusy,
-    loginTitle: loggedIn
-      ? '当前已登录；需要换账号请先点「退出登录」'
-      : ready
-        ? '打开 Boss 登录窗口扫码'
-        : '未接入',
+    loggedIn,
+    loginLabel: loginBusy ? '登录中…' : '登录',
+    loginDisabled: loginBusy,
+    loginTitle: '打开 Boss 登录窗口扫码',
   };
 }
 

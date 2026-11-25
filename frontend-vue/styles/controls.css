@@ -1,8 +1,8 @@
 /* 分域样式：控件（按钮、输入、开关、页签、胶囊、状态点、错误条、骨架条）。
-   控件比卡片小一号、玻璃更薄、按下时下沉。 */
+   控件比卡片小一号、底色更浅、按下时下沉。 */
 
 /* ---------- 按钮 ----------
-   默认是「次级玻璃」：比卡片亮一档但仍在同一材质族里。
+   默认比卡片亮一档，但仍在同一套表面阶梯里。
    过渡用 --ease-smooth 且只过渡 transform/shadow/color——过渡 background 会让 */
 .btn {
   display: inline-flex;
@@ -30,7 +30,7 @@
 }
 
 .btn:hover:not(:disabled) {
-  /* 悬停只抬 1px：玻璃是厚重的，跳 3px 像塑料按钮 */
+  /* 悬停只抬 1px：跳 3px 会像塑料按钮 */
   transform: translateY(-1px);
   box-shadow: var(--shadow-far);
 }
@@ -54,16 +54,14 @@
 }
 
 /* 顶栏右段的工具按钮（配置 / 敏感库 / 主题）与打分分段同级放大。 */
-.topbar .tb-tail .btn-sm,
-.topbar .theme-mount .btn-sm {
+.topbar .tb-tail .btn-sm {
   height: 26px;
   padding: 0 12px;
   font-size: var(--fs-md);
 }
 
 /* 主按钮：渐变两端同色系，纯色会让高光边看起来像贴纸边。
-   不挂绿色外发光：绿 shadow 叠在玻璃底上会散成一圈绿色光晕，看着像折射高光，
-   用户 2026-11-25 明确要求删掉（登录 / 打招呼 / 开始抓取 都是主按钮）。 */
+   不挂绿色外发光：绿 shadow 会散成一圈绿色光晕（登录 / 打招呼 / 开始抓取 都是主按钮）。 */
 .btn-primary {
   border-color: var(--btn-primary-border);
   background: var(--primary-gradient);
@@ -98,7 +96,7 @@
 }
 
 /* ---------- 输入 ----------
-   输入框是「凹陷的玻璃」：底色比卡片深、内阴影在上沿（光进不去的暗部）。 */
+   输入框比卡片更暗一档，内阴影在上沿（光进不去的暗部）。 */
 .input,
 .textarea {
   width: 100%;
@@ -215,7 +213,7 @@
     border-color var(--dur) var(--ease-smooth);
 }
 
-/* 滑块本体：带内高光的白色小玻璃球 */
+/* 滑块本体：带内高光的白色小圆球 */
 .switch input::after {
   content: '';
   position: absolute;
@@ -273,15 +271,14 @@
     box-shadow var(--dur) var(--ease-smooth);
 }
 
-/* 悬停：未选中的页签给一层浅玻璃，鼠标扫过时知道自己停在哪个上。 */
+/* 悬停：未选中的页签提亮一档，鼠标扫过时知道自己停在哪个上。 */
 .tab:hover:not(.is-active):not(:disabled) {
   background: var(--surface-2);
   color: var(--text-1);
 }
 
-/* 选中态本体：实心主色药丸 + 主色描边。原先这里只有 `.tab.is-active .tab-num`
-   （计数变色），本体没有规则，选中与未选中几乎看不出区别——用户 2026-11-25 报
-   「选中的 tab 没有高亮」。颜色一律走令牌，深浅两套主题各自成立。 */
+/* 选中态本体：实心主色药丸 + 主色描边。只给计数变色不够，选中与未选中看不出区别。
+   颜色一律走令牌，深浅两套主题各自成立。 */
 .tab.is-active {
   background: var(--primary-soft);
   color: var(--text-1);
@@ -463,7 +460,6 @@
   .btn,
   .chip,
   .job-card,
-  .job-tab,
   .tab,
   .seg,
   .sort-pill,
@@ -473,7 +469,6 @@
   .theme-mode-btn,
   .font-scale-btn,
   .palette-dot,
-  .auto-toggle,
   .scrape-filter-btn,
   .pan-pop,
   .pan-modal,

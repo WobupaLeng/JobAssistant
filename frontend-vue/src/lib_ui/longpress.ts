@@ -1,11 +1,10 @@
 /**
- * 长按多选的状态机。规则全在时间与位移边界上，放组件里没法测。`pointerdown` 起 500ms 定时器；
- * 期间 `pointerup` / `pointercancel` 或移动超过 8px（用户在滚动）即取消；到点才进入多选并勾上
- * 按下的那张卡。同一次按下若以 `pointercancel` 收场（触摸滚动、`touch-action` 接管手势），
- * 随后的 `click` 是这次长按的余波，必须吞掉，不能当成「单击打开详情」。
+ * 长按多选的状态机。`pointerdown` 起 500ms 定时器；期间 `pointerup` / `pointercancel` 或移动
+ * 超过 8px（用户在滚动）即取消；到点才进入多选并勾上按下的那张卡。若以 `pointercancel` 收场
+ * （触摸滚动、`touch-action` 接管手势），随后的 `click` 是这次长按的余波，必须吞掉。
  */
 
-/** 长按判定窗口（毫秒）。SPEC 定死 500。 */
+/** 长按判定窗口（毫秒）。 */
 export const LONG_PRESS_MS = 500;
 
 /** 允许的抖动半径（像素）。超过就当成拖动/滚动。 */

@@ -120,6 +120,19 @@
   color: var(--accent);
 }
 
+/* 事件行并入日志卡的同一条时间线后（用户 m00374）：标记落在 `.log-level` 那格，
+   沿用上面同一套语义色，不再单独成块。 */
+.log-row.is-feed .feed-tag.is-ok {
+  color: var(--primary-text);
+}
+.log-row.is-feed .feed-tag.is-skip,
+.log-row.is-feed .feed-tag.is-warn {
+  color: var(--warn-text);
+}
+.log-row.is-feed .feed-tag.is-bad {
+  color: var(--bad-text);
+}
+
 [data-theme='light'] .feed-line.is-ok .msg,
 .feed-line.is-ok .feed-msg {
   color: #047857;
@@ -142,12 +155,8 @@
 
 @media (max-width: 1180px) {
   /* 窄窗：状态摘要在按钮那一行已经没地方了，让它自己独占最后一行。
-   不参与换行排序（去掉 order），只是被 `flex-basis: 100%` 顶下去—— */
+   不参与换行排序（去掉 order），只是被 flex-basis: 100% 顶下去—— */
   .scrape-brief {
     flex-basis: 100%;
-  }
-
-  .demo-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 }

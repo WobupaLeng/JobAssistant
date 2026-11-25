@@ -3,7 +3,6 @@
 
 /* 选中的筛选 chip：与未选中的区别靠背景与描边，不靠字号变化，
  * 免得整排 chip 在点选时左右抖动。 */
-.filter-chips .chip.is-on,
 .chip.as-btn.is-on {
     color: var(--text-1);
     background: var(--primary-soft);

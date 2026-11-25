@@ -31,7 +31,8 @@
   --fs-lg: calc(20px * var(--ui-scale) * var(--font-scale));
 
   /* ---------- 表面底色（不透明） ----------
-   * 层号越大越亮：0 = 外壳与卡片，1/2/3 = 逐层抬升的容器，input = 下沉的输入框。 */
+   * 层号越大越亮：0 = 卡片 / 面板，1/2/3 = 逐层抬升的容器，input = 下沉的输入框。
+   * 外壳不直接用 surface-0，而是半透明的 --shell-tint，露出系统窗口模糊。 */
   --surface-0: #0d1422;
   --surface-1: #121a2b;
   --surface-2: #182238;
@@ -39,10 +40,8 @@
   --surface-input: #080c14;
   /* 卡片底色：岗位卡 / 敏感库卡 / 配置卡共用这一枚，卡片之间不得各写各的层号。 */
   --surface-card: var(--surface-0);
-  /* 外壳底层中性染色：深色用黑，浅色用白，不跟主题色。 */
+  /* 半透明外壳底：固定中性灰，不跟随主题色。 */
   --shell-tint: rgba(0, 0, 0, 0.5);
-  /* 主题色 wash 仍由 applyPalette 写入，保留给未来玻璃层；当前外壳底层不消费。 */
-  --palette-wash: transparent;
 
   /* 弹层实底：抽屉 / 敏感库 / 配置卡 / 决策记录 / 筛选条共用，盖在内容之上且字要看得清。 */
   --popup-surface: #0b1220;
@@ -52,15 +51,13 @@
   --scrim: rgba(4, 8, 16, 0.55);
 
   /* ---------- 高光 ----------
-   `--spec-top` 是迎光上边缘，`--spec-bottom` 是背光下边缘。 */
+   --spec-top 是迎光上边缘，--spec-bottom 是背光下边缘。 */
   --spec-top: rgba(255, 255, 255, 0.22);
   --spec-bottom: rgba(255, 255, 255, 0.04);
   --spec-side: rgba(255, 255, 255, 0.08);
   --spec-strength: 1;
   /* 高光峰值：对角弧与指针光斑的起点色。必须是纯白，复用 --spec-top 会发灰。 */
   --spec-peak: #ffffff;
-  /* 进卡 / 离卡补间时长：改这里必须同改 main.ts 的 HL_RESTORE_MS。 */
-  --hl-restore-ms: 220ms;
 
   /* ---------- 描边 ---------- */
   --hairline: rgba(255, 255, 255, 0.10);
@@ -78,6 +75,7 @@
   --primary-soft: rgba(16, 185, 129, 0.16);
   --accent: #2563eb;
   --accent-soft: rgba(37, 99, 235, 0.18);
+  --accent-text: #93c5fd; /* 辅色系文字（INFO 日志 / 信息页签）：深底上压亮一档才有对比 */
   /* 主按钮与「开」态开关共用的渐变：纯色会让高光边看起来像贴纸边。 */
   --primary-gradient: linear-gradient(180deg, var(--primary) 0%, var(--primary-strong) 100%);
   /* 分值流光炫彩的渐变色带（与 --primary / --accent 同层） */
@@ -98,7 +96,7 @@
   /* ---------- 语义色（成对：底色 + 前景） ----------
    * 样式表只许引用这里，不许写字面量；取值来自冻结原型，颜色本身不许改。 */
   --on-primary: #fff; /* 主色块上的反白字（打招呼方块 / 主按钮 / 未读角标） */
-  --on-primary-deep: #04120c; /* 亮绿渐变头像上的深字 */
+  --on-primary-deep: #04120c; /* 默认绿主色渐变上的深字；色板可换深色主色，品牌标 / 头像改用 --btn-primary-fg */
   --primary-text: #6ee7b7; /* 主色系文字（高分徽标） */
   --primary-border: rgba(16, 185, 129, 0.4);
   --warn-text: #fbbf24; /* 警示文字（暂停按钮 / WARN 日志） */
@@ -112,24 +110,23 @@
   /* ---------- 常显滚动条 ----------
    * Chromium 的 overlay 滚动条不悬停时几乎透明，日志区会被当成「不能滚」。
    * 三道保险：容器 overflow-y: scroll + scrollbar-color + 下面这组 thumb/track 色。
-   * 颜色由 --primary 派生，切换色板后自动跟随；样式表只引用变量。 */
+   * 轨道保持透明，只留 thumb 的主题色；样式表只引用变量。 */
   --scroll-thumb: color-mix(in srgb, var(--primary) 62%, transparent);
   --scroll-thumb-hover: color-mix(in srgb, var(--primary) 86%, transparent);
-  --scroll-track: color-mix(in srgb, var(--primary) 14%, transparent);
+  --scroll-track: transparent;
 
   /* ---------- 圆角 ----------
-   * 比常规 UI 大：玻璃边缘要留出高光宽度，8px 圆角配 1px 高光等于没有厚度。 */
+   * 比常规 UI 大：边缘要留出高光宽度，8px 圆角配 1px 高光等于没有厚度。 */
   --radius-sm: 10px;
   --radius: 16px;
   --radius-lg: 22px;
   --radius-pill: 999px;
   /* 窗口外形圆角：Win11 DWM 画 8px 弧（backend-tauri/src/lib.rs 的 DWMWCP_ROUND），
-   外壳按同样半径同心内缩 2px，两层弧才不会互相啃。改这里必须同看 */
+   外壳按同样半径走，两层弧才不会互相啃。改这里必须同看 */
   --shell-radius: 8px;
-  --win-corner-cut: 2px;
 
   /* ---------- 投影 ----------
-   * 两层：窄影定形（near），宽影分层（far）。只有一层会让玻璃像纸片。 */
+   * 两层：窄影定形（near），宽影分层（far）。只有一层会让卡片像纸片。 */
   --shadow-near: 0 2px 8px rgba(0, 0, 0, 0.22);
   --shadow-far: 0 16px 48px rgba(0, 0, 0, 0.34);
   --shadow-card: var(--shadow-near), var(--shadow-far);
@@ -148,17 +145,14 @@
   --btn-pause-fg: #f0c674;
 
   /* ---------- 按钮配色（语义令牌）----------
-   三种实心按钮的前景与描边按 C7 深浅各一套，控件样式表只消费 var()。
+   实心按钮的前景与描边按 C7 深浅各一套，控件样式表只消费 var()。
    --btn-danger-fg 与 --bad-text-soft 同值不同义：前者是按钮前景，后者是错误条正文。
-   主按钮不设外发光令牌：绿色辉光在玻璃底上会散成折射感光晕，用户 2026-11-25 要求删除。 */
+   主按钮不设外发光令牌：绿色辉光会散成一圈绿色光晕。 */
   --btn-primary-fg: #04120c;
   --btn-primary-border: rgba(16, 185, 129, 0.45);
   --btn-danger-fg: #ffb4b0;
   --btn-danger-border: rgba(248, 81, 73, 0.42);
-  --btn-warn-fg: #f0c674;
-  --btn-warn-border: rgba(210, 153, 34, 0.45);
   --btn-press-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
-
 
   /* ---------- 动效 ----------
    * 慢且带惯性：320-420ms 非线性；低于 200ms 会像老式 UI 的瞬时跳变。 */
@@ -166,7 +160,6 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-fast: 160ms;
   --dur: 320ms;
-  /* 对话框展开/收起：比 --dur 短一档，宽度补间走满 320ms 会显得迟钝。 */
 
   --font-sans: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
   --font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
@@ -174,15 +167,16 @@
 
 /* 浅色主题：与深色只共用变量名。浅底没有暗部托住，靠加重投影与投影分层立起来。 */
 [data-theme='light'] {
-  --surface-0: #f4f7fc;
-  --surface-1: #fbfcfe;
+  --surface-0: #f8fafd;
+  --surface-1: #fdfeff;
   --surface-2: #ffffff;
   --surface-3: #ffffff;
   --surface-input: #ffffff;
-  /* 浅色外壳底层用白色薄染，压住 surface-0 自带的冷蓝。 */
-  --shell-tint: rgba(255, 255, 255, 0.7);
+  /* 浅色半透明外壳底：固定白色薄染，不跟随主题色。
+     0.64 让约三分之一桌面透上来；文字对比度由下面的 text-3 / 语义色补足。 */
+  --shell-tint: rgba(255, 255, 255, 0.64);
   /* 弹层实底：与深色同一条规则，只是提亮。 */
-  --popup-surface: #f4f7fb;
+  --popup-surface: #fbfcfe;
   --panel-solid: var(--popup-surface);
   --scrim: rgba(15, 23, 42, 0.32);
 
@@ -199,53 +193,53 @@
 
   --text-1: #0f172a;
   --text-2: rgba(15, 23, 42, 0.72);
-  --text-3: rgba(15, 23, 42, 0.50);
+  /* 浅色下的次要文字：0.74 压在白底上过黑，界面显得闷；0.64 仍有约 6:1 对比。 */
+  --text-3: rgba(15, 23, 42, 0.64);
 
   --primary-soft: rgba(16, 185, 129, 0.14);
   --accent-soft: rgba(37, 99, 235, 0.12);
+  --accent-text: #1d4ed8; /* 辅色系文字（INFO 日志 / 信息页签）：浅底上压深一档才有对比 */
   --warn-soft: rgba(210, 153, 34, 0.14);
   --bad-soft: rgba(248, 81, 73, 0.12);
-  --good-soft: rgba(63, 185, 80, 0.12);
+  --good-soft: rgba(15, 61, 36, 0.12);
 
   /* 语义色：浅底上要压深一档才有对比（已给浅色分支取值）。 */
   --on-primary: #fff;
   --on-primary-deep: #04120c;
   --primary-text: #047857;
   --primary-border: rgba(16, 185, 129, 0.4);
-  /* 暂停主按钮浅色覆盖：悬停描边原型无浅色值，沿用 :root 的 --btn-pause-border-hover。 */
+  /* 暂停主按钮浅色覆盖：悬停描边不另设浅色值，沿用 :root 的 --btn-pause-border-hover。 */
   --btn-pause-border: rgba(146, 101, 10, 0.4);
   --btn-pause-bg: rgba(176, 124, 0, 0.12);
   --btn-pause-fg: #92650a;
 
-  --warn-text: #92650a;
-  --warn-bg: rgba(245, 158, 11, 0.16);
-  --warn-bg-strong: rgba(245, 158, 11, 0.24);
+  --warn-text: #5a3b05;
   --warn-border: rgba(245, 158, 11, 0.42);
-  --bad-text: #ff6b6b;
-  --bad-text-soft: #ffb4b0;
-  --bad-text-softer: #ffd9d6;
+  /* 浅底语义文字：不能沿用深底的亮红，否则在粉底上几乎糊成一片。 */
+  --bad-text: #7a1a1a;
+  --bad-text-soft: #7a1a1a;
+  --bad-text-softer: #5f1010;
   --bad-bg: rgba(255, 107, 107, 0.14);
   --bad-bg-strong: rgba(255, 107, 107, 0.3);
   --bad-border: rgba(255, 107, 107, 0.42);
+  --good: #0f3d24;
 
   /* 常显滚动条：浅底提高主色占比，半透明滑块在白底上才看得见。 */
   --scroll-thumb: color-mix(in srgb, var(--primary) 68%, transparent);
   --scroll-thumb-hover: color-mix(in srgb, var(--primary) 90%, transparent);
-  --scroll-track: color-mix(in srgb, var(--primary) 16%, transparent);
+  --scroll-track: transparent;
 
   /* 按钮配色浅色覆盖：前景压深、描边加深。 */
   --btn-primary-fg: #fff;
   --btn-primary-border: rgba(5, 150, 105, 0.55);
   --btn-danger-fg: #b91c1c;
   --btn-danger-border: rgba(185, 28, 28, 0.38);
-  --btn-warn-fg: #92650a;
-  --btn-warn-border: rgba(146, 101, 10, 0.36);
   --btn-press-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.16);
 
   /* 浅底投影必须更重：没有暗部托住，轻影会让卡片「浮不起来」 */
-  --shadow-near: 0 1px 3px rgba(15, 23, 42, 0.10);
-  --shadow-far: 0 14px 40px rgba(15, 23, 42, 0.16);
-  --shadow-pop: 0 4px 14px rgba(15, 23, 42, 0.12), 0 28px 72px rgba(15, 23, 42, 0.24);
+  --shadow-near: 0 1px 3px rgba(15, 23, 42, 0.08);
+  --shadow-far: 0 14px 40px rgba(15, 23, 42, 0.12);
+  --shadow-pop: 0 4px 14px rgba(15, 23, 42, 0.10), 0 28px 72px rgba(15, 23, 42, 0.18);
 
   --inner-light: inset 0 1px 0 0 var(--spec-top),
     inset 0 -1px 0 0 var(--spec-bottom);

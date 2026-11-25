@@ -1,5 +1,5 @@
 /**
- * 登录态的纯视图模型（平台卡状态点 + 「保存登录 / 退出」按钮派生）。两条来源优先级不同：
+ * 登录态的纯视图模型（平台卡状态点 + 「退出」按钮派生）。两条来源优先级不同：
  * `login-state` 事件是旁路推送，`login_status` 查询是权威。所以 **`mergeLoginState`：
  * 未知态不覆盖已知态**，否则推送迟到时「已登录」会退化成「未知」。
  */
@@ -9,9 +9,6 @@ import type { LoginStatus } from '../api/types';
 
 /** 后端 state 全集的字面量（`lib.rs:463-500` 的 `login_snapshot` / `login_emit_decision`）。 */
 export const LOGIN_STATES = ['waiting', 'logged_in', 'closed', 'error', 'no_login'] as const;
-
-/** 需要用户继续操作的三个态：可以点「保存登录」。 */
-const SAVEABLE: readonly string[] = ['logged_in'];
 
 /** 已登录 —— 可以让用户「退出登录」。 */
 export function isLoggedIn(state: string | null | undefined): boolean {
@@ -131,28 +128,12 @@ export interface LoginActionView {
 }
 
 /**
- * 「保存登录」：只在**已登录且本次会话还没存过**时出现（存过再点没有意义），
- * 正在忙时禁用，防连点。
- */
-export function saveLoginAction(
-  status: LoginStatus | null | undefined,
-  busy: boolean,
-): LoginActionView {
-  const state = status?.state ?? '';
-  const visible = isLoggedIn(state) && status?.saved !== true;
-  return {
-    testId: 'platform-login-save-btn',
-    label: busy ? '保存中…' : '保存登录',
-    btnClass: 'btn btn-sm btn-ghost',
-    visible,
-    disabled: busy || !visible,
-    title: '把「已登录」记到本机配置，下次启动不必重新扫码',
-  };
-}
-
-/**
- * 「退出登录」：已登录时出现。`running` 的会话点退出会顺带关掉 sidecar 浏览器
- * （后端 `LogoutReply.closed`），所以按钮一直可点——没会话时后端只是清标记。
+ * 「退出」：登录格在已登录后变成的一枚红按钮。
+ *
+ * **与「登录」互斥**：已登录才出现退出，未登录那一格就是「登录」（登录成功后标记由后端
+ * 自动落库，界面不再需要「保存登录」这一步）。浏览器没起来时 `state` 是 `unknown`，
+ * 按未登录算——那时该做的是「重新连接浏览器 / 登录」，不是清标记。
+ * `running` 的会话点退出会顺带关掉 sidecar 浏览器（后端 `LogoutReply.closed`）。
  */
 export function logoutAction(
   status: LoginStatus | null | undefined,
@@ -161,8 +142,8 @@ export function logoutAction(
   const visible = isLoggedIn(status?.state ?? '');
   return {
     testId: 'platform-logout-btn',
-    label: busy ? '退出中…' : '退出登录',
-    btnClass: 'btn btn-sm btn-ghost',
+    label: busy ? '退出中…' : '退出',
+    btnClass: 'btn btn-sm btn-danger',
     visible,
     disabled: busy || !visible,
     title: status?.running === true ? '退出登录并关闭浏览器会话' : '清除本机登录标记',

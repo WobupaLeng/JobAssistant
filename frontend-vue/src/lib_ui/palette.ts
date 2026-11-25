@@ -1,6 +1,6 @@
 /**
- * 调色板：主题色联动。只改「强调色」一族令牌（主色、辅助色、主按钮与高亮文字）
- * 与外壳染色，不碰布局几何。色值写在 `<html>` 行内 style 上覆盖 tokens.css
+ * 调色板：主题色联动。只改「强调色」一族令牌（主色、辅助色、主按钮、高亮文字
+ * 与流光），不碰外壳底色与布局几何。色值写在 `<html>` 行内 style 上覆盖 tokens.css
  * 默认值，所以深浅切换后依然生效。存储键 `aja.palette`。
  */
 
@@ -18,8 +18,6 @@ interface PaletteTone {
   primaryFg: string;
   accent: string;
   accentSoft: string;
-  /** 外壳左上角的主色径向光斑，随调色板变化。 */
-  bgWash: string;
 }
 
 export interface PaletteDef {
@@ -45,18 +43,16 @@ export const PALETTES: readonly PaletteDef[] = [
       primaryFg: '#ffffff',
       accent: '#06b6d4',
       accentSoft: 'rgba(6, 182, 212, 0.18)',
-      bgWash: 'rgba(37, 99, 235, 0.22)',
     },
     light: {
       primary: '#2563eb',
       primaryStrong: '#1d4ed8',
       primarySoft: 'rgba(37, 99, 235, 0.12)',
       primaryBorder: 'rgba(37, 99, 235, 0.4)',
-      primaryText: '#1e40af',
+      primaryText: '#1e3a8a',
       primaryFg: '#ffffff',
       accent: '#0891b2',
       accentSoft: 'rgba(8, 145, 178, 0.12)',
-      bgWash: 'rgba(37, 99, 235, 0.14)',
     },
   },
   {
@@ -72,18 +68,16 @@ export const PALETTES: readonly PaletteDef[] = [
       primaryFg: '#04120c',
       accent: '#38bdf8',
       accentSoft: 'rgba(56, 189, 248, 0.18)',
-      bgWash: 'rgba(20, 184, 166, 0.20)',
     },
     light: {
       primary: '#0f766e',
       primaryStrong: '#115e59',
       primarySoft: 'rgba(15, 118, 110, 0.12)',
       primaryBorder: 'rgba(15, 118, 110, 0.4)',
-      primaryText: '#115e59',
+      primaryText: '#0d3f3b',
       primaryFg: '#ffffff',
       accent: '#0284c7',
       accentSoft: 'rgba(2, 132, 199, 0.12)',
-      bgWash: 'rgba(15, 118, 110, 0.13)',
     },
   },
   {
@@ -99,18 +93,16 @@ export const PALETTES: readonly PaletteDef[] = [
       primaryFg: '#04120c',
       accent: '#2dd4bf',
       accentSoft: 'rgba(45, 212, 191, 0.18)',
-      bgWash: 'rgba(132, 204, 22, 0.20)',
     },
     light: {
       primary: '#4d7c0f',
       primaryStrong: '#3f6212',
       primarySoft: 'rgba(77, 124, 15, 0.12)',
       primaryBorder: 'rgba(77, 124, 15, 0.38)',
-      primaryText: '#3f6212',
+      primaryText: '#2c470d',
       primaryFg: '#ffffff',
       accent: '#0f766e',
       accentSoft: 'rgba(15, 118, 110, 0.12)',
-      bgWash: 'rgba(77, 124, 15, 0.12)',
     },
   },
   {
@@ -126,18 +118,16 @@ export const PALETTES: readonly PaletteDef[] = [
       primaryFg: '#04120c',
       accent: '#fb7185',
       accentSoft: 'rgba(251, 113, 133, 0.18)',
-      bgWash: 'rgba(245, 158, 11, 0.20)',
     },
     light: {
       primary: '#b45309',
       primaryStrong: '#92400e',
       primarySoft: 'rgba(180, 83, 9, 0.12)',
       primaryBorder: 'rgba(180, 83, 9, 0.4)',
-      primaryText: '#92400e',
+      primaryText: '#6b2f0a',
       primaryFg: '#ffffff',
       accent: '#e11d48',
       accentSoft: 'rgba(225, 29, 72, 0.12)',
-      bgWash: 'rgba(180, 83, 9, 0.13)',
     },
   },
   {
@@ -153,18 +143,16 @@ export const PALETTES: readonly PaletteDef[] = [
       primaryFg: '#04120c',
       accent: '#a855f7',
       accentSoft: 'rgba(168, 85, 247, 0.18)',
-      bgWash: 'rgba(251, 113, 133, 0.20)',
     },
     light: {
       primary: '#e11d48',
       primaryStrong: '#be123c',
       primarySoft: 'rgba(225, 29, 72, 0.12)',
       primaryBorder: 'rgba(225, 29, 72, 0.4)',
-      primaryText: '#be123c',
+      primaryText: '#7f0e2d',
       primaryFg: '#ffffff',
       accent: '#7e22ce',
       accentSoft: 'rgba(126, 34, 206, 0.12)',
-      bgWash: 'rgba(225, 29, 72, 0.13)',
     },
   },
   {
@@ -180,18 +168,16 @@ export const PALETTES: readonly PaletteDef[] = [
       primaryFg: '#ffffff',
       accent: '#fb7185',
       accentSoft: 'rgba(251, 113, 133, 0.18)',
-      bgWash: 'rgba(192, 38, 211, 0.22)',
     },
     light: {
       primary: '#a21caf',
       primaryStrong: '#86198f',
       primarySoft: 'rgba(162, 28, 175, 0.12)',
       primaryBorder: 'rgba(162, 28, 175, 0.4)',
-      primaryText: '#86198f',
+      primaryText: '#6b166b',
       primaryFg: '#ffffff',
       accent: '#be123c',
       accentSoft: 'rgba(190, 18, 60, 0.12)',
-      bgWash: 'rgba(162, 28, 175, 0.13)',
     },
   },
   {
@@ -207,18 +193,16 @@ export const PALETTES: readonly PaletteDef[] = [
       primaryFg: '#ffffff',
       accent: '#d946ef',
       accentSoft: 'rgba(217, 70, 239, 0.18)',
-      bgWash: 'rgba(124, 58, 237, 0.24)',
     },
     light: {
       primary: '#6d28d9',
       primaryStrong: '#5b21b6',
       primarySoft: 'rgba(109, 40, 217, 0.12)',
       primaryBorder: 'rgba(109, 40, 217, 0.4)',
-      primaryText: '#5b21b6',
+      primaryText: '#4c1d95',
       primaryFg: '#ffffff',
       accent: '#a21caf',
       accentSoft: 'rgba(162, 28, 175, 0.12)',
-      bgWash: 'rgba(109, 40, 217, 0.13)',
     },
   },
 ];
@@ -316,7 +300,6 @@ export function applyPalette(id: PaletteId, theme: 'dark' | 'light'): void {
     st.setProperty('--primary-text', tone.primaryText);
     st.setProperty('--accent', tone.accent);
     st.setProperty('--accent-soft', tone.accentSoft);
-    st.setProperty('--palette-wash', tone.bgWash);
     st.setProperty('--btn-primary-fg', tone.primaryFg);
     st.setProperty('--btn-primary-border', tone.primaryBorder);
     st.setProperty('--palette-swatch', def.swatch);

@@ -32,6 +32,7 @@ import {
   scoreModeSegs,
   srSummary,
   startDisabled,
+  mainDisabled,
   tokenText,
 } from '../src/lib_ui/scrape-panel-model';
 
@@ -127,6 +128,11 @@ describe('抓取条三态', () => {
     expect(startDisabled(true, false)).toBe(true);
     expect(startDisabled(false, true)).toBe(true);
     expect(startDisabled(false, false)).toBe(false);
+  });
+
+  it('运行中主按钮「暂停抓取」必须可点（只有启动中禁用）', () => {
+    expect(mainDisabled(false)).toBe(false);
+    expect(mainDisabled(true)).toBe(true);
   });
 
   it('max JD 上限与后端 MAX_JD_CAP 一致（500）', () => {

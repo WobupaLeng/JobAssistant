@@ -31,7 +31,6 @@ const emit = defineEmits<{
   (e: 'navigate', nav: 'dashboard'): void;
 }>();
 
-
 const config = ref<AppConfigReply | null>(null);
 const stored = ref<ConfigDraft>(emptyDraft());
 const draft = ref<ConfigDraft>(emptyDraft());

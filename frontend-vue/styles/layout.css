@@ -2,7 +2,7 @@
  * 类名与只读参考逐字一致，E2E 与视觉比对依赖它。只用块注释。 */
 
 /* ---------- 应用外壳 ----------
-   外壳是整页唯一的底面：底色不透明，圆角与投影自己吃窗口边。 */
+   外壳是整页唯一的底面：半透明中性染色 + 系统窗口模糊，圆角与投影自己吃窗口边。 */
 .app-shell {
   display: flex;
   flex-direction: column;
@@ -15,8 +15,8 @@
   margin: 0;
   height: 100%;
   border-radius: var(--shell-radius);
-  /* 整页只有这一处底色：光斑渐变跨过 .topbar / .app-body 的边界会显出横向断层。 */
-  background: var(--surface-0);
+  /* 整页只有这一处底色：半透明中性染色，桌面由系统窗口模糊透上来。 */
+  background: var(--shell-tint);
   box-shadow: var(--inner-light), var(--shadow-card);
   overflow: hidden;
 }
@@ -55,7 +55,9 @@
   border-radius: 8px;
   font-size: var(--fs-sm);
   font-weight: 700;
-  color: #04120c;
+  /* 字色跟随色板前景色：色板可把主色换成深紫 / 深红，写死的深字在深渐变上读不清。
+     applyPalette 写入的 --btn-primary-fg 已按主色渐变最暗端算过对比度。 */
+  color: var(--btn-primary-fg);
   background: linear-gradient(145deg, var(--primary) 0%, var(--primary-strong) 100%);
   box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.18);
 }
@@ -71,7 +73,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding-top: 10px;
-  /* 底部留白，否则最后一张卡紧贴窗口边，玻璃边缘光会被裁掉 */
+  /* 底部留白，否则最后一张卡紧贴窗口边，边缘高光会被裁掉 */
   padding-bottom: 2px;
 }
 
@@ -91,7 +93,7 @@
 }
 
 /* 卡片高光边：默认对角弧与指针光斑都画在同一条 1px 边框环上（同一个 ::before + 同一套 mask）。
-   伪元素必须用 left/top/right/bottom: 0 + width/height: 100% 铺满，不能用 `inset: 0`—— */
+   伪元素必须用 left/top/right/bottom: 0 + width/height: 100% 铺满，不能用 inset: 0—— */
 .card::before,
 .card::after {
   content: '';
@@ -120,7 +122,7 @@
   transition: none;
 }
 
-/* 非 .card 的玻璃表面（聊天 rail、Boss 好友项、岗位卡、决策记录/敏感库）共用同一套高光伪元素。 */
+/* 非 .card 的表面（聊天 rail、Boss 好友项、岗位卡、决策记录/敏感库）共用同一套高光伪元素。 */
 .hl-surface { position: relative; }
 
 /* 默认高光弧落在 ::after 上，::before 专给指针光斑用。 */
@@ -191,7 +193,7 @@
     background-position 90ms var(--ease-out);
 }
 
-/* 右栏的渐变高光边（M2 玻璃质感，逐字照抄三档 stop）。
+/* 右栏的渐变高光边（照抄三档 stop）。
    与上面的 .card::before 同一族手法，也必须留在本文件：这里的 #000 只是遮罩的
    alpha 通道、不是配色；而 vue 系三份样式表按 tests/geometry.test.ts 明令不得出现 */
 .chat-rail::before {
@@ -259,8 +261,7 @@
 }
 
 /* ---------- 空态 / 提示 ---------- */
-.empty,
-.empty-state {
+.empty {
   padding: 18px 4px;
   font-size: var(--fs-sm);
   color: var(--text-3);
@@ -295,7 +296,7 @@
 /* 面板自身的底色归各自的样式文件（drawer / sensitive / pages / vue-dashboard / vue-chat）。 */
 
 /* 高光位置可动画：把 --hl-x / --hl-y 注册为 <length>/<percentage>。
-   initial-value 必须与 `var()` 的兜底值一致（50% / 0%），注册过的属性会向下继承。 */
+   initial-value 必须与 var() 的兜底值一致（50% / 0%），注册过的属性会向下继承。 */
 @property --hl-x {
   syntax: '<length-percentage>';
   inherits: true;

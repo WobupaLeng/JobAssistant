@@ -16,29 +16,11 @@
   gap: 4px;
 }
 
-/* 选中态用实心主色：深浅两套主题各自给 --primary 定过色，不能写死某一个绿。 */
-.job-tab.is-active {
-  color: var(--text-1);
-  background: var(--primary-soft);
-  border-color: var(--primary);
-}
-
-.job-tab.is-active .job-tab-count {
-  /* 计数是文字：--primary 在白玻璃上只有约 2.2:1，文字档 --primary-text 才有对比。 */
-  color: var(--primary-text);
-}
-
 /* ---------- 排序 ---------- */
 .job-sorts {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-}
-
-.job-sort.is-active {
-  color: var(--text-1);
-  font-weight: 560;
-  background: var(--surface-input);
 }
 
 /* 箭头固定 10px 宽：不占位时按钮宽度会跳，三个排序键会左右抖动 */
@@ -61,7 +43,6 @@
   font-size: var(--fs-xs);
 }
 
-.job-selected,
 .job-total {
   font-variant-numeric: tabular-nums;
 }
@@ -108,7 +89,6 @@
   min-height: 62px;
 }
 
-
 /* 窄窗降成两列 / 一列：三列在 900px 以下每张卡只剩 ~280px，
  * 公司名与地址会全被省略号吃掉。 */
 @media (max-width: 1180px) {
@@ -121,85 +101,6 @@
   .job-grid {
     grid-template-columns: minmax(0, 1fr);
   }
-}
-
-.table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  table-layout: fixed;
-  font-size: var(--fs-sm);
-}
-
-/* ---------- 表头 ----------
-   sticky 表头必须不透明（或足够糊），否则滚动时会看到文字互相穿透。 */
-.table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: 8px 10px;
-  text-align: left;
-  font-size: var(--fs-xs);
-  font-weight: 560;
-  color: var(--text-3);
-  white-space: nowrap;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--hairline);
-}
-
-.table tbody td {
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--hairline);
-  color: var(--text-2);
-  vertical-align: middle;
-}
-
-/* 最后一行不要下边线：容器已有圆角边框，多一条会显得底边加粗 */
-.table tbody tr:last-child td {
-  border-bottom: 0;
-}
-
-/* 行悬停：只提亮底色，不做位移（表格里行高变化会引起整表重排） */
-.table tbody tr {
-  transition: background var(--dur-fast) var(--ease-smooth);
-}
-
-.table tbody tr:hover {
-  background: var(--surface-input);
-}
-
-.table tbody tr.is-selected {
-  background: var(--primary-soft);
-}
-
-.table tbody tr {
-  cursor: pointer;
-}
-
-.table tbody tr.is-rejected td {
-  opacity: 0.72;
-}
-/* 选中行左侧的绿色标尺（旧版 `box-shadow: inset 3px 0 0 var(--primary)`）：
- * 抽屉打开时，左侧列表里「看的是哪一条」要一眼可见。 */
-.table tbody tr.is-selected td:first-child {
-  box-shadow: inset 3px 0 0 var(--primary);
-}
-
-/* 骨架条是表头以下的占位行，不需要指针反馈 */
-.table tbody tr.skeleton-row {
-  cursor: default;
-  pointer-events: none;
-}
-
-/* 空态单元格：旧版 `.empty { padding: 36px 20px; text-align: center }`，
- * 比 layout.css 里给 */
-.table tbody td.empty {
-  padding: 36px 20px;
-  text-align: center;
-  color: var(--text-3);
-  font-size: var(--fs-sm);
-  line-height: 1.8;
-  white-space: normal;
 }
 
 /* ---------- 分数着色 ----------

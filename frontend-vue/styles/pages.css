@@ -119,20 +119,7 @@
   color: var(--text-3);
 }
 
-/* 窄屏：左栏收窄，再到单列上下排布 */
-@media (max-width: 1180px) {
-  .chat-grid {
-    grid-template-columns: 220px 1fr;
-  }
-}
-
 @media (max-width: 900px) {
-  .chat-grid {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(140px, 30%) 1fr;
-    height: 620px;
-  }
-
   .bubble {
     max-width: 88%;
   }
@@ -258,12 +245,6 @@
   color: var(--text-3);
 }
 
-.log-table td.empty {
-  padding: 22px 8px;
-  text-align: center;
-  color: var(--text-3);
-}
-
 /* ---------- 4. 日志页：运行日志 + 决策日志双视图 ----------
  * 页面根容器不得有不透明底色，否则会把外壳底面整块盖住。 */
 
@@ -282,7 +263,7 @@
   border-bottom: 1px solid var(--hairline);
 }
 
-/* 筛选条与日志行同处一个滚动容器（用户口径：所有信息都进滚屏、只有一个滚动条），
+/* 筛选条与日志行同处一个滚动容器（所有信息都进滚屏、只有一个滚动条），
  * 但吸在容器顶部：滚日志时不会把级别/搜索条件一起滚丢。
  * 底色必须不透明，否则滚过去的内容会从筛选条底下透出来。 */
 .log-tools.is-sticky {
@@ -329,7 +310,7 @@
   white-space: nowrap;
 }
 
-/* 自动刷新开关：原生 checkbox 太小，套一层玻璃卡片给它一点体积 */
+/* 自动刷新开关：原生 checkbox 太小，套一层卡片给它一点体积 */
 .log-auto {
   display: inline-flex;
   align-items: center;
@@ -430,13 +411,6 @@
   background-clip: padding-box;
 }
 
-/* 紧凑态：概览页把运行日志作为投递列表下方的独立卡片，高度按内容给，
- * 不再用 260px / 58vh 撑开——那一组数值是为整页的日志视图定的。 */
-.log-wrap.is-compact .run-log-box {
-  min-height: 132px;
-  max-height: 34vh;
-}
-
 .run-log-line {
   display: grid;
   /* 时间列 max-content：14 字的日期+时分秒必须整行放下，定宽列会被挤成两行 */
@@ -465,7 +439,7 @@
   white-space: nowrap;
 }
 
-/* 级别标签：唯一的着色点（用户口径：颜色只加在标签上，正文保持同一墨色，
+/* 级别标签：唯一的着色点（颜色只加在标签上，正文保持同一墨色，
  * 整行染色会让满屏日志变成色块，反而更难读）。 */
 .run-log-level {
   justify-self: start;
@@ -503,11 +477,6 @@
 }
 
 /* ---------- 决策日志 ---------- */
-
-.log-score-val.is-none {
-  color: var(--text-3);
-  font-weight: 500;
-}
 
 .log-row.is-bad td {
   color: var(--text-2);

@@ -1,19 +1,2 @@
-/* 分域样式：自动投递开关的语义色（开 / 暂停）。
-   普通态与交互态走 controls.css 的 `.btn` 族，这里只补 `.btn` 没有的两档配色。 */
-
-.auto-toggle.is-on {
-  border-color: rgba(16, 185, 129, 0.5);
-  background: var(--primary-gradient);
-  color: var(--btn-primary-fg);
-  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.32);
-}
-
-.auto-toggle.is-warn {
-  border-color: rgba(210, 153, 34, 0.5);
-  background: var(--warn-soft);
-  color: var(--btn-warn-fg);
-}
-
-[data-theme='light'] .auto-toggle.is-warn {
-  color: #8a5a00;
-}
+/* 分域样式：本文件当前没有规则——自动投递状态条的配色在 vue-chat.css 的
+   .auto-apply-bar / .auto-apply-label。文件保留只为不打断 index.css 的 @import 顺序契约。 */

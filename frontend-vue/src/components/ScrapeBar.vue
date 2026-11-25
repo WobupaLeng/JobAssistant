@@ -8,9 +8,9 @@ import { MAX_JD_CEILING } from '../lib_ui/scrape-panel-model';
 import {
   buttonClass,
   buttonLabel,
+  mainDisabled,
   progressText,
   srSummary,
-  startDisabled,
   type ScrapeButtonState,
   type ScrapeProgressLike,
 } from '../lib_ui/scrape-panel-model';
@@ -43,7 +43,8 @@ const brief = computed(() => progressText(props.progress));
 const summary = computed(() => srSummary(props.progress));
 const label = computed(() => buttonLabel(props.state));
 const cls = computed(() => buttonClass(props.state));
-const startOff = computed(() => startDisabled(props.starting, props.state === 'running'));
+// 跑起来时主按钮是「暂停抓取」，必须可点（点它 emit stop）；只有启动中禁用。
+const startOff = computed(() => mainDisabled(props.starting));
 
 function onMaxJd(e: Event): void {
   const n = Number.parseInt((e.target as HTMLInputElement).value, 10);
@@ -85,7 +86,12 @@ function onMain(): void {
         停止抓取
       </button>
       <label class="scrape-limit">
-        <span class="scrape-limit-label">最多 JD</span>
+        <!-- 口径（用户 m01540）：数的是本次抓取**真正进待投递列表**的条数，
+             重复 / 低于门槛 / 被规则否决的都不算，所以文案不说「抓几条」 -->
+        <span
+          class="scrape-limit-label"
+          title="本次抓取真正入库（进待投递列表）的条数上限；重复、低于门槛、被排除的都不算"
+        >最多入库</span>
         <input
           class="input input-num"
           type="number"

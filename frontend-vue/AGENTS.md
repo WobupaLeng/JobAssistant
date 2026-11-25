@@ -12,7 +12,7 @@
 
 ```
 frontend-vue/
-  index.html               Vite 入口。11 份 CSS 的引入顺序是契约（见 C4）
+  index.html               Vite 入口。CSS 引入顺序是契约（见 C4；实际宿主是 styles/index.css）
   package.json             vue 3 / vite / typescript；不放任何 Tauri 运行时依赖
   vite.config.ts           ESM only，defineConfig 包一层；客户端变量用 import.meta.env 且只暴露 VITE_ 前缀
   tsconfig.json            严格模式
@@ -24,10 +24,10 @@ frontend-vue/
       invoke.ts            invoke 封装（prune：删 undefined、留 null）
       commands/            按领域拆的命令封装，命令名逐字对抄后端
     lib_ui/                纯函数与 composables（无 DOM 依赖优先，可单测）
-    components/            纯展示组件（21 个 .vue）：根级 AppShell / CityPicker / AppErrorBar / FilterPanel / JobCard / JobListView / JobDetailDrawer / LogCard / PlatformCard / ScrapeBar / SensitivePanel / TopbarTail；子目录 chat/（AutoApplyBar / ChatCompose / ChatDetach / ChatThread / ExpectRow / FriendList）、config/（ConfigSection）、logs/（DecisionRow / RunLine）
-    features/              只留编排（5 文件）：auto/queue.ts · chat/greet-draft.ts · config/model.ts · logs/model.ts · scrape/filter.ts。视图模型/纯状态机已下沉 lib_ui/（见 §2.5 推论）；jobs/score/sensitive 无独立 feature 目录
+    components/            纯展示组件（20 个 .vue）：根级 AppShell / CityPicker / AppErrorBar / FilterPanel / JobCard / JobListView / JobDetailDrawer / LogCard / PlatformCard / ScrapeBar / SensitivePanel / TopbarTail；子目录 chat/（AutoApplyBar / ChatCompose / ChatDetach / ChatThread / FriendList）、config/（ConfigSection）、logs/（DecisionRow / RunLine）
+    features/              只留编排（4 文件）：chat/greet-draft.ts · config/model.ts · logs/model.ts · scrape/filter.ts。视图模型/纯状态机已下沉 lib_ui/（见 §2.5 推论）；auto/jobs/score/sensitive 均无独立 feature 目录
     pages/                 dashboard / chat / config / logs
-  styles/                  14 份 CSS（11 份契约序 + vue-dashboard/vue-chat/vue-pages 追加在末尾），顺序见 C4
+  styles/                  15 份 CSS：index.css 是唯一 @import 宿主，其余 14 份 = 11 份契约序 + vue-dashboard/vue-chat/vue-pages 追加在末尾，顺序见 C4
   .agents/skills/          15 个技能，来源见 SOURCES.md
   AGENTS.md  HANDOFF.md
 ```
@@ -58,18 +58,20 @@ pages → features → components → lib_ui
 
 1. **不碰系统 API、不起子进程**，一切经 `invoke`。
 2. **禁止硬编码满分与门槛**（100 / 70 之类），一律由 `get_scoring_spec` 下发。
-3. **页面背景必须透明**，否则毛玻璃失效。
+3. **页面背景必须透明**：外壳与面板都不许自铺不透明的整页底，否则窗口圆角与系统模糊被一层实底盖死（`body` 的 `transparent` 由 `tests/geometry.test.ts` 守住）。
 4. **可交互控件必须带 `data-testid`**，命名 `<页面/模块>-<功能>-<控件类型>`（`job-refresh`、`scrape-start-btn`）。动态 id 用 `tid_safe()` 把 `: / \` 与空格换成 `-`。
 5. **CSS 文件不允许 `//!` 或 `///` 注释**。CSS 解析器会判定整份样式表非法并**静默丢弃**（曾导致「变量生效、组件样式全无」的误诊）。引入预处理器后需重新评估。
    **同族变体：注释正文里也不许出现 `` `*/` ``**——真正的坑不是 `//!` 本身，而是**块注释被提前闭合**。`styles/pages.css` 曾在注释里用反引号包住 `*/`，导致该行之后的四份样式表（`pages` / `sensitive` / `auto` / `filter`）全部失效，而 `vite build` 只报一条 `[css-syntax-error] Unexpected "\`"`、末尾照样打印 `✓ built`。改完 CSS 后**必须在产物里数一遍选择器**（`dist/assets/*.css`），不能只看构建成功。
-6. **不引入第二套 UI 库**：玻璃与控件规范由 `styles/` 与 `liquid-glass` 技能确定。
+6. **不引入第二套 UI 库**：控件外观只由 `styles/` 的令牌与分域样式确定，不接第二套组件库。
 7. **`src/` 里不放调试桩**：浏览器单独调试用的 `__TAURI_INTERNALS__` 桩不得进入正式路径。
 8. **vue 系 CSS 零颜色字面量，零例外（Chief 裁决 2026-11-23）**：`vue-dashboard / vue-chat / vue-pages` 三份禁止 hex/rgb/rgba 颜色字面量（`tests/geometry.test.ts` 守卫）。原型真值自带颜色字面量（高光、遮罩 alpha 等）时，**一律在 `tokens.css` 新增语义令牌**，vue 系只消费 `var()`；多一枚令牌是可接受代价，不允许「这一处特殊」的例外。新令牌照 C7 深浅两套独立定义；原型无浅色覆盖值时两套共用并在注释写明缘由（先例：`--spec-avatar-top`，原型 L1158 `rgba(255,255,255,.5)`，比 `--spec-top` 亮一档不可复用）。
    **宿主边界（不是例外）**：11 份契约 CSS 是原型逐字宿主，颜色字面量收口另轮（见 HANDOFF）；原型规则的同族已住契约 CSS 时，整条规则可随族宿主（先例：`.chat-rail::before` 与 `.card::before` 同在 `layout.css`，数值照原型 L1055–1057 逐字），vue 系原地留指向说明。**不得借「挪进契约 CSS」为 vue 系规则规避本红线**。
+9. **不引入玻璃材质**：CSS 禁止 `backdrop-filter` / `-webkit-backdrop-filter`，也禁止「半透明玻璃底」。底色只取 `tokens.css` 的不透明阶梯（`--surface-0…3` / `--surface-input` / `--surface-card`，弹层用 `--popup-surface`）；浮层遮罩只许用 `--scrim`（半透明，只压暗底下的页面）。窗口级系统模糊在 Rust 侧（`backend-tauri/src/lib.rs` 的 `SetWindowCompositionAttribute`），那是窗口属性，不在 CSS 里复刻。
 
 **契约增量（2026-11-23，SPEC-003）已随 Liquid Glass L2/L3 移除而作废**：
 - `styles/vue-glass.css` 已删除，C4 回到 **14 条**（11 条契约序 + 3 条 Vue 追加），`geometry-collect.test.ts` 的守卫同步为 14。历史记录「14→15 批准」不再有效，**不要再按 15 条写守卫**。
 - 红线 8 的 `VUE_CSS` 回到 **3 份**（`vue-dashboard / vue-chat / vue-pages`），`geometry.test.ts` 已同步。
+- CSS 玻璃材质同样已删：`--glass-0…3/-input/-tint(-strong)` 换成不透明 `--surface-*` 阶梯，28 处 `backdrop-filter` 清零，`--panel-blur` / `--blur-*` / `--saturate-*` 令牌删除，遮罩改用 `--scrim`（见红线 9）。
 - 规格文本 `docs/ui/UI-SPEC-liquid-glass-l2-l3.md` 与 `docs/specs/SPEC-003-legacy-liquid-glass-l2-l3.md` 保留为历史存档，**不是可施工依据**。
 
 ---
@@ -93,11 +95,11 @@ pages → features → components → lib_ui
 另有 3 条内联 `<style>`：`html{background:transparent}`、`body{margin:0}`、`body:not(:has(#app > *)){overflow:hidden}`——**防首帧闪白**，不要挪进外部文件（挂载点是 `#app`，不是 Leptos 的 `#root`）。
 > **宿主**：实际的宿主是 `styles/index.css` 的 @import 链（`index.html` 无 CSS link）。SPEC-003 曾批准的「14→15（`vue-glass.css`）」已随 Liquid Glass 移除作废，**当前就是 14 条**。
 
-**C5 整页背景透明**：`tokens.css:204` 的 `body` 必须 `background: transparent`，否则毛玻璃失效（全项目 13 处）。
+**C5 整页背景透明**：`tokens.css` 的 `body`（`:268` 起）必须 `background: transparent`，否则窗口圆角与系统模糊被实底盖死。
 
 **C6 CSS 禁 `//!` / `///`**：见红线 5。
 
-**C7 深浅双主题，两套令牌数值不共用**：`[data-theme='light']` 选择器 10 处；两套令牌独立定义（`tokens.css:22` 起 `:root`、`:137` 起 light；`theme.rs:64-67` 是切换逻辑）。
+**C7 深浅双主题，两套令牌数值不共用**：`[data-theme='light']` 选择器 11 处（跨 5 份样式表）；两套令牌独立定义（`tokens.css:4` 起 `:root`、`:168` 起 light）。切换在 `src/lib_ui/theme.ts`（写 `data-theme` 到 `<html>`，首帧由 `index.html` 的内联脚本预置），后端不参与。
 
 **C8 控件全部带 `data-testid`**：Leptos 版 99 个控件（button 69 / input 25 / select 2 / textarea 3）中 98 个有，唯一缺口是 `features/config/form.rs:23` 配置分组折叠标题按钮（外层 `.config-card` 有 `test_id`，按钮没有 `{test_id}-toggle` 派生；对照 `widgets.rs:248` 的 `Collapsible`）——Vue 版应补上。
 **`features/jobs/list.rs:272-289` 的隐藏 `<table class="sr-only" aria-hidden="true">` 必须原样保留**——唯一作用是为 `job-row-{id}` / `score-{id}` 保活锚点。
@@ -171,7 +173,7 @@ pages → features → components → lib_ui
 | `vue-debug` | **索引式**排障手册：入口只列症状，按需打开 `reference/*.md` 单篇，**不要通读** |
 | `vite` | 构建配置；Vite ≤7 用 `build.rollupOptions`，Vite 8+ 用 `build.rolldownOptions` |
 | `typescript-core` / `-vue` / `-config` / `-types` / `-debug` / `-testing` | TS 基础 / 单文件组件类型 / `tsconfig` 严格模式 / 类型设计 / 类型错误排障 / 测试类型 |
-| `liquid-glass` | 玻璃三层分工与光学参数（框架无关） |
+| `liquid-glass` | 上游存档：CSS 玻璃材质已删除（红线 9），当前不施工 |
 | `apple-design` | 动效与交互质感（框架无关） |
 
 ---

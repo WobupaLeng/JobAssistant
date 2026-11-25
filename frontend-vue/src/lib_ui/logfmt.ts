@@ -57,10 +57,8 @@ export function allLevels(): LogLevel[] {
 }
 
 /**
- * 运行日志时间：`MM-DD HH:mm:ss`（与旧版 `web/` 日志框一致，带秒）。
- *
- * 后端 `LogRow.ts` 是**毫秒**。纯函数：不读系统时钟，单测环境同结果。
- * 列表里这一列**不换行**（换行会把日期和时间拆成两行，读起来像没有时间戳）。
+ * 运行日志时间：`MM-DD HH:mm:ss`（带秒）。入参是后端 `LogRow.ts` 的**毫秒**。
+ * 纯函数：不读系统时钟。列表里这一列**不换行**，否则日期与时间会被拆成两行。
  */
 export function fmtLogTime(ts: number): string {
   return fmtTimeSecs(ts);

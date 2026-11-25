@@ -91,14 +91,13 @@ function greetChip(greet: GreetReply): string {
   return greet.tokens > 0 ? `大模型 · ${greet.tokens} tokens` : '大模型';
 }
 
-
 </script>
 
 <template>
   <div ref="rootEl" class="chat-detach-chat">
     <div v-if="props.friend === null" class="rail-body-slot" data-testid="chat-detach-slot">
       <div class="rail-state" data-testid="chat-detach-empty">
-        <!-- 40×40 圆形玻璃盒 + 一枚气泡 SVG（不是 emoji）。 -->
+        <!-- 40×40 圆形色块 + 一枚气泡 SVG（不是 emoji）。 -->
         <span class="state-glyph is-round" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M2.6 4.2h10.8v6.4H7.4L4.2 13v-2.4H2.6z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span>
         <span class="state-title" data-testid="chat-detach-empty-title">{{ CHAT_DETACH_EMPTY_TITLE }}</span>
         <span class="state-sub">{{ CHAT_DETACH_EMPTY_SUB }}</span>
@@ -106,7 +105,7 @@ function greetChip(greet: GreetReply): string {
     </div>
 
     <template v-else>
-      <!-- 对话头整行已移除（用户裁决）：HR 名与「生成打招呼 / 选简历」原本挤在
+      <!-- 对话头整行已移除：HR 名与「生成打招呼 / 选简历」原本挤在
            这一条里，公司/岗位字段一缺就只剩两个按钮悬在中间。名字已在展开态的
            左上标题行（`.chat-detach-head`）显示，两个按钮下沉到 Boss 列表的
            每一行（`FriendList.vue`），那里才有「对谁打招呼、给谁发简历」的上下文。 -->

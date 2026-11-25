@@ -113,6 +113,14 @@ export function startDisabled(starting: boolean, running: boolean): boolean {
 }
 
 /**
+ * 抓取条主按钮是否禁用：只有「启动中」。
+ * 跑着的时候主按钮文案是「暂停抓取」、点击 emit stop——再套 running 禁用会让暂停变灰不可点。
+ */
+export function mainDisabled(starting: boolean): boolean {
+  return starting;
+}
+
+/**
  * 数据库里三条 `status` 之外的计算模式选择。选中大模型打分后顶栏多一个 0-100 的初筛输入
  * （`llm_prefilter`，默认 50）：规则分低于它就不调大模型。初筛判定在后端，前端只负责选值与落库。
  */
@@ -166,8 +174,14 @@ export function tokenText(n: number): string {
 
 // ---------------------------------------------------------------- 事件流
 
-/** 事件流里一行。`tag` 是行首标记，`tone` 决定颜色（`panel.rs` 的 FeedLine）。 */
+/**
+ * 事件流里一行。`tag` 是行首标记，`tone` 决定颜色（`panel.rs` 的 FeedLine）。
+ * `ts` 是**接收时刻**（`ScrapeUpdate` 不带时间戳，前端 drain 时补），用于与运行日志
+ * 在同一条时间线上混排；`n` 是单调序号，只用来给混排后的行一个稳定 key。
+ */
 export interface FeedLine {
+  readonly ts: number;
+  readonly n: number;
   readonly tag: string;
   readonly msg: string;
   readonly tone: '' | 'ok' | 'skip' | 'warn' | 'bad';
@@ -188,15 +202,18 @@ export const FEED_MAX = 300;
 /**
  * `ScrapeUpdate` → 事件流一行。只转「岗位」这一型：日志 / 登录 / 畸形 / 退出 / 重启各有
  * 去处，混进事件流会淹掉进度信息。
+ *
+ * `now` / `n` 由调用方给：`now` 是这一批增量被 drain 的本地时刻（与运行日志同一时钟），
+ * `n` 是全局递增序号，混排后靠它区分同一毫秒的两条事件。
  */
-export function toFeedLine(u: ScrapeUpdate): FeedLine | null {
+export function toFeedLine(u: ScrapeUpdate, now: number = Date.now(), n: number = 0): FeedLine | null {
   if (u.kind !== 'job') return null;
   const summary = String(u.summary ?? '').trim();
   if (u.accepted) {
     const score = typeof u.score === 'number' ? `${u.score} 分 · ` : '';
-    return { tag: FEED_ACCEPTED_TAG, msg: `${score}${summary}`, tone: 'ok' };
+    return { ts: now, n, tag: FEED_ACCEPTED_TAG, msg: `${score}${summary}`, tone: 'ok' };
   }
-  return { tag: FEED_SKIPPED_TAG, msg: summary, tone: 'skip' };
+  return { ts: now, n, tag: FEED_SKIPPED_TAG, msg: summary, tone: 'skip' };
 }
 
 /** 事件流只留最后 `FEED_MAX` 行。 */

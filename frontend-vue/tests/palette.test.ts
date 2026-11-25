@@ -14,7 +14,7 @@ describe('palette catalog', () => {
   it('defines a complete tone pair for every palette', () => {
     for (const p of PALETTES) {
       for (const tone of [p.dark, p.light]) {
-        expect(Object.keys(tone)).toHaveLength(9);
+        expect(Object.keys(tone)).toHaveLength(8);
         for (const value of Object.values(tone)) {
           expect(value).toMatch(/\S/);
         }

@@ -2,11 +2,12 @@
 /**
  * 应用外壳：**只到顶栏为止**。外壳**不 import 任何 `pages/`**，也不调业务命令，页面树由
  * `App.vue` 作插槽传进来。负责顶栏、`.tb-embed` 落位点、页面骨架槽，以及首次挂载时的一次
- * `scrape_close`（只 stop 不关 stdin 会让 Python 残留）。
+ * 全景几何接线。
+ *
+ * 挂载时**不得** `scrape_close`：WebView 刷新（F5）也会重新走一遍挂载，那条命令会把
+ * sidecar 与整棵 Chrome 树关掉——用户看到的正是「刷新一下浏览器就没了」。sidecar 由
+ * Rust 进程持有，页面重载只需重查登录态（各页自己的 `login_status`），不需要关进程。
  */
-import { onMounted } from 'vue';
-
-import { scrapeClose } from '../api/commands/scrape';
 import { windowClose, windowMinimize, windowToggleMaximize } from '../api/commands/window';
 import { useCanvasScale } from '../lib_ui/use-canvas-scale';
 
@@ -20,10 +21,6 @@ const props = withDefaults(
   }>(),
   { isChatOpen: false },
 );
-
-onMounted(() => {
-  void scrapeClose().catch(() => undefined);
-});
 
 /** 窗口控件：失败静默（窗口操作不影响业务，错误不进错误队列）。 */
 const onMinimize = (): void => void windowMinimize().catch(() => undefined);

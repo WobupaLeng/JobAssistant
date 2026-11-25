@@ -1,15 +1,7 @@
 /**
- * 无边框窗口的标题带：**只有窗口最上方 `TITLE_STRIP_HEIGHT` 高的一条横带**能拖窗口、
- * 双击最大化/还原，页面其它空白处一律不拖窗口。
- *
- * 做法：Tauri 的 `data-tauri-drag-region` 只认被点到的那一个元素且不冒泡，所以在捕获阶段
- * （早于 Tauri 的 document `mousedown` 监听）按几何位置把属性补到**命中元素**上
- * （属性值必须非空：WebView2 里 `setAttribute(D, '')` 取回来是 null，插件会判「不是拖动区」）。
- * 下一次按下先摘掉上一次的标记——属性留在节点上，那个节点就会永久变成拖动区，
- * 这也是「整窗都能拖」的老病灶。
- *
- * 双击由 Tauri 自带的 `drag.js` 处理：命中拖动区的 `mousedown` 且 `detail === 2` 时
- * 调 `internal_toggle_maximize`，所以这里**不再**自己发 toggleMaximize，否则一次双击翻两次。
+ * 无边框窗口：只有最上方 `TITLE_STRIP_HEIGHT` 高的横带能拖窗口 / 双击最大化，其它空白处不拖。
+ * `data-tauri-drag-region` 不冒泡，于是在捕获阶段按几何位置给命中元素补属性（值不能是空串）。
+ * 下次按下先摘旧标记，否则节点永久变拖动区；双击交给 Tauri 自带的 `drag.js`，这里不要再发。
  */
 
 /** 与 Tauri 约定的属性名（`data-tauri-drag-region`）。 */

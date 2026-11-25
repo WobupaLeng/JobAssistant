@@ -3,7 +3,7 @@
  * **只经 invoke，不碰 @tauri-apps/api**（C1）。
  */
 
-import { invokeNone } from '../invoke';
+import { invokeFlat, invokeNone } from '../invoke';
 
 export function windowMinimize(): Promise<void> {
   return invokeNone('window_minimize');
@@ -15,4 +15,9 @@ export function windowToggleMaximize(): Promise<void> {
 
 export function windowClose(): Promise<void> {
   return invokeNone('window_close');
+}
+
+/** 把当前主题告诉 Rust：窗口模糊底色分深浅两档，深色档是深蓝黑。 */
+export function setWindowTheme(theme: 'dark' | 'light'): Promise<void> {
+  return invokeFlat('set_window_theme', { theme });
 }

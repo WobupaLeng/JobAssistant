@@ -10,18 +10,21 @@ import {
   BACKEND_KEYS,
   BACKEND_READ_KEYS,
   DRAFT_KEY,
+  KEYWORDS_KEY,
   SAVE_DEBOUNCE_MS,
   activeCount,
   applyBackend,
   createDraft,
   decode,
+  decodeKeywords,
   diffArgs,
   draftValues,
   encode,
+  encodeKeywords,
   toggleCode,
   type FilterDraft,
 } from '../src/lib_ui/scrape-filter-model';
-import { loadDraft, saveDraft } from '../src/features/scrape/filter';
+import { loadDraft, loadKeywords, saveDraft, saveKeywords } from '../src/features/scrape/filter';
 import {
   DEGREE_OPTIONS,
   JOB_TYPE_OPTIONS,
@@ -281,6 +284,38 @@ describe('本地兜底存储', () => {
       saveDraft(d);
       expect(store.get(DRAFT_KEY)).toBeTruthy();
       expect(loadDraft()).toEqual(d);
+    } finally {
+      delete (globalThis as { localStorage?: unknown }).localStorage;
+    }
+  });
+});
+
+describe('搜索关键词本地持久化（F5 不丢）', () => {
+  it('encode / decode 往返：去空、去重、保留顺序', () => {
+    const raw = encodeKeywords(['前端', ' 前端 ', '', 'Go']);
+    expect(raw).toBe('["前端","Go"]');
+    expect(decodeKeywords(raw)).toEqual(['前端', 'Go']);
+  });
+
+  it('坏数据 / 旧版逗号串都能救回来', () => {
+    expect(decodeKeywords(null)).toEqual([]);
+    expect(decodeKeywords('')).toEqual([]);
+    expect(decodeKeywords('{"a":1}')).toEqual([]);
+    expect(decodeKeywords('前端, Go，测试')).toEqual(['前端', 'Go', '测试']);
+    expect(decodeKeywords('["前端", 3]')).toEqual(['前端']);
+  });
+
+  it('有 localStorage 时写 KEYWORDS_KEY，读回来是同一份', () => {
+    const store = new Map<string, string>();
+    const fake = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    };
+    (globalThis as { localStorage?: unknown }).localStorage = fake;
+    try {
+      saveKeywords(['前端', 'Go', '前端']);
+      expect(store.get(KEYWORDS_KEY)).toBe('["前端","Go"]');
+      expect(loadKeywords()).toEqual(['前端', 'Go']);
     } finally {
       delete (globalThis as { localStorage?: unknown }).localStorage;
     }

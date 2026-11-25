@@ -21,7 +21,7 @@ function storage(): Storage | null {
   }
 }
 
-/** 初始主题：已保存的选择 > 系统偏好 > 深色（毛玻璃在深色下观感最好）。 */
+/** 初始主题：已保存的选择 > 系统偏好 > 深色。 */
 export function readInitialTheme(): Theme {
   const s = storage();
   if (s) {

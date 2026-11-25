@@ -23,7 +23,7 @@ applyFontScale(readFontScale());
 // 同 220ms 但动不同属性（弧动 opacity、光斑动 --hl-fade），写同一个会互相顶掉。状态自己
 // 记账，不读伪元素的 computed opacity——Chromium 不返回补间中的值。
 const HL_SURFACES = '.card, .hl-surface, .sensitive-card';
-/** 恢复时长，与 tokens.css 的 --hl-restore-ms 一致（改一处须同改另一处）。 */
+/** 进卡 / 离卡补间的恢复时长（毫秒）。 */
 const HL_RESTORE_MS = 220;
 
 interface LitState {

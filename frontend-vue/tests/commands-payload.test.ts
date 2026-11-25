@@ -542,4 +542,14 @@ describe('commands_greet', () => {
     await greet.greetOne('u1', '您好');
     expect(last()).toEqual({ cmd: 'greet_one', payload: { uid: 'u1', text: '您好' } });
   });
+
+  it('greet_one：带岗位时发驼峰 jobId（后端据此标已投递）', async () => {
+    // 键名必须是驼峰：蛇形 `job_id` 会被当成未知键，而它是 `Option<String>`，
+    // 静默变 None —— 消息照发，岗位永远不进已投递，且没有任何报错。
+    await greet.greetOne('u1', '您好', 'boss:1');
+    expect(last()).toEqual({
+      cmd: 'greet_one',
+      payload: { uid: 'u1', text: '您好', jobId: 'boss:1' },
+    });
+  });
 });

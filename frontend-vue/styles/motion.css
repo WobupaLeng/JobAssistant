@@ -1,7 +1,6 @@
 /* 动效：列表与分数变化的过渡。曲线用 `--ease-out`，时长 180~260ms。
  * 只动 opacity / transform：走合成层，不会触发每帧重排。 */
 
-
 @keyframes list-fade {
   from {
     opacity: 0;
@@ -49,7 +48,7 @@
 }
 
 /* 尊重系统的「减少动态效果」：保留淡入淡出（对理解有帮助），去掉位移与缩放。
-   这条必须写在 motion.css 里而不是别处——它是子片段函数 `motion_fade_class` */
+   这条必须写在 motion.css 里而不是别处——它是子片段函数 motion_fade_class */
 @media (prefers-reduced-motion: reduce) {
   .list-fade,
   .list-fade > tbody,
@@ -83,7 +82,7 @@
 /* ---------- 1. 弹层进场：统一到 `--pan-dur` + `--ease-out` ----------
    .pan-pop     浮层（主题面板 / 城市选择器 / 菜单）：略缩放下落
    .pan-modal   居中大窗（配置 / 决策记录）：缩放 + 下移 10px 归位
-   .drawer      侧边抽屉：`.is-open` 靠第 6 段的关键帧进场 */
+   .drawer      侧边抽屉：.is-open 靠第 6 段的关键帧进场 */
 .pan-pop {
   animation: pan-pop calc(var(--pan-dur) * 0.72) var(--ease-out) both;
 }
@@ -187,7 +186,7 @@
 }
 
 /* ---------- 4. 列表切换：滚动换带（不做淡入淡出） ----------
-   `JobListView` 换代时换 key 重建卡片，卡片从下方 24px 依次滑入，按网格列数错开起步。 */
+   JobListView 换代时换 key 重建卡片，卡片从下方 24px 依次滑入，按网格列数错开起步。 */
 .job-grid > .job-card {
   animation: list-roll-in 0.34s var(--ease-out) both;
 }
@@ -234,7 +233,7 @@
 /* ---------- 6. 抽屉展开 / 收起：同一套动画与时长 ----------
    四个抽屉（岗位详情 / 条件筛选 / 敏感库 / 底部批量条）共用 `.drawer-anim`（由
    src/lib_ui/pan.ts 挂）：展开由各抽屉的基础 transform 决定从哪边来，本段只补间到无位移；
-   收起时先挂 `.is-closing` 留一帧回程，过渡结束才真的关。 */
+   收起时先挂 .is-closing 留一帧回程，过渡结束才真的关。 */
 .drawer-anim,
 .drawer.drawer-anim {
   transition: transform var(--drawer-dur) var(--ease-out);
@@ -272,7 +271,7 @@
 }
 
 /* 左抽屉的「打开态」：`.is-open` 由 DashboardPage 的 `filterOpen` 直接驱动，
-   所以关闭那一帧就摘掉，位移回程立刻开播（不再等 `.is-closing`、不再排队）。 */
+   所以关闭那一帧就摘掉，位移回程立刻开播（不再等 .is-closing、不再排队）。 */
 .scrape-filter-bar.is-open {
   transform: none;
 }
@@ -309,7 +308,6 @@
   .drawer.is-open,
   .sensitive-panel.is-open,
   .drawer-backdrop,
-  .drawer-mask,
   .filter-backdrop,
   .sensitive-backdrop,
   .job-state,

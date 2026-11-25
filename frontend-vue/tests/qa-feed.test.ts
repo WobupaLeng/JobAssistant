@@ -27,7 +27,7 @@ function read(rel: string): string {
 describe('toFeedLine：ScrapeUpdate → 事件流行', () => {
   it('入库：行首 ✔，带分值与摘要', () => {
     const u: ScrapeUpdate = { kind: 'job', summary: '后端开发 · 某公司', accepted: true, score: 86 };
-    expect(toFeedLine(u)).toEqual({ tag: '✔', msg: '86 分 · 后端开发 · 某公司', tone: 'ok' });
+    expect(toFeedLine(u)).toMatchObject({ tag: '✔', msg: '86 分 · 后端开发 · 某公司', tone: 'ok' });
     expect(FEED_ACCEPTED_TAG).toBe('✔');
   });
 
@@ -38,8 +38,15 @@ describe('toFeedLine：ScrapeUpdate → 事件流行', () => {
 
   it('被规则跳过：行首「跳过」，tone=skip', () => {
     const u: ScrapeUpdate = { kind: 'job', summary: '外包公司', accepted: false, score: 0 };
-    expect(toFeedLine(u)).toEqual({ tag: '跳过', msg: '外包公司', tone: 'skip' });
+    expect(toFeedLine(u)).toMatchObject({ tag: '跳过', msg: '外包公司', tone: 'skip' });
     expect(FEED_SKIPPED_TAG).toBe('跳过');
+  });
+
+  it('补上接收时刻与单调序号（与运行日志混排用）', () => {
+    const u: ScrapeUpdate = { kind: 'job', summary: 'x', accepted: false, score: 0 };
+    const line = toFeedLine(u, 1_700_000_000_000, 42);
+    expect(line?.ts).toBe(1_700_000_000_000);
+    expect(line?.n).toBe(42);
   });
 
   it('非岗位事件不进事件流（日志/登录/畸形/退出/重启各有去处）', () => {
@@ -56,7 +63,7 @@ describe('toFeedLine：ScrapeUpdate → 事件流行', () => {
 
 describe('trimFeed：只留最后 FEED_MAX 行', () => {
   it('未超限原样返回（且是副本）', () => {
-    const lines = [{ tag: '✔', msg: 'a', tone: 'ok' as const }];
+    const lines = [{ ts: 1, n: 1, tag: '✔', msg: 'a', tone: 'ok' as const }];
     const out = trimFeed(lines);
     expect(out).toEqual(lines);
     expect(out).not.toBe(lines);
@@ -64,6 +71,8 @@ describe('trimFeed：只留最后 FEED_MAX 行', () => {
 
   it('超限从头部丢', () => {
     const lines = Array.from({ length: FEED_MAX + 5 }, (_, i) => ({
+      ts: i,
+      n: i,
       tag: '✔',
       msg: String(i),
       tone: 'ok' as const,
@@ -81,13 +90,13 @@ describe('接线：drain 真的被调用，渲染真的带 ✔', () => {
 
   it('页面运行中拉 scrape_drain(50)，并把结果转行', () => {
     expect(page).toContain('await scrapeDrain(50)');
-    expect(page).toContain('toFeedLine(u)');
+    expect(page).toContain('toFeedLine(u, Date.now(), feedN)');
     expect(page).toContain('if (progress.value.running) await drainFeed();');
   });
 
-  it('LogCard 渲染事件流并带 scrape-feed 锚点', () => {
+  it('LogCard 把事件行并进同一条时间线，并保留 scrape-feed 锚点', () => {
     expect(card).toContain('data-testid="scrape-feed"');
-    expect(card).toContain('line.tag');
+    expect(card).toContain('r.tag');
   });
 
   it('前端源码里不出现「已入库 0 条」这种伪造文案', () => {

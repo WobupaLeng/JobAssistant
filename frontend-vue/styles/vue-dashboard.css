@@ -290,7 +290,6 @@
   box-shadow: 0 0 0 1px var(--primary) inset, 0 0 14px -3px var(--primary);
 }
 
-/* 聊天联动：当前展开聊天的 Boss 所在公司的岗位，描边高亮（不改背景，避免与多选冲突）。 */
 /* 无限滚动哨兵：占一小段高度供 IntersectionObserver 观察，并显示「加载中」。 */
 .job-load-sentinel {
   /* 从网格行份额里脱身：它是网格的最后一个子项，
@@ -304,7 +303,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-soft);
+  color: var(--text-3);
   font-size: var(--fs-sm);
   pointer-events: none;
 }
@@ -624,7 +623,7 @@
   min-height: 220px;
 }
 
-/* （44×44 玻璃盒 + 内嵌 SVG，不是文本字符。 */
+/* （44×44 圆形底色 + 内嵌 SVG，不是文本字符。 */
 .state-glyph {
   width: 44px;
   height: 44px;
@@ -1200,7 +1199,7 @@ body {
 }
 
 .theme-panel .font-scale-btn.is-active {
-  /* 深浅通用：--primary 在浅色块里没有覆盖（仍是 #10b981），压在白玻璃上只有约 2.2:1。
+  /* 深浅通用：--primary 在浅色块里没有覆盖（仍是 #10b981），压在浅底上只有约 2.2:1。
    * --primary-text 是同一枚色的「作文字用」档（深 #6ee7b7 / 浅 #047857），行内选中态用它。 */
   color: var(--primary-text);
   background: var(--primary-soft);
@@ -1395,6 +1394,22 @@ body {
   overflow: hidden;
 }
 
+/* 卡头（含页签胶囊）不许被压缩：日志卡是定高 220px，卡体内容一多，flex 收缩会连带把卡头
+   压矮，页签胶囊就溢出到第一行日志上（用户：选项卡下半区域跟文字发生重叠）。
+   卡头锁住自身高度，压缩全部由卡体承担（min-height: 0 + overflow: hidden 已经兜住）。 */
+.log-card > .card-head {
+  flex: 0 0 auto;
+}
+
+/* 「上次抓取岗位」的岗位名可能很长，nowrap 又不许换行时会横向溢出、滑到页签胶囊底下被盖住。
+   允许收缩 + 省略号：超出卡头就截断，不再压到页签上。 */
+.log-card .card-sub {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .log-live {
   display: inline-flex;
   align-items: center;
@@ -1422,6 +1437,77 @@ body {
 
 /* （日志行区是卡体内的 flex 子项，靠 min-height:0 在自己内部滚，
    不另外设 max-height——日志卡已经定高 220px（），再叠一层 180px 就是二次限高， */
+/* 日志卡的筛选页签（用户 m01229 / m01321）：单选，默认「全部」= 运行日志与决策混排。
+   摆在卡头、紧在「决策记录」按钮左边；胶囊底与顶栏的分段控件同色系，但不复用
+   .segmented（那个带 order: -1，是顶栏专用）。 */
+.log-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-pill);
+  background: var(--surface-0);
+}
+
+.log-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+.log-tab:hover {
+  color: var(--text-2);
+  /* 级别色在下面统一接管字色：hover 只给底色反馈，不再靠改字色（否则会盖掉级别色） */
+  background: var(--surface-2);
+}
+
+.log-tab.is-active {
+  background: var(--primary-soft);
+  color: var(--text-1);
+}
+
+/* 每个页签带自己那一类行的级别色（与 .log-level 共用同一套令牌），
+   扫一眼就知道页签对应哪类日志。这几条必须写在 .is-active / :hover 之后：
+   选中与悬停时都保留级别色，只有「全部」回落到 text-1 / text-2。 */
+.log-tab[data-tab='error'] {
+  color: var(--bad-text);
+}
+
+.log-tab[data-tab='warn'] {
+  color: var(--warn-text);
+}
+
+.log-tab[data-tab='info'] {
+  color: var(--accent-text);
+}
+
+.log-tab[data-tab='decision'] {
+  color: var(--primary-text);
+}
+
+/* 日志行区外面的包裹层（`scrape-feed` 锚点）：它必须把卡体的剩余高度整段让给 .log-rows。
+   少了这层 flex 约束，.log-rows 的 height 变成 auto（内容多高就多高），
+   卡体 overflow: hidden 只裁不滚 → 看起来「一次性全加载、不能滚」（用户 m00513 实测）。 */
+.log-feed {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .log-rows {
   list-style: none;
   margin: 0;
@@ -1459,23 +1545,28 @@ body {
   background-clip: padding-box;
 }
 
+/* 三列定宽：时间 / 级别 / 正文。级别词长短不一（「WARN」「INFO」四个字母，
+   「决策」两个汉字），flex + auto 宽度会让正文起点逐行错开（用户 m01419 要求对齐）。
+   时间列写死 14ch：时间戳是「MM-DD HH:mm:ss」共 14 个字符位（tabular-nums 保证数字等宽，
+   破折号/冒号比数字窄，留出的余量正好）。写窄了 nowrap 的文本会压到级别列上（用户：重叠）。 */
 .log-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 14ch 3.6em minmax(0, 1fr);
+  column-gap: 8px;
   align-items: baseline;
-  gap: 8px;
   font-size: var(--fs-xs);
   color: var(--text-2);
   padding: 1px 0;
 }
 
 .log-time {
-  flex: 0 0 auto;
+  white-space: nowrap;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
 
 .log-level {
-  flex: 0 0 auto;
+  white-space: nowrap;
   font-size: var(--fs-2xs);
   font-weight: 700;
   letter-spacing: 0.4px;
@@ -1488,6 +1579,20 @@ body {
 
 .log-level.is-error {
   color: var(--bad-text);
+}
+
+/* 决策行的行为色调（`decisionTone`）：排除 bad / 入库 primary / 重算 accent。
+   「决策」这个级别词本身是中性色，别让它跟真正的错误红撞脸。 */
+.log-level.is-bad {
+  color: var(--bad-text);
+}
+
+.log-level.is-primary {
+  color: var(--primary-text);
+}
+
+.log-level.is-accent {
+  color: var(--warn-text);
 }
 
 .log-msg {

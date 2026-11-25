@@ -141,22 +141,10 @@ afterEach(() => {
 const dot = (w: { find: (s: string) => { attributes: (n: string) => string | undefined } }): string =>
   w.find('[data-testid="platform-boss-status"]').attributes('aria-label') ?? '';
 
-describe('PlatformCard: 保存 / 退出 / 扫码', () => {
-  it('已登录未保存：出现 platform-login-save-btn，点击 emit save', async () => {
-    const w = mount(PlatformCard, {
-      props: {
-        selected: 'boss',
-        login: { platform: 'boss', state: 'logged_in', running: true, message: '', saved: false },
-      },
-    });
-    const btn = w.find('[data-testid="platform-login-save-btn"]');
-    expect(btn.exists()).toBe(true);
-    await btn.trigger('click');
-    expect(w.emitted('save')).toHaveLength(1);
-    expect(w.find('[data-testid="platform-logout-btn"]').exists()).toBe(true);
-  });
-
-  it('已保存过：保存按钮收起，退出按钮仍在', () => {
+describe('PlatformCard: 登录 / 退出 / 扫码', () => {
+  // 三态互斥：未登录 → 「登录」；已登录 → 「退出」；扫码中 → 二维码。
+  // 登录标记由后端在登录成功时自动落库，界面上不再有「保存登录」。
+  it('已登录：只有退出按钮，既没有保存登录，也没有登录按钮', () => {
     const w = mount(PlatformCard, {
       props: {
         selected: 'boss',
@@ -165,6 +153,19 @@ describe('PlatformCard: 保存 / 退出 / 扫码', () => {
     });
     expect(w.find('[data-testid="platform-login-save-btn"]').exists()).toBe(false);
     expect(w.find('[data-testid="platform-logout-btn"]').exists()).toBe(true);
+    expect(w.find('[data-testid="platform-boss-login-btn"]').exists()).toBe(false);
+  });
+
+  it('未登录：只有登录按钮，没有退出也没有保存登录', () => {
+    const w = mount(PlatformCard, {
+      props: {
+        selected: 'boss',
+        login: { platform: 'boss', state: 'no_login', running: false, message: '', saved: false },
+      },
+    });
+    expect(w.find('[data-testid="platform-boss-login-btn"]').exists()).toBe(true);
+    expect(w.find('[data-testid="platform-logout-btn"]').exists()).toBe(false);
+    expect(w.find('[data-testid="platform-login-save-btn"]').exists()).toBe(false);
   });
 
   it('扫码中：resolve-scan-flag 出现且用到 data URI；非 waiting 态不出现', async () => {
@@ -243,15 +244,11 @@ describe('DashboardPage: login-state 订阅', () => {
     expect(fake.unlistenCount()).toBe(1);
   });
 
-  it('「保存登录」发 login_save（参数 { platform }）', async () => {
+  it('已登录不再渲染「保存登录」，也不发 login_save（标记由后端自动落库）', async () => {
     fake.setStatus({ state: 'logged_in', running: false, saved: false });
     const w = await mountDashboard();
-    const btn = w.find('[data-testid="platform-login-save-btn"]');
-    expect(btn.exists()).toBe(true);
-    await btn.trigger('click');
-    await flushPromises();
-    const save = fake.calls.find((c) => c.cmd === 'login_save');
-    expect(save?.args).toEqual({ platform: 'boss' });
+    expect(w.find('[data-testid="platform-login-save-btn"]').exists()).toBe(false);
+    expect(fake.calls.some((c) => c.cmd === 'login_save')).toBe(false);
     w.unmount();
   });
 

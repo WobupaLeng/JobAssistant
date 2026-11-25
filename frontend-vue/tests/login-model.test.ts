@@ -19,7 +19,6 @@ import {
   loginStatusFromEvent,
   logoutAction,
   mergeLoginState,
-  saveLoginAction,
   scanFlagVisible,
 } from '../src/lib_ui/login-model';
 import { loginDot } from '../src/lib_ui/platform-model';
@@ -172,38 +171,18 @@ describe('login-model: 徽标（与 platform-model.loginDot 同口径）', () =>
   });
 });
 
-describe('login-model: 保存登录 / 退出登录 / 扫码', () => {
-  it('保存登录：已登录且没存过才出现（testid 固定）', () => {
-    const a = saveLoginAction(status({ state: 'logged_in', saved: false }), false);
-    expect(a.visible).toBe(true);
-    expect(a.disabled).toBe(false);
-    expect(a.label).toBe('保存登录');
-    expect(a.testId).toBe('platform-login-save-btn');
-  });
-
-  it('已存过就不再给按钮（点了后端也只会回 false）', () => {
-    expect(saveLoginAction(status({ state: 'logged_in', saved: true }), false).visible).toBe(false);
-  });
-
-  it('未登录时没有保存按钮', () => {
-    expect(saveLoginAction(status({ state: 'no_login', running: false }), false).visible).toBe(
-      false,
-    );
-    expect(saveLoginAction(null, false).visible).toBe(false);
-  });
-
-  it('忙碌中按钮出现但禁用，文案变「保存中…」', () => {
-    const a = saveLoginAction(status({ state: 'logged_in', saved: false }), true);
-    expect(a.visible).toBe(true);
-    expect(a.disabled).toBe(true);
-    expect(a.label).toBe('保存中…');
-  });
-
-  it('退出登录：仅已登录时出现，忙碌时禁用', () => {
+describe('login-model: 退出登录 / 扫码', () => {
+  // 登录格三态互斥：未登录是「登录」按钮，已登录才换成红色「退出」，扫码中贴二维码。
+  // 登录标记由后端自动落库，界面不再有「保存登录」；`saved` 只剩徽标双态用途。
+  it('退出：只有已登录才出现（红按钮），未登录不出，忙碌时禁用', () => {
     const a = logoutAction(status({ state: 'logged_in' }), false);
     expect(a.visible).toBe(true);
     expect(a.testId).toBe('platform-logout-btn');
-    expect(a.label).toBe('退出登录');
+    expect(a.label).toBe('退出');
+    expect(a.btnClass).toContain('btn-danger');
+    // 浏览器未连接（unknown）按未登录算：那一格要显示「登录 / 重新连接浏览器」，
+    // 不能同时给出「退出」。
+    expect(logoutAction(status({ state: 'unknown', saved: true }), false).visible).toBe(false);
     expect(logoutAction(status({ state: 'logged_in' }), true).disabled).toBe(true);
     expect(logoutAction(status({ state: 'no_login', running: false }), false).visible).toBe(false);
     expect(logoutAction(null, false).visible).toBe(false);

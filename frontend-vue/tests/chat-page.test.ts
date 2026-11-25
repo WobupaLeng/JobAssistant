@@ -83,7 +83,12 @@ function fakeInvoke(cmd: string, payload?: unknown): Promise<unknown> {
       });
     case 'chat_send':
       return Promise.resolve({ text: '回执文本', job_id: null });
+    case 'greet_draft':
+      return Promise.resolve({ text: '您好，我想应聘后端岗', tokens: 0, source: 'rule', note: '' });
+    case 'greet_one':
+      return Promise.resolve('您好，我想应聘后端岗');
     case 'login_status':
+      if (loginError !== '') return Promise.reject(new Error(loginError));
       return Promise.resolve({ platform: 'boss', state: 'logged_in', saved: true, error: '' });
     default:
       return Promise.resolve(true);
@@ -97,6 +102,8 @@ let friendsOverride: Friend[] | null = null;
 let messagesOverride: unknown[] | null = null;
 /** 非空时 `chat_messages` 直接失败，用来验错误条的去处。 */
 let messagesError = '';
+/** 非空时 `login_status` 直接失败（真实后端在 sidecar 没起来时就是这么抛的）。 */
+let loginError = '';
 
 function messagesSeed(): unknown[] {
   return messagesOverride ?? [];
@@ -133,6 +140,7 @@ afterEach(() => {
   friendsOverride = null;
   messagesOverride = null;
   messagesError = '';
+  loginError = '';
   vi.restoreAllMocks();
 });
 
@@ -208,6 +216,42 @@ describe('提示条的语气与位置（用户 m01273）', () => {
     expect(w.find('[data-testid="chat-detach-hint"]').exists()).toBe(false);
     // 失败时列表上方也不能冒出「已是最新消息」。
     expect(w.find('[data-testid="chat-rail-fresh"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('浏览器没拉起来 ⇒ 只留「读取消息失败」那条，不再补一句「浏览器未连接」（用户 m00837）', async () => {
+    // 同一件事（sidecar 没起来）被两条通道各说一遍：心跳给泛泛的「请先登录」，
+    // 读消息给更具体的「先点开始抓取 / 扫码登录」。并排出现就是同一句话说两遍。
+    const noSession = 'sidecar 尚未启动。请先点「开始抓取」或「扫码登录」把浏览器拉起来，再打开 Boss 消息';
+    loginError = noSession;
+    messagesError = noSession;
+    const w = await mountPage();
+    await w.find('[data-testid="friend-u1"]').trigger('click');
+    await flushPromises();
+
+    const top = w.find('[data-testid="chat-note-detach"]');
+    expect(top.exists()).toBe(true);
+    // 只钉前缀：读消息失败那条可能被追加「重试」类后缀（见 `ChatPage.vue` 的 `RETRY_READ`），
+    // 本用例要守的是「不重复说同一件事」，不是文案全文。
+    expect(top.text().startsWith(`读取消息失败：${noSession}`)).toBe(true);
+    expect(w.find('[data-testid="auto-note-detach"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('打招呼也要带岗位 id：后端据此把岗位标进「已投递」（用户 m00935）', async () => {
+    // 不带 jobId 的招呼会「发出去了但岗位还在未投递里」——这条链路只能靠调用参数钉住。
+    const w = await mountPage({ friends: [friend('u1', { job_id: 'job-u1' })] });
+    await (w.vm as unknown as { greetFor: (uid: string) => Promise<void> }).greetFor('u1');
+    await flushPromises();
+    await w.find('[data-testid="chat-greet-send"]').trigger('click');
+    await flushPromises();
+
+    const call = calls.filter((c) => c.cmd === 'greet_one').pop();
+    expect(call?.payload).toEqual({
+      uid: 'u1',
+      text: '您好，我想应聘后端岗',
+      jobId: 'job-u1',
+    });
     w.unmount();
   });
 });

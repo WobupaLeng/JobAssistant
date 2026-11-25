@@ -17,6 +17,7 @@ import {
 } from '../lib_ui/sensitive-model';
 import { PAN_CLASS, playOpen, resetPanel } from '../lib_ui/pan';
 import { hasHigherOverlay } from '../lib_ui/overlay-stack';
+import { fmtDecisionTime } from '../lib_ui/logfmt';
 
 const props = withDefaults(
   defineProps<{
@@ -251,7 +252,11 @@ defineExpose({
             </div>
             <p class="sensitive-note" :class="{ 'is-rejected': r.kind === 'rejected' }">{{ r.reason ?? '—' }}</p>
             <div class="sensitive-card-foot">
-              <span class="sensitive-time">{{ r.location ?? '—' }}</span>
+              <span
+                class="sensitive-time"
+                :data-testid="`sensitive-time-${r.id}`"
+                :title="`写入时间 ${fmtDecisionTime(r.created_at)}`"
+              >{{ fmtDecisionTime(r.created_at) }}<template v-if="r.location"> · {{ r.location }}</template></span>
               <span class="spacer"></span>
               <button
                 class="btn btn-sm btn-ghost"

@@ -202,6 +202,16 @@ function ruleBlocks(css: string): { selector: string; body: string }[] {
   return out;
 }
 
+describe('日志卡：scrape-feed 包裹层不抢 .log-rows 的滚动高度', () => {
+  it('.log-feed 撑满卡体余高，且允许子项收缩（否则整块被裁、不能滚）', () => {
+    const block = ruleBlocks(read('styles/vue-dashboard.css')).find((r) => r.selector === '.log-feed');
+    expect(block?.body).toContain('display: flex');
+    expect(block?.body).toContain('flex: 1 1 auto');
+    expect(block?.body).toContain('min-height: 0');
+    expect(block?.body).toContain('overflow: hidden');
+  });
+});
+
 describe('归属：面板的自身几何与材质只有一个写者', () => {
   for (const [sel, owner] of Object.entries(PANEL_OWNER)) {
     it(`${sel} 的背景 / 磨砂只在 ${owner} 声明`, () => {

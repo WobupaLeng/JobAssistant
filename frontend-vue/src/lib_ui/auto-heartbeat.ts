@@ -37,6 +37,8 @@ export interface HeartbeatHooks {
   onSending(sending: boolean): void;
   /** 界面提示（登录失效、失败重试、已发出一条）。 */
   onNote(text: string): void;
+  /** 一条真的发出去了（带 `job_id`）：列表据此把那条先隐掉，等重拉再以后端为准。 */
+  onSent?(jobId: string): void;
 }
 
 export interface HeartbeatTimer {
@@ -228,6 +230,8 @@ export function startHeartbeat(hooks: HeartbeatHooks, maxFails = HEARTBEAT_MAX_F
         if (msg.trim() !== '') hooks.onNote(msg.trim());
       } else {
         hooks.onNote('自动投递已发出一条');
+        const sentId = String(reply.job_id ?? '').trim();
+        if (sentId !== '') hooks.onSent?.(sentId);
       }
     } catch (e) {
       if (alive) hooks.onNote(`发送招呼失败：${errText(e)}`);

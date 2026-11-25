@@ -1,9 +1,9 @@
-/* 仅补齐 Vue 版新增的类；其余全部来自 styles/ 的 11 份分域 CSS
+/* 仅补齐 Vue 版新增的类；其余全部来自 styles/ 的分域 CSS
    （顺序即层叠契约，见 styles/index.css 与 AGENTS.md C4）。
     */
 
 /* Vue 挂载点 #app 的高度重置（tokens.css 只认 #root）。不设 body 底色（C5）。
-   `overflow: hidden` 是硬要求：`.app-shell` 有 --win-corner-cut 内缩，任何后代多出 1px */
+   overflow: hidden 是硬要求：.app-shell 走窗口圆角，任何后代多出 1px 都会顶破外壳。 */
 html,
 body,
 #app {
@@ -12,7 +12,7 @@ body,
 }
 
 /* `#app` 是两行网格：页面行吃满剩余高度，浮层根（抽屉 / 模态框）那一行零高。
-   抽屉本身是 `position: fixed`，挂在这里就绕开了页面的 overflow 裁切。 */
+   抽屉本身是 position: fixed，挂在这里就绕开了页面的 overflow 裁切。 */
 #app {
   display: grid;
   grid-template-rows: minmax(0, 1fr) 0;
@@ -34,19 +34,17 @@ body,
   /* 顶部不留间距，内容区占满整个窗口：
    顶栏 46px 自带 0 14px 内边距，内容区顶边直接接在它下沿， */
   /* 内容区顶边接顶栏下沿，左右与底部各留 14px：窗口圆角需要这一圈呼吸位，
-     否则最下沿的卡片会被 `overflow: hidden` 裁在圆弧里。 */
+     否则最下沿的卡片会被 overflow: hidden 裁在圆弧里。 */
   padding: 0 14px 14px;
 }
 
 /* 整窗主题流光：颜色全部来自当前调色板的强调色令牌，不写死色值。
-   先给外壳铺一层很薄的中性染色（深色黑、浅色白），保证顶栏和内容区都没有裸露的中性灰；
+   先给外壳铺一层很薄的半透明中性底（深色黑、浅色白），不跟随主题色，保证顶栏和内容区都没有裸露的中性灰；
    再叠三块低透明度径向光斑与一条更慢的斜向高光，让底色缓慢流动。
    外壳本身不投影，卡片也不投影，边界只由 1px 高光边给出。 */
 .app-shell {
-  --surface-card: color-mix(in srgb, var(--primary) 6%, var(--surface-0));
-  background:
-    linear-gradient(var(--shell-tint), var(--shell-tint)),
-    var(--surface-0);
+  /* 半透明中性外壳底：桌面由系统窗口模糊透上来，不能再叠不透明 surface-0。 */
+  background: var(--shell-tint);
   /* 负 z-index 的伪元素要关在外壳自己的层叠上下文里，才不会盖住顶栏与卡片。 */
   position: relative;
   isolation: isolate;
@@ -60,9 +58,19 @@ body,
 }
 
 .chat-detach {
-  background:
-    linear-gradient(var(--shell-tint), var(--shell-tint)),
-    var(--surface-0);
+  /* 对话框是一层很薄的玻璃，不是第二块更白的面板：
+     只用 4% 文字色做极轻的压暗/提亮，叠在外壳磨砂上，避免比左侧内容区更白。 */
+  background: color-mix(in srgb, var(--text-1) 4%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.08);
+  backdrop-filter: blur(18px) saturate(1.08);
+}
+
+/* 浅色下不再给对话框单独开 backdrop-filter：
+   Tauri 透明窗 + WebView2 里，这层 backdrop 会合成到白色兜底面上，
+   表现为整块聊天区发白，反而把外壳的系统磨砂盖掉。磨砂交给窗口底层的 Haze。 */
+[data-theme='light'] .chat-detach {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .app-shell::before,
@@ -82,8 +90,8 @@ body,
     radial-gradient(48% 60% at 12% 12%, var(--primary) 0%, transparent 70%),
     radial-gradient(42% 50% at 88% 6%, var(--accent) 0%, transparent 72%),
     radial-gradient(60% 55% at 58% 100%, var(--primary-strong) 0%, transparent 75%);
-  /* 流光强度：当前为原强度的 50%（0.22 → 0.11）；外壳底由中性 --shell-tint 承担。 */
-  opacity: 0.11;
+  /* 流光强度：当前为原强度的 10%（0.22 → 0.022）；外壳底由中性 --shell-tint 承担。 */
+  opacity: 0.022;
   animation: content-aurora-drift 30s var(--ease-smooth) infinite alternate;
 }
 
@@ -94,7 +102,7 @@ body,
     var(--primary) 50%,
     transparent 62%
   );
-  opacity: 0.06;
+  opacity: 0.012;
   animation: content-aurora-sheen 24s linear infinite;
 }
 
@@ -236,8 +244,8 @@ body,
 /* ----------------------------------------------
    概览页：抓取筛选栏（本轮只接城市）
    
-   容器不设底色，玻璃与边框借 .card；这里只负责一条横排、可换行、不撑破。 */
-/* 主列（被压缩方）：原型 的 .dashboard 口径。
+   容器不设底色，底色与边框借 .card；这里只负责一条横排、可换行、不撑破。 */
+/* 主列（被压缩方）：沿用原型的 .dashboard 口径。
  * 内部仍是原来的块流（卡片自带外边距），这里只补「作为 flex 子项」的四件事：
  * 吃掉剩余宽、min-width:0（否则对话框展开时它不缩，会把右栏顶出窗口）、
  * 自己滚、以及原型那条 flex-basis 过渡（宽度过渡只走 flex，禁 translateX，硬约束 4）。 */
@@ -257,7 +265,6 @@ body,
 /* 纵向布局：抓取条 / 筛选栏 / 错误条定高，岗位列表吃剩余高度，
    决策日志卡定高吸底（高 220px，见 styles/vue-dashboard.css 的 .log-card）。 */
 .page-dashboard > .app-error,
-.page-dashboard > .app-notice,
 .page-dashboard > .scrape-card,
 .page-dashboard > .scrape-filter-bar {
   flex: 0 0 auto;
@@ -284,7 +291,7 @@ body,
 }
 
 /* 筛选抽屉「浮动」态：窗口级 fixed 抽屉，左 12px 贴住窗口边。
-   节点常驻 DOM，开合全靠 `.is-open` 补间——`v-show` 的 display 翻转会掐掉回程动画。 */
+   节点常驻 DOM，开合全靠 .is-open 补间——v-show 的 display 翻转会掐掉回程动画。 */
 .scrape-filter-bar.is-floating {
   position: fixed;
   top: 12px;

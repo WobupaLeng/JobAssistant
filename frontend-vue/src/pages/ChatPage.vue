@@ -32,7 +32,13 @@ import {
   toggleAction,
   type AutoPhase,
 } from '../lib_ui/auto-model';
-import { BROWSER_DETACHED_NOTE, startHeartbeat, type HeartbeatTimer } from '../lib_ui/auto-heartbeat';
+import {
+  BROWSER_DETACHED_NOTE,
+  NOT_LOGGED_IN_NOTE,
+  startHeartbeat,
+  type HeartbeatTimer,
+} from '../lib_ui/auto-heartbeat';
+import { markJobSent } from '../lib_ui/job-live';
 import {
   AI_DRAFT_FAIL_PREFIX,
   CHAT_RAIL_TITLE,
@@ -134,6 +140,21 @@ const bottomNote = computed(() => {
 });
 /** 「已是最新消息」要出现**两处**：Boss 列表最上方 + 消息流末尾，都是灰色居中。 */
 const freshNote = computed(() => (note.value === MESSAGES_FRESH_NOTE ? note.value : ''));
+/**
+ * 第二条提示（`autoNote`，心跳/自动投递写的）：与 `note` 说的是**同一件事**时不再重复。
+ *
+ * 典型现场（用户 m00837）：sidecar 没起来 → 心跳先写「浏览器未连接：请先登录」，
+ * 随后点开一条 Boss，读消息失败又把 `note` 写成「读取消息失败：sidecar 尚未启动。
+ * 请先点「开始抓取」或「扫码登录」…」。两句都是「浏览器没连上」，并排就是同一句话
+ * 说两遍；这里只留信息更全的那条（`note`），登录成功后两条照旧由 `onLoginState` 清掉。
+ */
+const extraNote = computed(() => {
+  const text = autoNote.value;
+  if (text === '') return '';
+  if (text === note.value) return '';
+  if (isSessionNote(text) && isSessionNote(note.value)) return '';
+  return text;
+});
 
 /**
  * 读取/建会话/发送失败时把 Playwright 原始文案换成一句「能照做」的话，
@@ -255,7 +276,7 @@ async function loadFriends(allowOpenSession = false): Promise<void> {
     }
     // 刷新不得改变展开态与选中：只把 activeFriend 的字段换成新的。
     // 顺序不变，不整体替换：远程行与现有行**按 uid 就地改写**，未变的行引用保持不变，
-    // 只有真正变更的字段才触发那一行的重渲染（用户报「点刷新卡住」的根因是整表重建）。
+    // 只有真正变更的字段才触发那一行的重渲染：整表重建会让刷新卡住。
     friends.value = mergeFriends(friends.value, reply.items);
     savePendingFriends(friends.value);
     if (reply.items.length === 0 && !friends.value.some(isPendingFriend)) note.value = FRIENDS_EMPTY_NOTE;
@@ -294,7 +315,7 @@ async function loadMessages(uid: string): Promise<void> {
   const friend = friends.value.find((f) => f.uid === uid) ?? null;
   // 判据只看「上次拉取成功时的 last_ts 与此刻是否相等」，与**此刻消息表是否为空无关**：
   // `pick()` 切换会话时会先清空 `messages`，再进来读缓存，那一刻必然是空的 ——
-  // 早先要求「length > 0」等于让这个跳过分支永远不成立（用户报：说好的跳过没生效）。
+  // 加「length > 0」会让这个跳过分支永远不成立。
   // 空表的正常路径由下面「本地缓存 >0 才渲染」与本函数末尾的远端请求兜住。
   if (messagesMemo.shouldSkip(uid, friend?.last_ts)) {
     note.value = MESSAGES_FRESH_NOTE;
@@ -305,7 +326,7 @@ async function loadMessages(uid: string): Promise<void> {
     const reply = await chatMessages(uid);
     if (ui.value.activeFriendsUid !== uid) return;
     // 远程结果**合并**而不是整体替换：按 msg_id 认同一行，乐观气泡原地保留。
-    // 浏览器抓取慢是事实，但界面不该为它闪一下（用户报「点 Boss 看对话卡住」）。
+    // 浏览器抓取慢是事实，但界面不该为它闪一下。
     messages.value = seedLocalMsgIds(mergeMessages(messages.value, reply.items), messages.value);
     feedUid.value = uid;
     // 只有成功拉取才记账：失败/空结果记账会让下次误判「已最新」而漏消息。
@@ -358,7 +379,7 @@ async function pick(uid: string): Promise<void> {
     // 再用真 uid 继续——占位行原地换掉。
     if (friend !== null && isPendingFriend(friend)) {
       // 建会话要真的去 Boss 上点「立即沟通」再等页面自己跳聊天页（实测 5–15 秒，最坏 ~80 秒）：
-      // 选中不能卡在这一步（用户 m00393）。先把占位行留在列表里、挂上「建立中」提示就返回，
+      // 选中不能卡在这一步。先把占位行留在列表里、挂上「建立中」提示就返回，
       // 用户可以接着点别的会话；真 uid 到了再回填这一行，人还停在这一行上就顺势进入。
       void ensureSession(friend).then((realUid) => {
         // 失败提示已由 `openSessionFor` 写好，占位行留着可以再点一次。
@@ -445,7 +466,7 @@ async function openSessionFor(friend: Friend): Promise<string> {
   }
   // 占位行原地换成真实会话：uid 变了，名字/公司沿用占位行（服务端还没回列表）。
   // `local_only`：`chat_open` 给的是聊天页地址里的加密 uid，与好友列表的数字 uid 不是一套，
-  // 不打标记的话下一次 `chat_friends` 合并会把这行整条删掉（用户 m00145：刚打招呼的 Boss 消失）。
+  // 不打标记的话下一次 `chat_friends` 合并会把这行整条删掉，刚打过招呼的 Boss 会消失。
   friends.value = friends.value.map((f) =>
     f.uid === friend.uid ? { ...f, uid: realUid, job_id: f.job_id ?? jobId, local_only: true } : f,
   );
@@ -565,8 +586,15 @@ async function sendGreet(): Promise<void> {
   const text = g.text.trim();
   if (text === '') return;
   sendingGreet.value = true;
+  // 岗位 id 两个来源：从概览页卡片打招呼时后端记在 `greetJob`（会话可能还是占位行，
+  // 身上没有 `job_id`），从聊天页对已有会话打招呼时用 `friend.job_id`。
+  const jobId =
+    greetJob.value !== null && greetJob.value.uid === friend.uid
+      ? greetJob.value.jobId
+      : (friend.job_id ?? null);
   try {
-    await greetOne(friend.uid, text);
+    // 带上岗位 id：后端发成功后顺带标「已投递」，否则这条岗位还留在未投递里。
+    await greetOne(friend.uid, text, jobId);
     messages.value = seedLocalMsgIds([
       ...messages.value,
       { sender: 'me', content: text, time: nowText(), msg_id: '', recalled: false },
@@ -582,6 +610,8 @@ async function sendGreet(): Promise<void> {
     }
     // 打招呼也是发消息：同样让那一行立刻显示 `[送达]`（否则只有右边对话有气泡）。
     bumpRow(friend.uid, text);
+    // 这次岗位标记已经用掉：之后再对同一 Boss 发消息不得重复标记。
+    if (jobId !== null) greetJob.value = null;
     note.value = GREET_SENT_NOTE;
   } catch (e) {
     note.value = `发送失败：${errText(e)}`;
@@ -876,12 +906,13 @@ async function onLoginState(payload: { platform?: string; state: string }): Prom
 }
 
 /**
- * 这条提示是不是「登录类」（未登录 / 浏览器未连接）。判据用文案前缀而不是错误码：
- * 引导语都是前端常量，登录成功后要成对清掉，但不能误伤其它错误。新增文案时加进
+ * 这条提示是不是「登录类」（未登录 / 浏览器未连接 / 浏览器未启动）。判据用文案前缀而不是
+ * 错误码：引导语都是前端常量，登录成功后要成对清掉，但不能误伤其它错误。新增文案时加进
  * `LOGIN_NOTE_PREFIXES`。
  */
 const LOGIN_NOTE_PREFIXES: readonly string[] = [
   '浏览器未连接',
+  '浏览器未启动',
   '未登录',
   '登录已失效',
 ];
@@ -899,6 +930,37 @@ function isSessionNote(text: string): boolean {
  * 「重开心跳」，表现为 `login_status` 刷屏。空串 = 还没收到过任何已知态。
  */
 let lastLoginState = '';
+
+/** 重试是否在跑：只挡重复点击，不锁其它交互。 */
+const checkingBrowser = ref(false);
+
+/**
+ * 只读一次登录态：不拉浏览器、不发起登录，纯粹确认「连上了没 / 登录还在不在」。
+ * 连上了就清掉登录类提示并让心跳重新开表；仍连不上就把原因写成最新的一句。
+ */
+async function retryBrowserCheck(): Promise<void> {
+  if (checkingBrowser.value) return;
+  checkingBrowser.value = true;
+  try {
+    const st = await loginStatus('boss').catch(() => ({ state: 'unknown', saved: false }));
+    const state = String(st.state ?? 'unknown');
+    if (isLoggedIn(state)) {
+      if (isSessionNote(note.value)) note.value = '';
+      if (isSessionNote(autoNote.value)) autoNote.value = '';
+      lastLoginState = state;
+      await beat?.start();
+      return;
+    }
+    autoNote.value = '';
+    note.value = state === 'unknown' && st.saved === true ? BROWSER_DETACHED_NOTE : NOT_LOGGED_IN_NOTE;
+  } finally {
+    checkingBrowser.value = false;
+  }
+}
+
+/** 只有「浏览器/登录」类提示才配重试：真错误各自有刷新路径。 */
+const noteNeedsCheck = computed(() => note.value !== '' && isSessionNote(note.value));
+const autoNoteNeedsCheck = computed(() => extraNote.value !== '' && isSessionNote(extraNote.value));
 
 async function subscribeLoginState(): Promise<void> {
   if (unlistenLogin !== null) return;
@@ -940,6 +1002,9 @@ onMounted(() => {
         autoSending.value = v;
       },
       onNote: onAutoNote,
+      onSent(jobId) {
+        markJobSent(jobId);
+      },
     });
     await beat.start();
     await subscribeLoginState();
@@ -1023,6 +1088,7 @@ defineExpose({
   topNote,
   bottomNote,
   freshNote,
+  extraNote,
   noteTone,
   friends,
   messages,
@@ -1089,15 +1155,34 @@ defineExpose({
          ChatDetach 收起时用 [hidden] 改成零宽盒（motion.css）而不是 display:none，不互斥时
          两份会落在同一屏上，看起来就是同一句提示出现了两次。 -->
     <template v-if="!ui.chatOpen">
-      <div v-if="note !== ''" class="cfg-hint chat-note" data-testid="chat-note">{{ note }}</div>
+      <div v-if="note !== ''" class="cfg-hint chat-note" data-testid="chat-note">
+        <span class="note-text">{{ note }}</span>
+        <button
+          v-if="noteNeedsCheck"
+          class="btn btn-sm btn-ghost chat-note-retry"
+          type="button"
+          data-testid="chat-note-retry"
+          title="只重新检查一次浏览器连接状态，不会重新登录"
+          :disabled="checkingBrowser"
+          @click="retryBrowserCheck"
+        >{{ checkingBrowser ? '检查中…' : '重试' }}</button>
+      </div>
       <!-- `onAutoNote` 会把同一句话同时写进 `note` 与 `autoNote`（那一行是给对话框
            #notices 与右栏共用一份来源），所以这里必须去重：内容相同时只留上面那条，
-           否则右栏会上下并排出现两条一模一样的提示。 -->
-      <div
-        v-if="autoNote !== '' && autoNote !== note"
-        class="cfg-hint chat-note"
-        data-testid="auto-note"
-      >{{ autoNote }}</div>
+           否则右栏会上下并排出现两条一模一样的提示。去重口径见 `extraNote`：
+           不只是「一模一样」，登录/连接类说同一件事的两句话也只留一条。 -->
+      <div v-if="extraNote !== ''" class="cfg-hint chat-note" data-testid="auto-note">
+        <span class="note-text">{{ extraNote }}</span>
+        <button
+          v-if="autoNoteNeedsCheck"
+          class="btn btn-sm btn-ghost chat-note-retry"
+          type="button"
+          data-testid="auto-note-retry"
+          title="只重新检查一次浏览器连接状态，不会重新登录"
+          :disabled="checkingBrowser"
+          @click="retryBrowserCheck"
+        >{{ checkingBrowser ? '检查中…' : '重试' }}</button>
+      </div>
     </template>
   </aside>
 
@@ -1173,9 +1258,31 @@ defineExpose({
       <template #notices>
         <!-- 顶部只挂真错误（红条）：右栏的 note / autoNote 在对话框展开时看不到，这里同源再渲染一份。
              灰色说明不占顶部，见下方 #footer。 -->
-        <div v-if="topNote !== '' || autoNote !== ''" class="detach-notes">
-          <div v-if="topNote !== ''" class="detach-note" data-testid="chat-note-detach">{{ topNote }}</div>
-          <div v-if="autoNote !== ''" class="detach-note" data-testid="auto-note-detach">{{ autoNote }}</div>
+        <div v-if="topNote !== '' || extraNote !== ''" class="detach-notes">
+          <div v-if="topNote !== ''" class="detach-note" data-testid="chat-note-detach">
+            <span class="note-text">{{ topNote }}</span>
+            <button
+              v-if="noteNeedsCheck"
+              class="btn btn-sm btn-ghost chat-note-retry"
+              type="button"
+              data-testid="chat-note-detach-retry"
+              title="只重新检查一次浏览器连接状态，不会重新登录"
+              :disabled="checkingBrowser"
+              @click="retryBrowserCheck"
+            >{{ checkingBrowser ? '检查中…' : '重试' }}</button>
+          </div>
+          <div v-if="extraNote !== ''" class="detach-note" data-testid="auto-note-detach">
+            <span class="note-text">{{ extraNote }}</span>
+            <button
+              v-if="autoNoteNeedsCheck"
+              class="btn btn-sm btn-ghost chat-note-retry"
+              type="button"
+              data-testid="auto-note-detach-retry"
+              title="只重新检查一次浏览器连接状态，不会重新登录"
+              :disabled="checkingBrowser"
+              @click="retryBrowserCheck"
+            >{{ checkingBrowser ? '检查中…' : '重试' }}</button>
+          </div>
         </div>
       </template>
       <template #footer>

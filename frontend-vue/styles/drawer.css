@@ -1,7 +1,7 @@
 /* 分域样式：岗位详情抽屉。形状、间距、字号照抄只读参考，颜色全部走 tokens.css 变量。 */
 
 /* 岗位详情抽屉的遮罩：铺满整屏的点击区，透明即可——面板自己带底色与投影。
-   少了它，`<aside class="drawer">` 就没有可点关闭的背景，看起来像「点了没反应」。 */
+   少了它，<aside class="drawer"> 就没有可点关闭的背景，看起来像「点了没反应」。 */
 .drawer-backdrop {
   position: fixed;
   inset: 0;
@@ -35,7 +35,7 @@
   border: 1px solid var(--hairline-strong);
   box-shadow: var(--shadow-pop);
   /* 进场时长与曲线由 motion.css 第 6 段统一：展开 / 收起同一时长、同一条曲线
-   （`.drawer-anim` 把 transform 补间到 none，`.is-closing` 补间回这里写的 24px）。 */
+   （.drawer-anim 把 transform 补间到 none，.is-closing 补间回这里写的 24px）。 */
   /* 收起态只剩位移，不再压透明度：透明度归 motion.css 第 6 段管，那里只做 transform
    * 补间，没有地方能把它补回来（实测症状＝面板全透明、只剩遮罩）。 */
   transform: translateX(24px);

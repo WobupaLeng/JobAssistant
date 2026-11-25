@@ -3,7 +3,15 @@
  * `localStorage` 读写。顺序不变：后端 `scrape_defaults` 优先，`applyBackend()` 返回 0 时
  * 才回落本地草稿。**不要**改 `DRAFT_KEY` 的名字——老版本写下的草稿要能被读出来。
  */
-import { DRAFT_KEY, decode, encode, type FilterDraft } from '../../lib_ui/scrape-filter-model';
+import {
+  DRAFT_KEY,
+  KEYWORDS_KEY,
+  decode,
+  decodeKeywords,
+  encode,
+  encodeKeywords,
+  type FilterDraft,
+} from '../../lib_ui/scrape-filter-model';
 
 interface StorageLike {
   getItem(key: string): string | null;
@@ -39,5 +47,29 @@ export function saveDraft(d: FilterDraft): void {
     s.setItem(DRAFT_KEY, encode(d));
   } catch {
     /* 忽略：本地草稿是兜底，不是权威 */
+  }
+}
+
+/**
+ * 读本地搜索关键词。关键词不进后端 `scrape_defaults`，只能本地存；坏数据按空表处理。
+ */
+export function loadKeywords(): string[] {
+  const s = storage();
+  if (!s) return [];
+  try {
+    return decodeKeywords(s.getItem(KEYWORDS_KEY));
+  } catch {
+    return [];
+  }
+}
+
+/** 写本地搜索关键词；失败静默，和草稿同一姿势。 */
+export function saveKeywords(list: readonly string[]): void {
+  const s = storage();
+  if (!s) return;
+  try {
+    s.setItem(KEYWORDS_KEY, encodeKeywords(list));
+  } catch {
+    /* 忽略：本地存储只是让 F5 之后还能看见，不是权威 */
   }
 }
