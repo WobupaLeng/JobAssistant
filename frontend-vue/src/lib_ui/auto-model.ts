@@ -1,18 +1,7 @@
 /**
- * 自动投递的纯逻辑。
- *
- * 自动投递状态机的行为口径。
- *
- * ## 节奏规则归属（不可改动）
- * 「下一条什么时候发」**完全由后端决定**（`core/domain/auto_greet.rs`：
- * 20 秒基准 ± 5 秒随机，下限 15 秒）。前端只做两件事：
- *
- * 1. 每秒读一次 `auto_greet_status()` 刷新倒计时文字；
- * 2. 当后端回执的 `next_at_ms` **已到期**时才调 `auto_greet_next()` 发一条。
- *
- * 前端**不得**自己算间隔、不得自己排下一次时刻——那会把反爬红线搬到
- * 一个可被最小化 / 刷新打断的定时器上。WebView 挂起时 `setTimeout` 不触发，
- * 循环自然停在 await 上，这是已知且接受的行为（C16 同族）。
+ * 自动投递的纯逻辑。「下一条什么时候发」**完全由后端决定**，前端只在 `next_at_ms`
+ * 到期时才调 `auto_greet_next()`，**不得**自己算间隔或排下一次时刻——那会把反爬红线搬到
+ * 一个可被最小化 / 刷新打断的定时器上。
  */
 import type { AutoNextReply, AutoStatusReply } from '../api/types';
 import { AUTO_TICK_MS } from './chat-model';
@@ -61,7 +50,7 @@ export function togglePressed(phase: AutoPhase): boolean {
   return phase === 'running' || phase === 'paused';
 }
 
-/** 状态标签文案（裁决 N：先读「现在处于什么状态」）。 */
+/** 状态标签文案：先读「现在处于什么状态」。 */
 export function stateLabel(phase: AutoPhase): string {
   if (phase === 'running') return '投递中';
   if (phase === 'paused') return '已暂停投递';
@@ -76,10 +65,8 @@ export function stateClass(phase: AutoPhase): string {
 }
 
 /**
- * 现在是否该调 `auto_greet_next`。
- *
- * 判据只有一条：后端说「在跑、没暂停」且 `next_at_ms` 已到期。
- * `next_at_ms === 0`（不在倒计时）一律不发——那是暂停 / 停止态。
+ * 现在是否该调 `auto_greet_next`：后端说「在跑、没暂停」且 `next_at_ms` 已到期。
+ * `next_at_ms === 0`（不在倒计时）一律不发。
  */
 export function shouldSend(nowMs: number, st: AutoStatusReply, sending: boolean): boolean {
   if (sending || st.paused || !st.running) return false;
@@ -97,10 +84,7 @@ export function secondsLeft(remainingMs: number): number {
 }
 
 /**
- * 状态细节行（原型的 `title` 提示，不占版面）。
- *
- * **必须始终含「已发 N 条」**：E2E 用正则认这一段，少了它
- * 「自动投递到底发了几条」在界面上就无从核对。
+ * 状态细节行（`title` 提示，不占版面）。**必须始终含「已发 N 条」**：E2E 用正则认这一段。
  */
 export function statusText(
   st: AutoStatusReply,
@@ -152,11 +136,8 @@ export function replyNote(r: AutoNextReply): string {
 }
 
 /**
- * 点主按钮该做什么（四个分支）。
- *
- * - idle / stopped → 先 `reset` 清零上一轮计数，再 `resume`；
- * - running → `pause('用户已暂停')`；
- * - paused → `resume`。
+ * 点主按钮该做什么：idle / stopped → 先 `reset` 清零计数再 `resume`；running → `pause`；
+ * paused → `resume`。
  */
 export type AutoAction = { kind: 'start' } | { kind: 'pause'; reason: string } | { kind: 'resume' };
 

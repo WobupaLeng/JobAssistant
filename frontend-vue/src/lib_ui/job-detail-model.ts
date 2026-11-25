@@ -1,12 +1,6 @@
 /**
- * 岗位详情抽屉的纯视图模型。
- *
- * 真源是后端 JD 字段口径与逐字文案 + 冻结原型
- * `prototypes/ui-v1/index.html` 的 `job-detail-*` 骨架（可测锚点）。
- * 两边冲突时**以原型为准的只有外壳**（testid / 头部 / 底部动作条），
- * 正文内容仍按 .rs：原型正文是占位串，.rs 才是真实字段。
- *
- * 这里只做"该显示什么"，不碰 DOM、不发命令。
+ * 岗位详情抽屉的纯视图模型。与原型冲突时**以原型为准的只有外壳**（testid / 头部 /
+ * 底部动作条），正文内容按后端字段口径（原型正文只是占位串）。不碰 DOM、不发命令。
  */
 import type { Job } from '../api/types';
 import type { ScoreTone } from './job';
@@ -190,18 +184,13 @@ export function needsJdFetch(job: Job): boolean {
 // ---------------------------------------------------------------- 单条动作
 
 /**
- * 详情抽屉底部的两个单条动作（原型 `job-detail-reject-btn` /
- * `job-detail-deliver-btn`，§16.4 裁决保留）。
- *
- * 「不投递」对已排除的岗位反向变成「撤销否决」——否则抽屉里会出现一个
- * 点了没反应的按钮（卡片与列表批量条同口径，用户裁决 m00874）。
+ * 详情抽屉底部的两个单条动作（原型 `job-detail-reject-btn` / `job-detail-deliver-btn`）。
+ * 「不投递」对已排除的岗位反向变成「撤销否决」，否则会出现点了没反应的按钮。
  */
 export type DetailAction = 'reject' | 'allow' | 'deliver';
 /**
- * 追溯型动作：`undo-deliver` 把「已投递」放回待投递（`unmark_delivered`）。
- *
- * 它与 `deliver` 成对出现在「已投递」页签上，语义是撤回而不是新增一种状态，
- * 所以单独列进 `DetailAction`，让按钮与页签一一对应。
+ * 追溯型动作：`undo-deliver` 把「已投递」放回待投递（`unmark_delivered`）。它与 `deliver`
+ * 成对出现在「已投递」页签上，语义是撤回而非新增状态。
  */
 export type DetailAct = DetailAction | 'undo-deliver';
 
@@ -214,19 +203,9 @@ export interface DetailActionMeta {
 }
 
 /**
- * 底部两颗动作按钮：**页签决定可做哪些事**（与列表批量条同一口径
- * `job-list-model.batchOps`）。
- *
- * - 未投递（pending）：不投递 / 标记已投递
- * - 不投递（rejected）：撤销否决（不出现投递类按钮）
- * - 已投递（delivered）：待投递（放回待投递列表本身，不出现不投递）
- *
- * 之所以要按页签裁，是因为抽屉里原本两张按钮恒在：在不投递页签点「标记已投递」
- * 会把一个被否决的岗位标成已投递，在已投递页签点「不投递」会让同一行既是
- * rejected 又是 delivered，列表与抽屉各显示一套状态。按钮跟随页签后，
- * 抽屉里能点的动作与当前列表能做的动作永远一致。
- *
- * 页签是第一判据；只有没给页签（单测直接调）时才退回看 `job.status`。
+ * 底部两颗动作按钮：**页签决定可做哪些事**（pending 是不投递 / 标记已投递，rejected 是撤销
+ * 否决，delivered 是放回待投递）。不按页签裁会让同一行既是 rejected 又是 delivered；没给页签
+ * （单测直接调）时才退回看 `job.status`。
  */
 export function detailActions(job: Job, tab?: string): readonly DetailActionMeta[] {
   const delivered = job.status === 'delivered';
@@ -263,7 +242,7 @@ export function rejectAction(job: Job): DetailActionMeta {
     ? {
         action: 'allow',
         testId: 'job-detail-allow-btn',
-        // 与列表批量条、卡片上的同一动作统一叫「撤销否决」（用户裁决 m00874）：
+        // 与列表批量条、卡片上的同一动作统一叫「撤销否决」：
         // 这个动作是把已否决的岗位放回待投递，不是「允许投递」再投一次。
         label: '撤销否决',
         btnClass: 'btn btn-sm btn-ghost',

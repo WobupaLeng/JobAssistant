@@ -1,16 +1,7 @@
 /**
  * 契约类型：与 `backend-tauri/src/commands_*.rs` 的结构体逐一对应。
- *
- * 这里的每个字段名都必须与 Rust 侧 serde 的输出**逐字一致（蛇形）**。
- * 只有 **`invoke` 的入参**用驼峰（AGENTS.md C3），DTO 不做任何大小写转换——
- * 后端 `#[serde(rename_all = "snake_case")]` 的 struct 甚至连入参都可能只认蛇形，
- * 转换层多一步就多一处静默失效。
- *
- * 与命令层对齐的修正（以 Rust 侧命令层为准，见 ARCH-003 §5.3）：
- * - `LlmStatus.key_hint` / `model` 是 `Option<String>` → `string | null`；
- * - `ScrapeProgress.last_log` / `last_title` / `finished_reason` 同为可空；
- * - `ScrapeUpdate` 的 `job.score` 是 `Option<u8>` → `number | null`；
- * - `AppConfigReply` **没有** `api_key` 字段（后端只回 `api_key_hint` 掩码）。
+ * 字段名必须与 Rust 侧 serde 输出**逐字一致（蛇形）**；只有 `invoke` 的入参用驼峰
+ * （AGENTS.md C3），DTO 不做任何大小写转换——多一层转换就多一处静默失效。
  */
 
 import type { Job } from '../lib_ui/job';
@@ -28,10 +19,7 @@ export interface AppInfo {
 }
 
 /**
- * `get_scoring_spec()` 的返回。
- *
- * **前端禁止硬编码满分与门槛**（AGENTS.md C10）：该常量历史上散落 5 处，
- * 漏改任一处会产生「门槛 60 分却筛出 6 分岗位」的静默错误。
+ * `get_scoring_spec()` 的返回。**前端禁止硬编码满分与门槛**（AGENTS.md C10），
  * 真实值必须来自本命令；`0 / 0` 只是拿到 spec 之前的占位。
  */
 export interface ScoringSpec {
@@ -40,14 +28,9 @@ export interface ScoringSpec {
 }
 
 /**
- * `list_jobs` 的参数。
- *
- * 页签 `tab` 一给，就覆盖 `status` + `include_rejected` + `rejected_only`：
- * 三个页签的语义互斥，拼在一起会得到「未投递里混着否决」这种看不懂的列表。
- *
- * 注意：命令层是 `list_jobs(state, args: ListJobsArgs)`，载荷要包一层 `args`；
- * 且**为 `undefined` 的字段必须被丢掉**（命令层 `Option<T>` 没有 `#[serde(default)]`，
- * 显式 `null` 会被判成缺 key，见 ARCH-003 §5.2），由 `api/invoke.ts` 的 `prune` 负责。
+ * `list_jobs` 的参数。页签 `tab` 一给就覆盖 `status` + `include_rejected` +
+ * `rejected_only`（三者语义互斥）。`undefined` 字段由 `api/invoke.ts` 的 `prune` 丢掉——
+ * 命令层 `Option<T>` 没有 `#[serde(default)]`，显式 `null` 会被判成缺 key。
  */
 export interface ListJobsArgs {
   /** 状态：`pending` / `delivered` / `rejected`（旧版 `listTab`） */
@@ -84,10 +67,8 @@ export interface LlmStatus {
 }
 
 /**
- * `score_job` / `passes_threshold` 的入参。
- *
- * 命令层 `ScoreArgs` 带 `#[serde(rename_all = "snake_case")]`，所以**键名一律蛇形**；
- * `useLlm` / `llmPrefilter` 两个驼峰写法由 `alias` 兜住，但不必依赖它。
+ * `score_job` / `passes_threshold` 的入参。命令层带 `rename_all = "snake_case"`，
+ * 所以**键名一律蛇形**；驼峰写法只靠 `alias` 兜住，不必依赖。
  */
 export interface ScoreArgs {
   company: string;
@@ -124,11 +105,8 @@ export interface ScrapeProgress {
 }
 
 /**
- * 抓取事件流的一帧（`scrape_drain` 的单条增量）。
- *
- * Rust 侧是 `#[serde(tag = "kind", rename_all = "snake_case")]` 的判别联合，
- * 判别值即 `kind` 字段的小写形式。`job.score` 是 `Option<u8>` →
- * 未打分 / 被否决的岗位给的是 `null`，不是 0。
+ * 抓取事件流的一帧（`scrape_drain` 的单条增量），Rust 侧是 `tag = "kind"` 的判别联合。
+ * `job.score` 是 `Option<u8>`：未打分 / 被否决的岗位给 `null`，不是 0。
  */
 export type ScrapeUpdate =
   | { kind: 'job'; summary: string; accepted: boolean; score: number | null }
@@ -158,9 +136,7 @@ export interface Friend {
   unread: number;
   avatar: string;
   /**
-   * 最后聊天时刻（毫秒）。列表排序与「库里是否更新」都只看它。
-   *
-   * DOM 兜底路径取不到时间，这时是 `null`（后端不落库、前端按「无时间」排最后）。
+   * 最后聊天时刻（毫秒），列表排序只看它。DOM 兜底路径取不到时间时为 `null`。
    */
   last_ts?: number | null;
   /**
@@ -170,14 +146,12 @@ export interface Friend {
   last_from_me?: boolean;
   /**
    * 我发的最后一条的送达态：`1` 已送达、`2` 已读。
-   * 对方发的消息恒为 `0`，前端不渲染任何状态词（用户 m01427）。
+   * 对方发的消息恒为 `0`，前端不渲染任何状态词。
    */
   last_status?: number;
   /**
-   * 这条会话对应的岗位 id（库里 `job_queue.job_id`，形如 `boss:xxx`）。
-   *
-   * 由后端从库里补上：Boss 返回的会话列表**不带**岗位 id，只有我们自己是哪条岗位来的
-   * 才知道。uid 失效（或列表这一刻没拉到）时靠它重新点「立即沟通」把会话接回来。
+   * 这条会话对应的岗位 id（库里 `job_queue.job_id`，形如 `boss:xxx`），由后端从库里补上。
+   * uid 失效时靠它重新点「立即沟通」把会话接回来。
    */
   job_id?: string | null;
 }
@@ -189,10 +163,8 @@ export interface ChatMessage {
   msg_id: string;
   recalled: boolean;
   /**
-   * 前端本地临时 id：只给**乐观气泡**（刚发出、后端还没给 msg_id）用。
-   *
-   * 没有它时列表 key / testid 只能退回数组下标，远程结果一到、下标错位就整表重 diff。
-   * 它由前端 `seedLocalMsgIds` 补，后端不认也不回传，故标「内部」。
+   * 前端本地临时 id，只给**乐观气泡**用：没有它时列表 key 只能退回数组下标，
+   * 远程结果一到就整表重 diff。由 `seedLocalMsgIds` 补，后端不认也不回传。
    */
   local_id?: string;
 }
@@ -257,8 +229,8 @@ export interface SensitiveRecord {
 }
 
 /**
- * 敏感库一页。`total` 是**按当前筛选条件**的总数，不是全库总数——
- * 抽屉标题「敏感库 N 条」与「已选中 M 条」用的就是它。
+ * 敏感库一页。`total` 是**按当前筛选条件**的总数，不是全库总数，
+ * 抽屉标题「敏感库 N 条」用的就是它。
  */
 export interface SensitivePage {
   items: SensitiveRecord[];
@@ -266,11 +238,8 @@ export interface SensitivePage {
 }
 
 /**
- * 抓取筛选面板的默认条件入参（`set_scrape_defaults` 的 `args`，14 项）。
- *
- * **只提交变化过的字段**：缺席的键在 Rust 侧是 `None`（= 不动），
- * 不会被空值覆盖。键名一律驼峰，对齐 `commands_config.rs` 的 `alias`。
- * 回读走 `get_app_config().scrape_defaults`。
+ * 抓取筛选面板的默认条件入参（`set_scrape_defaults` 的 `args`）。
+ * **只提交变化过的字段**：缺席的键在 Rust 侧是 `None`（= 不动）。键名一律驼峰。
  */
 export interface ScrapeDefaultsArgs {
   city?: string;
@@ -291,11 +260,8 @@ export interface ScrapeDefaultsArgs {
 }
 
 /**
- * `get_app_config()` 的返回，对齐 `commands_config::AppConfigReply`。
- *
- * **没有 `api_key` 字段**：密钥只落库、只以 `api_key_hint`（`****尾4位`）回传。
- * 保存时若用户没动密钥框，patch 里就不要带 `api_key`；带了掩码也会被后端
- * 识别并跳过（见 `commands_config::apply_patch`）。
+ * `get_app_config()` 的返回。**没有 `api_key` 字段**：密钥只落库，只以 `api_key_hint`
+ * 回传；保存时没动密钥框就别带 `api_key`，带了掩码也会被后端跳过。
  */
 export interface AppConfigReply {
   base_url: string;
@@ -328,9 +294,8 @@ export interface AppConfigReply {
   tokens_greet: number;
   tokens_score: number;
   /**
-   * 抓取筛选面板上次用过的条件（`scrape_defaults.*` 聚合，14 项）。
-   * 一个都没配过时是 `{}`，**不是 `null`**；缺省字段时可能是 `null`，
-   * 所以读取方一律走「当对象展开，非对象就当空」，不要直接点属性。
+   * 抓取筛选面板上次用过的条件。一个都没配过时是 `{}`，但缺省字段时可能是 `null`，
+   * 所以读取方一律「当对象展开，非对象就当空」，不要直接点属性。
    */
   scrape_defaults: Record<string, unknown> | null;
 }
@@ -358,10 +323,8 @@ export interface LimitReply {
 }
 
 /**
- * `list_decisions()` 的一行，对齐 `core::domain::store_ports::DecisionRecord`。
- *
- * `old_score` / `new_score` 是后加的补列：更早的行两列为 `null`，
- * 界面按「无分数变化」渲染（不要显示 `0 → 0`）。
+ * `list_decisions()` 的一行。`old_score` / `new_score` 是后加的补列，更早的行两列为
+ * `null`，界面按「无分数变化」渲染（不要显示 `0 → 0`）。
  */
 export interface DecisionRecord {
   id: number;
@@ -387,11 +350,8 @@ export interface LogRow {
 }
 
 /**
- * `list_logs(since)` 的返回：条目 + **本次游标**。
- *
- * 调用方必须把 `now` 存下来，下次带 `since = now`；
- * 否则每次都会把整段历史重新拉一遍。后端按 `>=` 比较（闭区间），
- * 游标那一毫秒的条目会重送一次，由界面多重集去重消化。
+ * `list_logs(since)` 的返回：条目 + **本次游标**。调用方必须存下 `now` 并在下次作为
+ * `since`；后端按 `>=` 比较（闭区间），游标那一毫秒会重送一次，由界面多重集去重消化。
  */
 export interface LogsReply {
   items: LogRow[];
@@ -459,10 +419,8 @@ export interface RemoveReply {
 }
 
 /**
- * 自动投递：一次 `auto_greet_next` 的结果。
- *
- * 后端是**无定时器的状态机**：每调一次最多发一条，回执里带 `next_at_ms`，
- * 前端据此安排下一次调用（节奏与随机间隔属业务规则，在前端**不得**自己算）。
+ * 自动投递：一次 `auto_greet_next` 的结果。后端是**无定时器的状态机**，每调一次最多
+ * 发一条，前端按回执里的 `next_at_ms` 安排下一次（节奏属业务规则，前端**不得**自己算）。
  */
 export interface AutoNextReply {
   /** 本次是否真的发出去了 */
@@ -502,11 +460,8 @@ export interface AutoStatusReply {
 }
 
 /**
- * `rescore_jobs` 的参数。
- *
- * 分页由调用方驱动：后端一次只处理 `limit` 条并回 `next_cursor`，
- * 调用方必须循环到 `has_more === false`。`after_job_id` 为 `null` 表示从头开始，
- * 且这个 `null` 必须**真的发出去**（不 prune），否则会与「缺 key」混淆。
+ * `rescore_jobs` 的参数。后端一次只处理 `limit` 条并回 `next_cursor`，调用方必须循环到
+ * `has_more === false`。`after_job_id` 的 `null` 表示从头开始，且必须**真的发出去**（不 prune）。
  */
 export interface RescoreArgs {
   after_job_id?: string | null;

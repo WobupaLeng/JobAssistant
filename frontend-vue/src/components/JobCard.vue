@@ -1,16 +1,8 @@
 <script setup lang="ts">
 /**
- * 单张岗位卡（SPEC §16.4/§16.5 裁决 T/V/W2 的五行卡 + 打招呼方块）。
- *
- * 组件只做展示与事件转出，判定逻辑全在 `features/jobs/list-model.ts`：
- * 卡片在 `.job-grid` 里的位置由父级决定，`selected` / `selecting` 由父级下发。
- *
- * 为什么 check 绑 `@click.stop`：多选态下点勾选框只想改勾选，不该触发
- * 卡片单击（那会变成"再切一次"，两次结果互相抵消）。
- *
- * 长按（≥500ms）进入多选：判定与状态机全在 `lib_ui/longpress.ts`，这里只负责
- * 「按住起表 / 松开撤表」并把到期事件转出。计时器只在按下的这张卡上活着，
- * 指针离开或抖动超 8px 立刻撤销（用户是在滚动列表，不是要选）。
+ * 单张岗位卡（五行卡 + 打招呼方块）。只做展示与事件转出，判定全在
+ * `features/jobs/list-model.ts`；勾选框绑 `@click.stop`，多选态下点它不该触发卡片单击。
+ * 长按（≥500ms）的状态机在 `lib_ui/longpress.ts`，这里只管起表 / 撤表并转出到期事件。
  */
 import { computed, onBeforeUnmount } from 'vue';
 import {
@@ -20,6 +12,7 @@ import {
   movedBeyond,
   type TimerHandle,
 } from '../lib_ui/longpress';
+import type { Job } from '../api/types';
 import type { CardView } from '../lib_ui/job-list-model';
 import type { ListTab } from '../lib_ui/job-list-model';
 
@@ -47,7 +40,8 @@ const emit = defineEmits<{
   (e: 'allow', jobId: string): void;
   /** 已投递列表里的反向动作：取消投递标记（回到「未投递」列表）。 */
   (e: 'undeliver', jobId: string): void;
-  (e: 'open', jobId: string): void;
+  /** 打开详情：整条岗位随事件交出去，父级不回列表里反查（分页窗口里可能已没有它）。 */
+  (e: 'open', job: Job): void;
   /** 长按到点：进入多选并勾上这张卡。 */
   (e: 'longpress', jobId: string): void;
 }>();
@@ -77,7 +71,7 @@ const scoreLevelClass = computed(() => {
 });
 
 function onOpen(): void {
-  emit('open', props.view.jobId);
+  emit('open', props.view.job);
 }
 
 /** 从按下到长按到点之间一直存活的撤销句柄；null 表示当前没有按着。 */
@@ -98,7 +92,8 @@ function onPointerDown(ev: PointerEvent): void {
   const target = ev.target as HTMLElement | null;
   const interactive = target?.closest?.(interactiveSelector()) ?? null;
   if (ignorePointerTarget(target?.tagName ?? '', interactive !== null)) return;
-  cancelPress();
+  pressTimer?.cancel();
+  pressTimer = null;
   longPressed = false;
   pressOrigin = { x: ev.clientX, y: ev.clientY };
   pressTimer = armLongPress(() => {
@@ -110,14 +105,21 @@ function onPointerDown(ev: PointerEvent): void {
 
 function onPointerMove(ev: PointerEvent): void {
   if (!pressTimer) return;
-  if (movedBeyond(pressOrigin, { x: ev.clientX, y: ev.clientY })) cancelPress();
+  if (movedBeyond(pressOrigin, { x: ev.clientX, y: ev.clientY })) {
+    pressTimer.cancel();
+    pressTimer = null;
+  }
+}
+
+/** 抬起：定时器作废；长按到点过的这次按下，尾巴上的 click 会被吞掉。 */
+function onPointerUp(): void {
+  pressTimer?.cancel();
+  pressTimer = null;
 }
 
 /**
- * 单击：多选期间只切勾选，不弹详情（父级按 `selecting` 决定，这里不重复判断）。
- *
- * 长按刚触发时浏览器仍会补一个 click，那个 click 必须吞掉——否则「长按进入多选」
- * 会立刻被自己的尾巴当成「点一下再取消勾选」，勾选状态一闪即空。
+ * 单击：多选期间只切勾选，不弹详情（父级按 `selecting` 决定）。长按刚触发时浏览器仍会补
+ * 一个 click，必须吞掉——否则勾选状态一闪即空。
  */
 function onClick(): void {
   if (longPressed) {
@@ -145,7 +147,7 @@ onBeforeUnmount(cancelPress);
     :data-card="view.jobId"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
-    @pointerup="cancelPress"
+    @pointerup="onPointerUp"
     @pointerleave="cancelPress"
     @pointercancel="cancelPress"
     @click="onClick"

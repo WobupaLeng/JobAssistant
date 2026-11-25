@@ -1,18 +1,13 @@
 /* 分域样式：投递列表（页签 / 排序 / 批量条 / 三列卡片网格）与分数着色。 */
 
-/* ================================================================
- * 一、投递列表：页签行
- *
- * 三个药丸（未投递 / 已投递 / 不投递）+ 一个「查看全部」开关 + 右侧排序。
- * 药丸是「互斥的视图选择」，开关是「跨视图的补充条件」，两者视觉层级不同：
- * 药丸实心、开关只是一行小字，避免用户把它们当成同一组单选。
- * ================================================================ */
+/* ---------- 一、页签行 ---------- */
 
 .job-tabs-row {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  flex: 0 0 auto;
 }
 
 .job-tabs {
@@ -21,69 +16,16 @@
   gap: 4px;
 }
 
-.job-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 22px;
-  padding: 0 9px;
-  font-size: var(--fs-xs);
-  font-weight: 520;
-  color: var(--text-2);
-  background: var(--glass-input);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-pill);
-  cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out);
-}
-
-.job-tab:hover {
-  color: var(--text-1);
-  border-color: var(--hairline-strong);
-}
-
-/* 选中态用实心主色：旧版待投递是绿色药丸，这里统一走 --primary，
- * 深浅两套主题各自给 --primary 定过色，所以不能写死某一个绿。 */
+/* 选中态用实心主色：深浅两套主题各自给 --primary 定过色，不能写死某一个绿。 */
 .job-tab.is-active {
   color: var(--text-1);
   background: var(--primary-soft);
   border-color: var(--primary);
 }
 
-.job-tab-count {
-  font-size: var(--fs-2xs);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-3);
-}
-
 .job-tab.is-active .job-tab-count {
-  /* 计数是文字：--primary 的绿在白玻璃上只有约 2.2:1，浅色主题几乎读不出。
-   * 同色族的文字档 --primary-text（深 #6ee7b7 / 浅 #047857）两套都够对比。 */
+  /* 计数是文字：--primary 在白玻璃上只有约 2.2:1，文字档 --primary-text 才有对比。 */
   color: var(--primary-text);
-}
-
-/* 「查看全部」开关：故意与药丸拉开距离（margin-left），
- * 让人一眼看出它不是第四个页签。 */
-.job-all-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 6px;
-  font-size: var(--fs-2xs);
-  color: var(--text-3);
-  cursor: pointer;
-  user-select: none;
-}
-
-.job-all-toggle input {
-  margin: 0;
-  cursor: pointer;
-}
-
-.job-all-toggle:hover {
-  color: var(--text-2);
 }
 
 /* ---------- 排序 ---------- */
@@ -91,28 +33,6 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
-}
-
-.job-sort-label {
-  margin-right: 4px;
-  font-size: var(--fs-2xs);
-}
-
-.job-sort {
-  padding: 2px 6px;
-  font-size: var(--fs-2xs);
-  color: var(--text-3);
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
-}
-
-.job-sort:hover {
-  color: var(--text-1);
-  background: var(--glass-input);
 }
 
 .job-sort.is-active {
@@ -129,11 +49,10 @@
   color: var(--primary);
 }
 
-/* ================================================================
- * 二、批量条
- * ================================================================ */
+/* ---------- 二、批量条 ---------- */
 
 .job-batch {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -142,113 +61,31 @@
   font-size: var(--fs-xs);
 }
 
-.job-batch-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--text-2);
-  cursor: pointer;
-  user-select: none;
-}
-
-.job-batch-check input {
-  margin: 0;
-  cursor: pointer;
-}
-
 .job-selected,
 .job-total {
   font-variant-numeric: tabular-nums;
 }
 
-.job-batch-hint {
-  font-size: var(--fs-2xs);
-}
-
-/* ================================================================
- * 三、卡片网格（旧版图 2）
- *
- * 旧版用的是 CSS 多列（`column-count: 3`），卡片按列从上往下排、高度不齐时
- * 列高会像砖墙一样错落。这里保留同样的观感（列数 + 6px 列距 + 卡片下边距），
- * 但用 grid 实现：grid 的行内对齐更可预测，且 `align-items: start` 就能让
- * 每张卡片只占自己那一行的高度，不需要 `break-inside: avoid` 那种补丁。
- * ================================================================ */
+/* ---------- 三、卡片网格 ---------- */
 
 .job-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  /* 间距与内边距的唯一真源在 vue-dashboard.css 的 `.job-grid`（14px 与窗口左右留白
-   * 同档）。本文件排在 vue-dashboard.css 之前、同优先级旧规则会沿用前值，所以这里
-   * 不再写 gap —— 否则卡片之间/贴边只剩 6px。 */
-  min-width: 0;
-}
-
-/* ---------- 投递列表撑满剩余空间 ----------
- * 用户裁决「投递列表默认撑满下发的空间」：卡片占满概览页剩余高度，
- * 页签行 / 批处理行固定在上方，只有卡片网格自己滚。
- *
- * 用 flex 逐级传递 `min-height: 0`：任何一层漏掉，`flex: 1` 的子项都会被
- * 内容高度顶开，滚动条就跑到页面外层去了（表现为「撑满」不生效）。 */
-.job-body.is-fill {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex: 1 1 auto;
-}
-
-.job-body.is-fill > .job-tabs-row,
-.job-body.is-fill > .job-batch {
-  flex: 0 0 auto;
-}
-
-.job-body.is-fill > .job-grid {
   flex: 1 1 auto;
   min-height: 120px;
   overflow-y: auto;
-  /* 行高交给 .job-grid 本体（`minmax(--job-card-h, 1fr)` 三等分，用户 m03518）。
-   * 这里若再写一次 `grid-template-rows` 会整条覆盖掉：早先那句把下限换成
-   * `--job-card-content-h`、再把隐式行写成 `auto`，结果是隐式行不再等分，
-   * 第 4 行起高度塌回内容高。所以本块只保留滚动与内边，不重复声明行高。 */
-  /* 滚动条贴着网格内边，不压住卡片右边缘的描边（14px 网格内边距 − 10px＝4px）。
-   * 用 margin 而不是 padding：padding 会覆盖掉 .job-grid 的上下 10px 留白，
-   * 卡片就又贴住列表卡头与窗口底边。 */
-  margin-right: 10px;
-  /* 网格本身不再是「内容高度即全部」：多出来的部分在这里滚 */
-  align-content: stretch;
-  scrollbar-gutter: stable;
-  /* 行高下限随卡片内边距一起增大时，网格自己的上下留白也同步让位，否则三行
-   * 「刚好撑满」的预算会被这 10 + 14px 内边距挤掉，第三行又被推到可视区外。 */
-  box-sizing: border-box;
-}
-
-/* 卡片的骨架与空态都横跨整行，撑满时它们应居中而不是贴在顶部 */
-.job-body.is-fill > .job-grid > .empty-state {
-  align-self: center;
-  margin: auto 0;
-}
-
-/* 骨架与空态要横跨整行，否则会缩成三分之一宽的一条 */
-.job-grid > .empty-state,
-.job-grid.is-skeleton > .job-card {
-  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* 间距与内边距的唯一真源在 vue-dashboard.css 的 `.job-grid`（14px 与窗口左右留白
+   同档）。本文件排在 vue-dashboard.css 之前、同优先级旧规则会沿用前值，所以这里 */
+  min-width: 0;
 }
 
 .job-card {
-  /* 卡片本体的布局与外观唯一真源在 vue-dashboard.css 的 `.job-card`（两列信息区、
-   * 内边距、行距、flex 方向）。这里只补 jobs.css 独有的内高光。 */
-  /* 高光环必须落在圆角上：列表卡用的是 --radius-sm（10px），但它比描边半径小得多，
-   * 高光绕过四角时几乎看不出弯，视觉上像直角。统一抬到 --radius。 */
+  /* 卡片的布局与外观唯一真源是 vue-dashboard.css 的 `.job-card`；这里只抬高圆角：
+   * 光带要沿圆角走，--radius-sm 太小，四角几乎看不出弯。 */
   border-radius: var(--radius);
 }
 
-
-/* 已投递 / 不投递的状态表达以页签（tone-*）为准：卡片没有边框，颜色只出现在
- * 光带上，真源是 vue-dashboard.css 的 .job-card.tone-delivered / .job-card.tone-rejected
- * （覆写 --spec-* 光带令牌）。
- *
- * JobCard.vue 还会按岗位状态挂 is-delivered / is-rejected（详情或后续筛选可能用到），
- * 那条路径没有页签名，这里补同样的语义色，免得「状态已投递但光带还是白的」。
- * 两组选择器都只改光带令牌，不恢复描边。 */
+/* 已投递 / 不投递的光带色（tone-* 的真源同在内嵌网格一侧）。 */
 .job-card.is-delivered {
   --spec-peak: var(--good);
   --spec-top: color-mix(in srgb, var(--good) 62%, transparent);
@@ -272,203 +109,6 @@
 }
 
 
-/* ---------- 卡片内部的行 ---------- */
-.jc-line {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-}
-
-/* 分数方块：旧版 `w-7`（28px）见方、加粗居中，是卡片里唯一的高饱和色块，
- * 用来让用户扫视时先看到「这条值不值得点」。
- * 着色档位由 Rust 的 `score_tier` 按**满分比例**算出（80%/60%/40%），
- * 这里只负责把档位翻译成颜色，不做任何数值判断。 */
-.jc-score {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 20px;
-  border-radius: 6px;
-  font-size: var(--fs-2xs);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-1);
-  background: var(--glass-input);
-  border: 1px solid var(--hairline);
-}
-
-.jc-score.is-high {
-  color: #04170f;
-  background: var(--primary);
-  border-color: var(--primary-strong);
-}
-
-.jc-score.is-mid {
-  color: var(--primary);
-  background: var(--primary-soft);
-  border-color: var(--primary);
-}
-
-.jc-score.is-low {
-  color: var(--warn);
-  background: var(--warn-soft);
-  border-color: var(--warn);
-}
-
-.jc-score.is-bad {
-  color: var(--bad);
-  background: var(--bad-soft);
-  border-color: var(--bad);
-}
-
-/* 未打分 / 已投递：退成灰底，不再抢视线 */
-.jc-score.is-none,
-.jc-score.is-done {
-  color: var(--text-3);
-  background: var(--glass-input);
-  border-color: var(--hairline);
-}
-
-.jc-title {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--fs-sm);
-  font-weight: 560;
-  color: var(--text-1);
-}
-
-/* 已投递的标题划掉：一眼区分「已经投过了」，不用读状态 chip */
-.jc-title.is-done {
-  color: var(--text-3);
-  text-decoration: line-through;
-  text-decoration-color: var(--text-3);
-}
-
-/* 勾选 / 已投递按钮：平时是灰圈，已投递变实心绿 */
-.jc-check {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  font-size: var(--fs-2xs);
-  line-height: 1;
-  color: transparent;
-  background: transparent;
-  border: 1px solid var(--hairline-strong);
-  border-radius: 5px;
-  cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out);
-}
-
-.jc-check:hover {
-  color: var(--primary);
-  border-color: var(--primary);
-}
-
-.jc-check.is-on {
-  color: var(--text-1);
-  background: var(--primary);
-  border-color: var(--primary);
-}
-
-.jc-sub {
-  font-size: var(--fs-2xs);
-}
-
-.jc-company {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 45%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-2);
-}
-
-/* 薪资是卡片里第二重要的信息：加粗、用正文色 */
-.jc-salary {
-  flex: 0 0 auto;
-  font-size: var(--fs-xs);
-  font-weight: 640;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-1);
-}
-
-/* 平台与状态 chip 在卡片里要更小：卡片只有 1/3 屏宽，
- * 20px 的 chip 会把公司名挤没 */
-.jc-sub .chip {
-  height: 16px;
-  padding: 0 5px;
-  font-size: var(--fs-2xs);
-}
-
-.jc-meta {
-  font-size: var(--fs-2xs);
-  color: var(--text-3);
-}
-
-/* 元信息用中点分隔，比竖线更轻；不用 border-left 是为了让折行时不出现孤立竖线 */
-.jc-meta-items {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.jc-meta-item + .jc-meta-item::before {
-  content: "｜";
-  margin: 0 3px;
-  color: var(--hairline-strong);
-}
-
-.jc-time {
-  flex: 0 0 auto;
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-}
-
-.jc-foot {
-  font-size: var(--fs-2xs);
-  color: var(--text-3);
-}
-
-.jc-hint {
-  flex: 0 0 auto;
-}
-
-.jc-foot .chip.as-btn {
-  height: 16px;
-  padding: 0 6px;
-  font-size: var(--fs-2xs);
-}
-
-/* 地址是卡片里最长的自由文本：给它左弹性 + 省略号，
- * 且不让它把「不投递」按钮挤到换行。 */
-.jc-addr {
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: 52%;
-  margin-left: auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
-}
-
-.jc-pin {
-  margin-right: 2px;
-}
-
 /* 窄窗降成两列 / 一列：三列在 900px 以下每张卡只剩 ~280px，
  * 公司名与地址会全被省略号吃掉。 */
 @media (max-width: 1180px) {
@@ -483,22 +123,6 @@
   }
 }
 
-/* ================================================================
- * 四、表格（保留给兼容表与其它页使用）
- * ================================================================ */
-
-/* ---------- 表格容器 ----------
- * `max-height` + overflow: 表头 sticky 才能生效。
- * 表格用 `table-layout: fixed` 防止长公司名把整列撑开（列宽由 col 定义）。 */
-.table-wrap {
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--hairline);
-  background: var(--glass-0);
-  overflow: auto;
-  max-height: 420px;
-  position: relative;
-}
-
 .table {
   width: 100%;
   border-collapse: separate;
@@ -508,8 +132,7 @@
 }
 
 /* ---------- 表头 ----------
- * sticky 表头必须不透明（或足够糊），否则滚动时会看到文字互相穿透。
- * 这里用 glass-2 + blur，既挡住下面又保留玻璃质感。 */
+   sticky 表头必须不透明（或足够糊），否则滚动时会看到文字互相穿透。 */
 .table thead th {
   position: sticky;
   top: 0;
@@ -551,41 +174,13 @@
   background: var(--primary-soft);
 }
 
-.table tbody tr.is-rejected td {
-  opacity: 0.72;
-}
-
 .table tbody tr {
   cursor: pointer;
 }
 
-/* ---------- 列宽 ----------
- * 分数固定窄列（数字恒定 2-3 位），岗位占最大权重，来源最短。 */
-.col-score {
-  width: 62px;
-  text-align: center !important;
+.table tbody tr.is-rejected td {
+  opacity: 0.72;
 }
-
-.col-source {
-  width: 76px;
-  text-align: right !important;
-}
-
-.cell-title {
-  color: var(--text-1);
-  font-weight: 560;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 通用省略：必须配 title 属性，否则长公司名截断后无从查看 */
-.cell-ellipsis {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* 选中行左侧的绿色标尺（旧版 `box-shadow: inset 3px 0 0 var(--primary)`）：
  * 抽屉打开时，左侧列表里「看的是哪一条」要一眼可见。 */
 .table tbody tr.is-selected td:first-child {
@@ -599,7 +194,7 @@
 }
 
 /* 空态单元格：旧版 `.empty { padding: 36px 20px; text-align: center }`，
- * 比 layout.css 里给 `.empty-state` 的 18px 更松，因为它是整张表里的唯一内容。 */
+ * 比 layout.css 里给 */
 .table tbody td.empty {
   padding: 36px 20px;
   text-align: center;
@@ -610,8 +205,7 @@
 }
 
 /* ---------- 分数着色 ----------
- * 三个状态：达门槛（绿）、低于门槛（红）、未打分（灰）。
- * **门槛必须来自 Rust 下发的 score_min_default**，这里的颜色规则不做任何假设。 */
+   三个状态：达门槛（绿）、低于门槛（红）、未打分（灰）。 */
 .score-num {
   display: inline-block;
   min-width: 30px;

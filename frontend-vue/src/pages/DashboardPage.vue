@@ -1,16 +1,9 @@
 <script setup lang="ts">
 /**
- * 概览页（M1）：抓取条 + 筛选面板 + 岗位列表 + 最近事件。
- *
- * 本页只做编排：
- * - 读：进页拉一次 `list_jobs` / `job_tab_counts` / `scrape_progress` /
- *   `get_scoring_spec` / `get_app_config`，之后 `job_tab_counts` 每 5 秒轮询
- *   （**只为页签数字**，不重拉列表——重拉会清掉勾选与滚动位置）。
- * - 写：筛选改动 400ms 防抖后只发 diff（C12）；批量标记走 `set_job_flag` 系；
- *   抓取按钮走 `scrape_start`（**必须包 `{args}`**）与 `scrape_stop`。
- *
- * 所有判定都在 `features/*` 的纯函数里，本文件不做业务计算。
- */
+ * 概览页：抓取条 + 筛选面板 + 岗位列表 + 最近事件。本页只做编排——进页拉一次 `list_jobs` /
+ * `job_tab_counts` / `scrape_progress` / `get_scoring_spec` / `get_app_config`，之后
+ * `job_tab_counts` 每 5 秒轮询（**只为页签数字**）。写：筛选只发 diff，批量标记走 `set_job_flag`，
+ * 抓取走 `scrape_start` / `scrape_stop`。 */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import AppErrorBar from '../components/AppErrorBar.vue';
 import FilterPanel from '../components/FilterPanel.vue';
@@ -130,20 +123,12 @@ import {
   type ErrorQueue,
 } from '../lib_ui/error-queue';
 
-/**
- * 跳页：本页不直接改 `App.vue` 的 nav，交给父级。
- *
- * 为什么不在页面里 import 路由：C13「页面分发是插槽」——页面反过来知道
- * 路由的存在就会形成回环。父级监听 `navigate` 再切换。
- */
+/** 跳页交给父级：页面直接 import 路由会形成回环，父级监听 `navigate` 再切换。 */
 const props = defineProps<{ activeNav?: string }>();
 const emit = defineEmits<{
-  /**
-   * 浮层窗开关。只有 `config` / `logs` 两种：**聊天不是页**，
-   * 「Boss 消息」常驻右栏，招呼也在原地展开（SPEC-001 AC1/AC7）。
-   */
+  /** 浮层窗开关。只有 `config` / `logs` 两种：**聊天不是页**，常驻右栏。 */
   (e: 'navigate', nav: 'config' | 'logs'): void;
-  /** 卡片「打招呼」⇒ 请父级分发槽就地展开对话框并消费草稿（SPEC §16.5 / A48）。 */
+  /** 卡片「打招呼」⇒ 请父级分发槽就地展开对话框并消费草稿。 */
   (e: 'greet'): void;
 }>();
 
@@ -176,14 +161,9 @@ function openFilter(): void {
 }
 
 /**
- * 关闭筛选抽屉：**当帧**先摘掉展开态，让 `--drawer-dur` 的位移回程真的播出来，
- * 过渡结束再把节点摘掉。
- *
- * 之前写法是「先挂 `.is-closing` 播回程、过渡完才卸载」，但从点击到卸载之间
- * 用户看到的是「点了没反应，过一会儿才没」——因为 `.is-closing` 只是把
- * transform 推回起点，眼睛先看到不动的那一帧。现在反过来：
- * `filterOpen = false` 立刻生效（`.is-open` 摘掉 → transform 回程开播），
- * 节点留在 DOM 里直到过渡跑完，离场这一段能看见。
+ * 关闭筛选抽屉：**当帧**先摘掉展开态让 `--drawer-dur` 的位移回程真的播出来，过渡结束再摘
+ * 节点。反过来（先挂 `.is-closing` 播回程、过渡完才卸载）会让点击到卸载之间出现「点了没反应」
+ * 的空窗，因为 transform 推回起点的那一帧眼睛看着是不动的。
  */
 function closeFilter(): void {
   if (!filterOpen.value) return;
@@ -200,8 +180,8 @@ const minScore = ref<number | null>(null);
 const maxJd = ref(0);
 const config = shallowRef<AppConfigReply | null>(null);
 const tokensTotal = computed(() => config.value?.tokens_total ?? 0);
-/* 分项读数（Chief 派单，DTO 现成）：只读既有 config 字段，零新增 invoke。
- * Rust 核心暂无累计写入路径（见 HANDOFF 偏差②更正），读数为旧库遗留值，前端不造数。 */
+/* 分项读数：只读既有 config 字段，零新增 invoke。Rust 核心暂无累计写入路径，
+ * 读数为旧库遗留值，前端不造数。 */
 const tokensGreet = computed(() => config.value?.tokens_greet ?? 0);
 const tokensScore = computed(() => config.value?.tokens_score ?? 0);
 
@@ -221,13 +201,9 @@ const logSince = ref<number>(0);
 
 const sensitiveOpen = ref(false);
 /**
- * 敏感库是否挂载：打开即挂，**关掉就立刻摘**。
- *
- * 面板 teleport 在 `.app-shell` 之后、`z-index: 61`（高于窗口内所有浮层），常驻 DOM
- * 的后果是：一块关掉的透明面板压在顶栏的主题菜单 / 城市选择器之上，菜单钻到底下点不动；
- * 它自己排的收起回调又是个自由计时器，晚到一步就是「关了又弹回来」。
- *
- * 关闭的观感不再依赖退场补间：保留这一帧的意义只是让面板「当场消失」。
+ * 敏感库是否挂载：打开即挂，**关掉就立刻摘**。面板 teleport 在 `.app-shell` 之后、
+ * `z-index: 61`，常驻 DOM 会让一块关掉的透明面板压住顶栏主题菜单 / 城市选择器；它自己排的
+ * 收起回调又是个自由计时器，晚到一步就是「关了又弹回来」。
  */
 const sensitiveMounted = ref(false);
 watch(sensitiveOpen, (open) => {
@@ -241,18 +217,18 @@ const sensitiveError = ref('');
 // 错误是**队列**：并发失败时一条都不丢（见 lib_ui/error-queue.ts）。
 const errors = ref<ErrorQueue>(EMPTY_QUEUE);
 
-// 岗位详情抽屉。
+// 岗位详情抽屉：打开的那一条按 job_id 单独缓存，不跟着列表分页窗口走——翻页 / 排序 / 过滤
+// 之后 `jobs` 里已经找不到它，直接查列表会得到「点了卡片什么都不出现」。
 const detail = ref<DetailState>(EMPTY_DETAIL);
-const detailJob = computed<Job | null>(() => {
-  const id = detail.value.jobId;
-  if (id === null) return null;
-  return jobs.value.find((j) => j.job_id === id) ?? null;
-});
+const detailJob = ref<Job | null>(null);
 
 // 平台卡：本轮只有 Boss 接了登录链路，选中的平台随抓取一起发给 scrape_start。
 const platform = ref(PRIMARY_PLATFORM);
 const login = shallowRef<LoginStatus | null>(null);
 const loginBusy = ref(false);
+/** 全窗浮层的挂载根（`index.html` 里那个空 div）；独立挂载页面时为空，就地渲染。 */
+const overlayRoot = ref<HTMLElement | null>(null);
+
 /** 最近一次「保存登录 / 退出登录」还没回来（两个按钮共用，防连点）。 */
 const loginActionBusy = ref(false);
 /** `login-state` 的退订函数；未订阅/已退订时为 `null`。 */
@@ -271,21 +247,16 @@ const fontScaleId = ref<FontScaleId>(readFontScale());
 applyFontScale(fontScaleId.value);
 
 /**
- * 主题下拉面板的开合（用户裁决：主题 / 主题色 / 字号收成一枚按钮）。
- *
- * 开关住在 `components/TopbarTail.vue`（它是面板与按钮的共同父级），这里只做转发：
- * 面板点外部关闭时它会 emit 一次 false，页面状态跟着回写，避免两边各记一份。
+ * 主题下拉面板的开合（主题 / 主题色 / 字号收成一枚按钮）。开关住在 `TopbarTail.vue`，
+ * 这里只做转发：面板点外部关闭时它会 emit 一次 false，页面状态跟着回写。
  */
 const themePanelOpen = ref(false);
 function onToggleThemePanelHandler(next: boolean): void {
   themePanelOpen.value = next;
 }
 /**
- * 面板里点「深色 / 浅色」：**直接用点中的那一档**（用户 m04260「深浅两色的选择反了」）。
- *
- * 这里原先写的是 `flipTheme(mode)` —— 把一个已经确定的取值又翻转了一次，
- * 于是点「深色」得到浅色、点「浅色」得到深色。按钮语义是「选哪个就是哪个」，
- * 不该经过翻转；`flipTheme` 只服务于需要取反的场合（本页已无调用方）。
+ * 面板里点「深色 / 浅色」：**直接用点中的那一档**，不能再反一次（按钮语义是「选哪个就是
+ * 哪个」）。`flipTheme` 只服务于需要取反的场合，本页已无调用方。
  */
 function onPickThemeMode(mode: 'dark' | 'light'): void {
   applyTheme(mode);
@@ -500,10 +471,8 @@ function stopLogPolling(): void {
 }
 
 /**
- * 事件流：`scrape_drain(50)` 取增量，转成行追加（`panel.rs` 的 drain 同口径）。
- *
- * 只在**运行中**拉：空闲时拉是白烧 CPU。失败静默——
- * 事件流是辅助信息，不该盖住真正的错误。
+ * 事件流：`scrape_drain(50)` 取增量转成行追加。只在**运行中**拉（空闲时白烧 CPU），
+ * 失败静默——辅助信息不该盖住真正的错误。
  */
 async function drainFeed(): Promise<void> {
   try {
@@ -582,14 +551,9 @@ async function persistDraft(): Promise<void> {
 }
 
 /**
- * 筛选抽屉的「应用」= **只保存条件**（用户裁决 m03447）。
- *
- * 早先这里会连锁「登录把关 + 开始抓取」（m02737），但抽屉是改条件的地方，
- * 点「应用」的意图是「这套条件我认了」，不是「立刻开工」。抓取仍由抓取条上的
- * 「开始抓取」发起，那里才做登录把关。
- *
- * 顺序不能反：先落库（`set_scrape_defaults`）再关抽屉；关早了用户看不到保存
- * 结果。保存失败也不拦关闭 —— 条件已由本地兜底写过，提示归提示。
+ * 筛选抽屉的「应用」= **只保存条件**，不连锁登录把关与抓取。
+ * 顺序不能反：先落库（`set_scrape_defaults`）再关抽屉，否则用户看不到保存结果；
+ * 保存失败也不拦关闭。
  */
 async function applyNow(): Promise<void> {
   if (saveTimer !== null) clearTimeout(saveTimer);
@@ -604,16 +568,9 @@ function onApplyFilter(): void {
 }
 
 /**
- * 抓取前的登录把关。
- *
- * 返回 true 表示「可以继续抓取」。三种情形：
- * 1. 已登录 → 直接放行；
- * 2. 未登录且用户确认 → 拉起浏览器扫码（`loginStart`），**不**继续抓取：
- *    扫码是异步的，此刻 profile 里还没有 cookie，硬起抓取只会立刻失败；
- * 3. 未登录且用户取消 → 返回 false，只提示，不起任何进程。
- *
- * 用 `window.confirm` 而不是自绘弹窗：这是一次「要不要现在去登录」的是/否询问，
- * 不承载数据也不承载样式，原生确认框在 WebView 里同样可用，少一层遮罩状态。
+ * 抓取前的登录把关，返回 true 表示可以继续。已登录直接放行；未登录且用户确认则拉起扫码
+ * （`loginStart`）但**不**继续抓取——扫码是异步的，此刻 profile 里还没有 cookie；用户取消则
+ * 返回 false 且不起任何进程。用 `window.confirm` 是不想为一个是/否询问多一层遮罩状态。
  */
 async function ensureLogin(): Promise<boolean> {
   await refreshLogin();
@@ -750,30 +707,26 @@ async function onUndeliverJob(jobId: string): Promise<void> {
 
 // ---------------------------------------------------------------- 详情抽屉
 
-/** 卡片单击 = 打开详情（长按多选已移除，点击路径只剩这一条）。 */
-function onOpenDetail(jobId: string): void {
-  detail.value = openDetail(detail.value, jobId);
+/** 卡片单击 = 打开详情。卡片自己把整条岗位带回来，抽屉不依赖列表快照。 */
+function onOpenDetail(job: Job): void {
+  detailJob.value = job;
+  detail.value = openDetail(detail.value, job.job_id);
 }
 
 function onCloseDetail(): void {
   detail.value = closeDetail();
+  detailJob.value = null;
 }
 
 /**
- * 抽屉底部三个单条动作。
- *
- * 与批量条共用同一批命令（reject_jobs / allow_jobs / mark_delivered，载荷都是
- * `{args:{jobIds}}`），差别只在「影响几条」的文案。动作成功后关抽屉并刷新，
- * 失败进错误队列——**不让抽屉停在半更新状态**。
+ * 抽屉底部三个单条动作。与批量条共用同一批命令（reject_jobs / allow_jobs /
+ * mark_delivered，载荷都是 `{args:{jobIds}}`），差别只在文案。成功后关抽屉并刷新，失败进
+ * 错误队列——**不让抽屉停在半更新状态**。
  */
 async function onDetailAction(action: DetailAct, jobId: string): Promise<void> {
   /*
-   * `jobId` 必须由抽屉自己带过来，**不能**回头读 `detailJob`。
-   *
-   * 抽屉里的按钮持有的是一份独立的岗位对象（打开时传入的那条，或 `get_job` 回读的副本），
-   * 而 `detailJob` 是 `jobs.find(id)`——`jobs` 只是当前页签已拉取的那一页（默认 100 条上限
-   * 且带过滤）。抽屉一旦不是从列表页里点开的、或期间列表被刷新/换页，`find` 就落空，
-   * 这里会拿到 `null` 并静默 return，表现正是「按钮点了没反应」。
+   * `jobId` 必须由抽屉自己带过来，**不能**回头读 `detailJob`：列表是分页窗口，翻页 / 排序后
+   * 那条岗位可能已不在其中，反查落空就表现为「按钮点了没反应」。
    */
   if (!jobId) return;
   const ids = [jobId];
@@ -816,15 +769,9 @@ async function refreshLogin(): Promise<void> {
   try {
     const next = await loginStatus(platform.value);
     /*
-     * `unknown` 是后端的**降级值**（`commands_scrape.rs:540-546/576-582`：
-     * sidecar 不在线、或 `session.open` 回执失败时返回），不是「未登录」的结论。
-     * 用户 m02848「浏览器显示我登录了，但应用说没登录」正是这条：
-     * 浏览器 profile 里有 cookie，但当前没有活着的 sidecar 会话，查询只能给 unknown。
-     *
-     * 规则：降级值不得抹掉已知结论（与 `mergeLoginState` 的同一条原则）。
-     * 上一次查到的 `logged_in` / `no_login` 继续留着，界面不会因为一次查不到就翻脸；
-     * 只有 `saved === true`（用户点过「保存登录」，本机标记在库）时，
-     * 才把 unknown 升格成 `no_login` —— 会话不在了但标记还在，需要重新登录。
+     * `unknown` 是后端的**降级值**（sidecar 不在线或 `session.open` 回执失败），不是「未登录」的
+     * 结论。降级值不得抹掉已知结论（同 `mergeLoginState`）：上一次的 `logged_in` / `no_login`
+     * 继续留着；只有 `saved === true` 时才把它升格成 `no_login`。
      */
     if (next.state === 'unknown' && login.value !== null) {
       const known = login.value.state !== 'unknown';
@@ -842,14 +789,9 @@ async function refreshLogin(): Promise<void> {
 }
 
 /**
- * 订阅 `login-state`（后端 `lib.rs:508` 的旁路推送，500ms 粒度）。
- *
- * 事件只带 `(platform, state, logged_in)`，缺 `running` / `saved` / `message`，
- * 所以一律走 `mergeLoginState` 合并进权威状态（未知态不覆盖已知态），
- * 而不是整份替换——否则「已登录」会被一条迟到的推送降级成「未知」。
- *
- * 非 Tauri 环境（vitest / 浏览器预览）`listenLoginState` 直接返回 no-op，
- * 这里不判断运行时。
+ * 订阅 `login-state`（后端旁路推送，500ms 粒度）。事件只带 `(platform, state, logged_in)`，
+ * 缺 `running` / `saved` / `message`，所以走 `mergeLoginState` 合并而不是整份替换，否则
+ * 「已登录」会被一条迟到的推送降级成「未知」。非 Tauri 环境 `listenLoginState` 返回 no-op。
  */
 async function subscribeLoginState(): Promise<void> {
   if (unlistenLogin !== null) return;
@@ -857,7 +799,7 @@ async function subscribeLoginState(): Promise<void> {
     const off = await listenLoginState(
       (payload) => {
         login.value = mergeLoginState(login.value, payload);
-        // 消费完就回执：两个页面都确认后后端立刻停掉 5 秒补发（用户 m02396）。
+        // 消费完就回执：两个页面都确认后后端立刻停掉 5 秒补发。
         void loginAck(payload.platform, payload.state);
         // 登录成功那一拍补一次权威查询：`saved` / `message` 只在查询里有。
         if (payload.state === 'logged_in') void refreshLogin();
@@ -892,10 +834,8 @@ async function onLogin(id: string): Promise<void> {
 }
 
 /**
- * 「保存登录」：只写一个本机标记（cookie 由持久化 profile 管）。
- *
- * 成功/失败都刷新一次权威状态——`saved` 与 `message` 只有查询里有。
- * 失败进错误队列并且可重试（不静默），因为用户点它就是要一个结果。
+ * 「保存登录」：只写一个本机标记（cookie 由持久化 profile 管）。成功/失败都刷新一次权威
+ * 状态（`saved` 与 `message` 只有查询里有）；失败进错误队列且可重试。
  */
 async function onSaveLogin(): Promise<void> {
   if (loginActionBusy.value) return;
@@ -935,14 +875,8 @@ async function onLogout(): Promise<void> {
 }
 
 /**
- * 抓取进行中的进度轮询。**只在运行中挂载**，停了一拍就自己卸掉。
- *
- * 与已删除的 5 秒常驻 tick 的区别：空闲时完全不发 IPC。原来那个 tick 无论
- * 在不在抓取都每 5 秒查一次登录态，而登录态查询会触碰浏览器（见 onMounted
- * 注释），空闲时毫无收益却一直在驱动浏览器。
- *
- * 进度与日志仍靠它推进：`drainFeed` 是事件的唯一消费口（`scrape_drain`），
- * 没有独立推送通道，所以运行中必须保留轮询。
+ * 抓取进行中的进度轮询。**只在运行中挂载**，空闲时完全不发 IPC（登录态查询会触碰浏览器）。
+ * 进度与日志仍靠它推进：`scrape_drain` 没有独立推送通道，运行中必须保留轮询。
  */
 function syncTick(): void {
   const need = progress.value.running;
@@ -987,26 +921,18 @@ function onDetailChat(jobId: string): void {
   void onGreet(jobId);
 }
 
-// ---------------------------------------------------------------- 卡片单击
+// ---------------------------------------------------------------- 卡片单击 / 长按
 
-/**
- * 点这张卡片 = 打开详情，**只有这一种结果**（用户裁决：多选态下单击勾选的设定已删除，
- * 勾选只剩勾选框与「全选本页」两个入口）。
- *
- * 只在卡片自己身上接（`JobCard` 内 emit，不走容器代理）：打开与「点抽屉外即关闭」都是
- * click，先后只看 DOM 序。卡片是抽屉的祖先分支，它的 click 一定先于 `document` 上那条
- * 关闭监听器到达，所以抽屉开完不会被同一次点击关掉。
- */
-function onCardOpen(jobId: string): void {
-  // 多选期间单击卡片只切勾选，绝不弹详情（用户裁决 m00725）。
+/** 多选期间单击只切勾选，其余情况打开详情。 */
+function onCardOpen(job: Job): void {
   if (selection.value.selecting) {
-    selection.value = clickCard(selection.value, jobId);
+    selection.value = clickCard(selection.value, job.job_id);
     return;
   }
-  onOpenDetail(jobId);
+  onOpenDetail(job);
 }
 
-/** 长按到点：进入多选并勾上按下的那张卡（时间与位移判定在 `lib_ui/longpress.ts`）。 */
+/** 长按到点：进入多选，并勾上按下的这张。 */
 function onCardLongPress(jobId: string): void {
   selection.value = enterSelecting(jobId);
 }
@@ -1019,10 +945,8 @@ function onCheckBlank(): void {
 // ---------------------------------------------------------------- 抓取
 
 /**
- * 「开始抓取」：**先登录把关，再抓取**（用户裁决 m03432）。
- *
- * 抽屉本身不由这里打开；唯一的例外是关键词为空——抓取根本没法发起，弹抽屉
- * 让用户就地补条件（用户裁决 m03446）。
+ * 「开始抓取」：**先登录把关，再抓取**。抽屉不由这里打开，唯一例外是关键词为空——
+ * 抓取根本没法发起，弹抽屉让用户就地补条件。
  */
 async function onStart(): Promise<void> {
   if (startDisabled(starting.value, progress.value.running)) return;
@@ -1065,10 +989,9 @@ async function onStop(): Promise<void> {
 }
 
 /**
- * 两处限额输入框的保存动作（`on_max_jd` / `on_min_score` 同口径）。
- *
- * 只走 `set_limit`——`min_score` 与 `max_jd` 都不在 `set_app_config` 的
- * `WRITABLE_KEYS` 里，塞进 patch 会被**静默跳过**（C11）。
+ * 两处限额输入框的保存动作（`on_max_jd` / `on_min_score` 同口径）。只走 `set_limit`：
+ * `min_score` 与 `max_jd` 都不在 `set_app_config` 的 `WRITABLE_KEYS` 里，塞进 patch 会被
+ * **静默跳过**。
  */
 async function onMaxJd(v: number): Promise<void> {
   const next = Math.min(MAX_JD_CEILING, Math.max(1, Math.trunc(v)));
@@ -1123,12 +1046,9 @@ async function removeSensitive(ids: number[]): Promise<void> {
 
 
 /**
- * 概览业务尾段（平台卡 + `.tb-tail`）有没有落位进壳的那一行。
- *
- * `AppShell` 在 `<header class="topbar">` 里留了一个 `display: contents` 的
- * `.tb-embed`（SPEC-001 决策 7 / AC10）：数据仍归本页所有，DOM 归顶栏那一行。
- * 单测直接 `mount(DashboardPage)` 时壳不在场，落位点查不到 ⇒ Teleport `disabled`，
- * 就地渲染，既有断言照旧成立。
+ * 概览业务尾段（平台卡 + `.tb-tail`）有没有落位进壳的那一行。`AppShell` 在 header 里留了
+ * 一个 `display: contents` 的 `.tb-embed`：数据归本页，DOM 归顶栏那一行。单测直接
+ * `mount(DashboardPage)` 时壳不在场 ⇒ Teleport `disabled`，就地渲染。
  */
 const tailInTopbar = ref(false);
 
@@ -1155,14 +1075,9 @@ function onSamePageHighlight(): void {
   highlightCompany.value = readHighlightCompany();
 }
 
-/** 捕获阶段判定点击是否落在筛选抽屉内；不落在里面就收起。
- *  只关自己的抽屉（JD 抽屉由 JobDetailDrawer 的遮罩自理）。
- *  注意：工具栏上的「筛选条件」入口按钮已按用户裁决移除（抽屉由列表空态打开），
- *  所以这里不再需要放行触发按钮。
- *
- *  面板类浮层（城市选择器）被 Teleport 到 body，DOM 上已不在抽屉里，所以按
- *  `data-overlay="popover"` 再放行一次：点面板里的省份 / 城市算「还在抽屉里操作」。
- *  面板自身负责点外面关闭，这里不能越权替它关抽屉，否则点一下城市就两头一起收。 */
+/** 捕获阶段判定点击是否落在筛选抽屉内，不落在就收起。只关自己的抽屉（JD 抽屉由
+ *  JobDetailDrawer 的遮罩自理）。城市选择器被 Teleport 到 body，DOM 上已不在抽屉里，
+ *  所以按 `data-overlay="popover"` 再放行一次；它自己负责点外面关闭，这里不能越权。 */
 function onGlobalPointerDown(ev: PointerEvent): void {
   if (!filterOpen.value) return;
   const target = ev.target as HTMLElement | null;
@@ -1173,6 +1088,7 @@ function onGlobalPointerDown(ev: PointerEvent): void {
 }
 
 onMounted(() => {
+  overlayRoot.value = document.querySelector('#app-overlay-root');
   tailInTopbar.value = document.querySelector('.tb-embed') !== null;
   highlightCompany.value = readHighlightCompany();
   window.addEventListener('storage', onStorageHighlight);
@@ -1217,7 +1133,7 @@ watch(
 </script>
 
 <template>
-  <!-- 容器锚点照原型：shell-dashboard（SPEC-001 AC9，page-dashboard 随二级导航退役）。 -->
+  <!-- 容器锚点 shell-dashboard。 -->
   <section class="page page-dashboard" data-testid="shell-dashboard">
     <AppErrorBar
       :queue="errors"
@@ -1294,7 +1210,7 @@ watch(
       @toggle-filter="filterOpen ? closeFilter() : openFilter()"
     />
 
-      <div class="job-fill">
+    <div class="job-fill">
       <JobListView
         :jobs="jobs"
         :counts="counts"
@@ -1374,13 +1290,13 @@ watch(
 
   </section>
 
-  <!-- 岗位详情抽屉与敏感库走 fixed 浮层：它们是全窗弹层，绝不能挂进
-       `.page-dashboard`——那里 `overflow: hidden` 且带 transform/backdrop-filter，
-       会把子元素裁在本列内（表现为「点遮罩关不掉、遮罩也不压住页面」）。
-       放在 section 之后：二者自身都是 position: fixed，不参与页面流。 -->
-  <div>
+  <!-- 抽屉与敏感库是全窗浮层，必须挂在没有 overflow / transform / 滤镜的浮层根上：
+       `.page-dashboard` 是 `overflow: hidden` 的滚动容器，作为它后代的 `position: fixed`
+       元素会被裁进那一列，表现为「点了卡片右侧不展开」。 -->
+  <Teleport to="#app-overlay-root" :disabled="overlayRoot === null">
     <JobDetailDrawer
       :job="detailJob"
+      :open="detail.jobId !== null"
       :min-score="minScore"
       :score-max="scoreMax"
       :tab="tab"
@@ -1399,5 +1315,5 @@ watch(
       @reload="loadSensitive"
       @remove="removeSensitive"
     />
-  </div>
+  </Teleport>
 </template>

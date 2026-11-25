@@ -1,13 +1,7 @@
 /**
- * 主题：深色为默认，`html[data-theme='light']` 覆盖设计令牌。
- *
- * 初始主题的取值顺序（已保存 > 系统偏好 > 深色）曾经是内联逻辑，并在预览环境里
- * 出过「永远锁死深色」的缺陷——所以这里单独成文件，且 `prefers-color-scheme`
- * 分支可以独立检视。
- *
- * 读写的 localStorage 与 `apply_theme` 写入的 DOM 属性必须与 `index.html` 的
- * 首帧脚本保持一致：首帧脚本在 Vue 挂载前就给 `<html>` 打好 `data-theme`，
- * 否则会先闪一帧深色再切浅色。
+ * 主题：深色为默认，`html[data-theme='light']` 覆盖设计令牌。取值顺序是
+ * 已保存 > 系统偏好 > 深色，必须与 `index.html` 首帧脚本逐条一致——首帧脚本在 Vue
+ * 挂载前就打好了 `data-theme`，否则会先闪一帧深色再切浅色。
  */
 
 export const THEME_KEY = 'aja.theme';
@@ -68,12 +62,8 @@ export function applyTheme(theme: Theme): void {
 }
 
 /**
- * 首帧：**只读**当前主题，不写 storage。
- *
- * 首帧脚本（`index.html` 里那段内联 IIFE）已经在挂载前把 `data-theme` 打好了；
- * 这里再读一次是为了让界面拿到同一份结论。判据顺序与首帧脚本逐条一致
- * （已保存 > 系统偏好 > 深色），只是**不落盘**——首帧就写 storage 会把
- * 「用户从没选过主题」写成一次显式选择，之后系统切浅色就跟不动了。
+ * 首帧：**只读**当前主题，不写 storage。判据与首帧脚本一致；落盘会把「从没选过主题」
+ * 写成一次显式选择，之后系统切浅色就跟不动了。
  */
 export function bootstrapTheme(): Theme {
   const theme = readInitialTheme();

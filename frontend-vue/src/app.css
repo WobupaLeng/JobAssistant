@@ -1,15 +1,9 @@
 /* 仅补齐 Vue 版新增的类；其余全部来自 styles/ 的 11 份分域 CSS
- * （顺序即层叠契约，见 styles/index.css 与 AGENTS.md C4）。
- *
- * 本文件由 main.ts 在 styles/index.css 之后引入，所以这里的规则一定压在上面。 */
+   （顺序即层叠契约，见 styles/index.css 与 AGENTS.md C4）。
+    */
 
-/* tokens.css 的高度重置只认 #root，Vue 的挂载点是 #app，这里补一条。
- * 不设 body 底色（C5）：窗口的亚克力必须透上来。
- *
- * `overflow: hidden` 是硬要求（用户 m03014「最窄窗口大小底部出现了滚动条」）：
- * `.app-shell` 有 `margin: var(--win-corner-cut)` 的内缩，无论用 margin 还是 calc，
- * 只要某个后代多出 1px（圆角、投影、子元素的最小内容高度）就会把视口撑出滚动条。
- * 本应用是固定骨架、各列自己滚，整页滚动一次都不该出现。 */
+/* Vue 挂载点 #app 的高度重置（tokens.css 只认 #root）。不设 body 底色（C5）。
+   `overflow: hidden` 是硬要求：`.app-shell` 有 --win-corner-cut 内缩，任何后代多出 1px */
 html,
 body,
 #app {
@@ -17,17 +11,16 @@ body,
   overflow: hidden;
 }
 
-/* 同屏三兄弟的容器（SPEC §2.1 / §2.4 / A15，ADR-004 目标编排）。
- *
- * 原型 L555-559：`display:flex; flex-direction:row; align-items:stretch;
- * flex:1 1 auto; min-height:0; gap:var(--rail-gap)`。`--rail-gap` 原型定义在
- * :root（L136）＝ 12px × --ui-scale，本项目不新增 token，把同一个算式写在这里。
- *
- * 纵向滚动交回各列自己（主列 .page-dashboard / 右栏 .chat-rail / 对话框各段）：
- * 容器一旦自己滚，展开对话框时整页会被推走，「同屏压缩」就看不出来。
- *
- * 左右内边距对齐顶栏 `.topbar` 的 14px：卡片与右栏都是窗口里的玻璃块，
- * 不能贴住窗口左右边；两列之间由 gap 分隔。 */
+/* `#app` 是两行网格：页面行吃满剩余高度，浮层根（抽屉 / 模态框）那一行零高。
+   抽屉本身是 `position: fixed`，挂在这里就绕开了页面的 overflow 裁切。 */
+#app {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 0;
+}
+
+/* 同屏三兄弟的容器：flex row、align-items: stretch、flex: 1 1 auto、min-height: 0，
+   gap 为 12px × --ui-scale（未新增 token，算式写在这里）。
+   纵向滚动交回各列自己——容器一旦自己滚，展开对话框时整页会被推走。 */
 .app-body {
   position: relative;
   flex: 1 1 auto;
@@ -35,36 +28,26 @@ body,
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  /* 列间距 12 → 6（用户 m01063「左边投递列表和右边 boss 列表中间的间距太大了」）。
-   * 主列与右栏/对话框之间只隔这一条缝，12px 在 1440 窗口下读起来像断开的两块玻璃；
-   * 6px 仍然分得开，同时把省下的 6px 还给主列（卡片宽度直接受益）。
-   * 原注释里 --rail-gap 的原型口径随这次裁决一并作废。 */
+  /* 列间距 6：主列与右栏只隔这一条缝，再窄就连成一片，再宽会把主列宽度还回去。 */
   gap: calc(6px * var(--ui-scale));
   overflow: hidden;
-  /* 顶部不留间距（用户 m03129「内容区占满整个窗口，保持顶部无间距」）：
-   * 顶栏 46px 自带 0 14px 内边距，内容区顶边直接接在它下沿，
-   * 左右仍退 14px 与顶栏对齐，底部留白由 `.app-shell` 的 padding 负责。 */
+  /* 顶部不留间距，内容区占满整个窗口：
+   顶栏 46px 自带 0 14px 内边距，内容区顶边直接接在它下沿， */
   padding: 0 14px 0;
 }
 
-/* 页面还没接上时的占位文案（ui lane 接管后自然消失）。 */
-.page-placeholder {
-  color: var(--text-3);
-  font-size: var(--fs-sm);
-}
-/* ----------------------------------------------
- * 城市选择器（省 → 市 + 搜索）
- *
- * 定位：面板被 Teleport 到 body（筛选抽屉的 .f-body 是滚动容器、外层又有
- * backdrop-filter，留在原地会被裁成一条），所以这里用 position: fixed，
- * 具体 top / left / width / max-height 由 CityPicker.vue 按触发按钮实时量出来后
- * 走行内样式给出。顶栏高度不受影响，投递列表也不会被挤压。
- * 窄屏时收窄而不是撑开。
- *
- * 字号口径：本仓库 styles/tokens.css 目前没有字号变量族（那是 prototypes/ui-v1
- * 原型的口径），所以这里沿用本文件已有写法直接给 px，不新增颜色、不新增变量，
- * 也不写 C6 禁止的注释形式。
- */
+ 城市选择器（省 → 市 + 搜索）
+ 
+ 定位：面板被 Teleport 到 body（筛选抽屉的 .f-body 是滚动容器、外层又有
+ backdrop-filter，留在原地会被裁成一条），所以这里用 position: fixed，
+ 具体 top / left / width / max-height 由 CityPicker.vue 按触发按钮实时量出来后
+ 走行内样式给出。顶栏高度不受影响，投递列表也不会被挤压。
+ 窄屏时收窄而不是撑开。
+ 
+ 字号口径：本仓库 styles/tokens.css 目前没有字号变量族（那是 prototypes/ui-v1
+ 原型的口径），所以这里沿用本文件已有写法直接给 px，不新增颜色、不新增变量，
+ 也不写 C6 禁止的注释形式。
+ /
 .city-picker {
   position: relative;
   display: block;
@@ -172,14 +155,13 @@ body,
 }
 
 /* ----------------------------------------------
- * 概览页：抓取筛选栏（本轮只接城市）
- *
- * 容器不设底色，玻璃与边框借 .card；这里只负责一条横排、可换行、不撑破。
- */
-/* 主列（被压缩方）：原型 L560-567 的 .dashboard 口径。
+   概览页：抓取筛选栏（本轮只接城市）
+   
+   容器不设底色，玻璃与边框借 .card；这里只负责一条横排、可换行、不撑破。 */
+/* 主列（被压缩方）：原型 的 .dashboard 口径。
  * 内部仍是原来的块流（卡片自带外边距），这里只补「作为 flex 子项」的四件事：
  * 吃掉剩余宽、min-width:0（否则对话框展开时它不缩，会把右栏顶出窗口）、
- * 自己滚、以及原型那条 flex-basis 过渡（宽度过渡只走 flex，禁 translateX，SPEC §2.2 硬约束 4）。 */
+ * 自己滚、以及原型那条 flex-basis 过渡（宽度过渡只走 flex，禁 translateX，硬约束 4）。 */
 .page-dashboard {
   display: flex;
   flex-direction: column;
@@ -194,8 +176,7 @@ body,
 }
 
 /* 纵向布局：抓取条 / 筛选栏 / 错误条定高，岗位列表吃剩余高度，
- * 决策日志卡定高吸底（高 220px，见 styles/vue-dashboard.css 的 .log-card）。
- * 窗口变高变矮只改列表可见行数，日志卡尺寸不变、始终贴底。 */
+   决策日志卡定高吸底（高 220px，见 styles/vue-dashboard.css 的 .log-card）。 */
 .page-dashboard > .app-error,
 .page-dashboard > .app-notice,
 .page-dashboard > .scrape-card,
@@ -308,8 +289,3 @@ body,
   padding: 10px 12px;
 }
 
-.scrape-filter-field {
-  flex: 1 1 180px;
-  min-width: 0;
-  max-width: 320px;
-}

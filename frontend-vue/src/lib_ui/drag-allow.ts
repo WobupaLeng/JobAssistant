@@ -1,30 +1,7 @@
 /**
- * 无边框窗口的拖动兜底（用户 m04113「窗口顶部空白区域不能拖到窗口」）。
- *
- * ## 为什么需要这一层
- *
- * 窗口是 `decorations: false` + `transparent: true`，没有系统标题栏，拖动完全靠
- * Tauri 的 `data-tauri-drag-region` 属性。而它的 drag 逻辑挂在**被点到的那一个元素**
- * 上，事件不会从子节点冒泡到祖先 —— 顶栏里每一块可视物件（品牌名、平台卡、打分分段、
- * token 读数、配置 / 敏感库 / 主题、三个窗口键）都把 pointerdown 抢走，
- * 结果「顶栏看着大片空白，按下去却拖不动」。
- *
- * ## 做法
- *
- * 捕获阶段（早于 Tauri 的监听）先判真假：
- * - 命中 button / a / input / select / textarea / label ⇒ 是可交互控件，原行为不动；
- * - 其余命中且不在排除区（默认抽屉面板、模态、弹出层）⇒ 给它补上 drag 属性。
- *
- * ## 两处 WebView2 的反直觉行为
- *
- * 1. **属性置空串等于没有这个属性**：`setAttribute(DRAG, '')` 在 WebView2 里取 `Attribute`
- *    会返回 null，插件据此判定「不是拖动区」。所以停用一律用 removeAttribute。
- * 2. **上一次拖动的「按下」永远等不到 mouseup**：拖动走的是系统 modal loop，
- *    后端 `window_start_dragging` 返回时手势已经结束。残留的按下状态会让**下一次**
- *    单击被当成「从上次落点拖到这里」，窗口直接跳走。这里自己记账：
- *    上一次拖动期间收到过 pointermove ⇒ 下一次 pointerdown 直接吞掉。
- *    **吞一次就要清账**，否则第一次拖完之后每次按下都被吞，窗口再也拖不动。
- * 3. **属性写成空串等于没写**：见上。这里统一写 `'true'`。
+ * 无边框窗口的拖动兜底：`data-tauri-drag-region` 只认被点到的那个元素且不冒泡，顶栏里的可点
+ * 物件会把 pointerdown 抢走。做法是在捕获阶段（早于 Tauri 的监听）命中可交互控件就交还原行为。
+ * 属性写成空串等于没写，停用要 removeAttribute；残留按下的拖动会让下次单击被误判。
  */
 
 /** 与 Tauri 约定的属性名（`data-tauri-drag-region`）。 */
@@ -34,14 +11,9 @@ export const DRAG_ATTR = 'data-tauri-drag-region';
 const INTERACTIVE = 'button, a, input, select, textarea, label, [contenteditable="true"]';
 
 /**
- * 排除区：抽屉 / 模态 / 弹出面板里空白处按下去应该是「什么都不发生」或「关闭弹层」，
- * 拖窗口会与既有的「点外部关闭」打架。
- *
- * **只排除盒子本身，不排除它的子树**（用户 m02102「窗口顶部按左键还是不能移动窗口」）。
- * 原来的写法是 `host.closest(EXCLUDED)`，而 `.drawer` 是所有浮层的**容器**：页面内容
- * 就长在抽屉里，于是整块界面都被判成排除区，兜底一律不生效。改成「命中的是面板盒子
- * 自身（`host.matches`）才排除」——按在面板的空白边距上不拖，按在里面的控件/内容上
- * 仍按普通规则处理（可交互控件走原行为，其余补拖动属性）。
+ * 排除区：浮层里按下应是「什么都不发生」或「关闭弹层」，不能拖窗口。
+ * **只排除盒子本身，不排除它的子树**：`.drawer` 是所有浮层的容器，用 closest
+ * 会把整块界面判成排除区，兜底一律不生效。
  */
 const EXCLUDED = '[data-overlay], .drawer, .filter-panel, .sensitive-panel, .config-modal, .decisions-modal, .theme-panel, .city-picker-panel';
 
@@ -81,9 +53,7 @@ export function installDragAllow(root: Document | HTMLElement = document): () =>
     }
     if (state.inFlight) {
       // 上一次拖动的收尾没回来：这一下不该成为新起点，否则窗口会瞬移。
-      // 但**必须在这里把账结掉**，只拦这一次：原来把 `inFlight` 永远留在 true，
-      // 于是第一次拖动之后每一次按下都走这条分支，表现就是「窗口再也拖不动」
-      // （用户 m02245「不能拖动」）。拦一次 = 丢掉那次残留的按下，下一次正常起拖。
+      // **必须在这里把账结掉**，只拦这一次，否则窗口再也拖不动。
       state.inFlight = false;
       state.moved = false;
       return;

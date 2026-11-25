@@ -19,6 +19,7 @@ import type { CardView } from '../src/lib_ui/job-list-model';
 const VIEW: CardView = {
   tid: 't1',
   jobId: 'boss:1',
+  job: { job_id: 'boss:1', title: '前端工程师', company: '某公司' } as CardView['job'],
   title: '前端工程师',
   company: '某公司',
   rawCompany: '某公司',
@@ -34,6 +35,10 @@ const VIEW: CardView = {
   rejected: false,
   time: '刚刚',
 };
+
+function openIds(w: ReturnType<typeof mountCard>): string[] {
+  return (w.emitted('open') ?? []).map((args) => (args[0] as { job_id: string }).job_id);
+}
 
 function mountCard() {
   return mount(JobCard, { props: { view: VIEW }, attachTo: document.body });
@@ -75,7 +80,7 @@ describe('JobCard 长按进多选', () => {
     expect(w.emitted('longpress')).toBeUndefined();
     // 撤销之后照常单击仍是「打开详情」。
     pointer(card, 'click', 10, 10);
-    expect(w.emitted('open')).toEqual([['boss:1']]);
+    expect(openIds(w)).toEqual(['boss:1']);
     w.unmount();
   });
 
@@ -88,7 +93,7 @@ describe('JobCard 长按进多选', () => {
     vi.advanceTimersByTime(1000);
     expect(w.emitted('longpress')).toBeUndefined();
     pointer(card, 'click');
-    expect(w.emitted('open')).toEqual([['boss:1']]);
+    expect(openIds(w)).toEqual(['boss:1']);
     w.unmount();
   });
 
@@ -103,7 +108,7 @@ describe('JobCard 长按进多选', () => {
     expect(w.emitted('open')).toBeUndefined();
     // 吞掉一次之后恢复正常：下一次单击照常打开详情。
     pointer(card, 'click');
-    expect(w.emitted('open')).toEqual([['boss:1']]);
+    expect(openIds(w)).toEqual(['boss:1']);
     w.unmount();
   });
 

@@ -43,10 +43,9 @@ const cards = computed(() => platformCards(props.selected, props.loginBusy, logg
 /** 已登录口径统一走 `login-model.isLoggedIn`（状态字符串唯一真源），不在这里重写比较。 */
 const loggedIn = computed(() => isLoggedIn(props.login?.state));
 /**
- * 双态「已登录·浏览器未连接」（用户 m01291）：库里存着登录标记，但浏览器（sidecar）
- * 此刻不在线——后端 `login_status` 在 sidecar 未运行时回 `state: 'unknown'`。
- * 此时「登录」按钮不能再叫「已登录」并禁用：那句话会与聊天页的「浏览器未连接」打架。
- * 按钮退回可点的「登录」，title 说清该做什么。
+ * 双态「已登录·浏览器未连接」：库里存着登录标记但 sidecar 不在线（`state: 'unknown'`）。
+ * 此时按钮不能叫「已登录」并禁用（会与聊天页的「浏览器未连接」打架），退回可点的「登录」，
+ * title 说清该做什么。
  */
 const detached = computed(
   () => (props.login?.state ?? '').toLowerCase() === 'unknown' && props.login?.saved === true,

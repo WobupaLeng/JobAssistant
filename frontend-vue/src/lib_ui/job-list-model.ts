@@ -1,12 +1,6 @@
 /**
  * 投递列表的纯逻辑：页签 / 排序 / 可见性 / 计数 / 批量显隐 / 卡片派生字段。
- *
- * 为什么单独一个 `.ts`：这些规则原本散在列表状态与卡片渲染两处，
- * `features/jobs/cards.rs` 的组件体里，只能靠肉眼看；搬成纯函数后 vitest 能
- * 逐条盯住（`tests/jobs-list.test.ts`）。组件只负责画，不再自己算。
- *
- * 层级：`features` 可以引 `api` 与 `lib_ui`（AGENTS.md §2 第 1 条），
- * 所以这里直接引 `api/types.ts` 的 `Job` 与 `lib_ui` 的 `fmtTime`。
+ * 组件只负责画，规则全在这里，由 `tests/jobs-list.test.ts` 逐条盯住。
  */
 import type { Job, JobTabCounts } from '../api/types';
 import { tidSafe } from './options';
@@ -75,11 +69,8 @@ export function sortSlug(field: SortField): string {
 }
 
 /**
- * 每个字段的默认方向。
- *
- * 界面上的箭头语义是「走强的方向」：分值/薪资先看大的（降序），
- * 加入时间先看新的（也是降序）。早期实现默认 `ascending = true` 是因为它
- * 把 `asc/desc` 直传给后端；这里改成更直白的 `desc`，由 `sortOrder()` 统一翻译。
+ * 每个字段的默认方向，统一为降序（箭头语义是「走强的方向」）；
+ * 发给后端时由 `sortOrder()` 统一翻译。
  */
 export function defaultDescending(field: SortField): boolean {
   switch (field) {
@@ -124,10 +115,7 @@ export function isDeliveredJob(job: Job): boolean {
 }
 
 /**
- * 界面侧再过滤一次。
- *
- * 后端 `list_jobs` 已按 `tab` 过滤并分页（`JobQuery::for_tab`），
- * 这层是幂等的兜底，不再是唯一过滤。
+ * 界面侧再过滤一次。后端 `list_jobs` 已按 `tab` 过滤并分页，这层是幂等的兜底。
  */
 export function visibleJobs(jobs: readonly Job[], tab: ListTab, showAll: boolean): Job[] {
   if (showAll) return jobs.slice();
@@ -149,10 +137,8 @@ export function emptyTabCounts(): JobTabCounts {
 }
 
 /**
- * 「共 N 条」。
- *
- * **不用** `db_overview().total`：那是含历史否决的全库行数，与页签的三态
- * 口径不是一回事，混用会出现「三个页签加起来不等于全部」（`state.rs:287-302`）。
+ * 「共 N 条」。**不用** `db_overview().total`：那是含历史否决的全库行数，
+ * 混用会出现「三个页签加起来不等于全部」。
  */
 export function headCount(counts: JobTabCounts, tab: ListTab, showAll: boolean): number {
   if (showAll) return Math.max(0, counts.pending + counts.delivered + counts.rejected);
@@ -166,12 +152,7 @@ export function tabCount(counts: JobTabCounts, tab: ListTab): number {
 
 // ---------------------------------------------------------------- 批量
 
-/**
- * 批量按钮 `hidden` 的唯一判据：已选 ≥ 1。
- *
- * 原来的 ≥ 2（SPEC §15.2 裁决 Q）改成 ≥ 1：用户裁决「单选或多选后」都要出按钮，
- * 单选时点一下就改这一条，比再长按一次进多选要快。0 条仍然不出（无事可做）。
- */
+/** 批量按钮的唯一判据：已选 ≥ 1 即出（单选也能直接操作），0 条不出。 */
 export function showBatchActions(selectedCount: number): boolean {
   return selectedCount >= 1;
 }
@@ -180,14 +161,8 @@ export function showBatchActions(selectedCount: number): boolean {
 export type BatchOp = 'reject' | 'deliver' | 'allow';
 
 /**
- * 页签决定「这一屏允许做哪几个批量动作」：
- * - 待投递（未投递）：不投递 / 已投递
- * - 不投递：待投递（= 取消否决，走 allow_jobs）
- * - 已投递：待投递（= 取消投递，走 unmark_delivered）
- * 三个页签互斥的语义决定了不会出现「在不投递里标已投递」这种自相矛盾的组合。
- *
- * 「待投递」在数据库侧对应 `JobStatus::Pending`，但用户在界面上只会看到
- * 「未投递」这颗页签——两者是同一个集合，文案以页签为准（`batchLabel`）。
+ * 页签决定这一屏允许做哪几个批量动作：未投递 → 不投递 / 已投递；
+ * 不投递 → 取消否决；已投递 → 取消投递标记。页签互斥，不会出现自相矛盾的组合。
  */
 export function batchOps(tab: ListTab): readonly BatchOp[] {
   switch (tab) {
@@ -218,12 +193,8 @@ export function toggleChecked(selected: readonly string[], id: string): string[]
 }
 
 /**
- * 批量文案：`不投递（3）` / `已投递（3）` / `待投递（3）`。
- *
- * `allow` 在后端只有一条命令（`allow_jobs`），但它落在两个页面上的含义不同：
- * - 不投递页签：撤销否决 → 回「未投递」；
- * - 已投递页签：撤销投递标记 → 回「未投递」。
- * 两处都写「待投递」会和页面上的页签名（未投递）对不上，所以拆开写。
+ * 批量文案。`allow` 后端只有一条命令，但在两个页签含义不同（撤销否决 / 撤销投递标记），
+ * 都说「待投递」会与页签名「未投递」对不上，所以按页签拆开写。
  */
 export function batchLabel(op: BatchOp, n: number, tab: ListTab = 'pending'): string {
   if (op === 'reject') return `不投递（${n}）`;
@@ -236,14 +207,9 @@ export function batchLabel(op: BatchOp, n: number, tab: ListTab = 'pending'): st
 export type ScoreTier = 'is-high' | 'is-mid' | 'is-low' | 'is-bad' | 'is-none' | 'is-done';
 
 /**
- * 分值方块档位，按**满分比例**算（`cards.rs:36-63`）。
- *
- * 阈值 80% / 60% / 40% 是"占满分的比例"，不是绝对分——满分 100 与满分 10
- * 同一段代码都要对。所以不传 `maxScore` 就没有档位（`is-none`），
- * 绝不用硬编码的 80 分当界限（AGENTS.md C10）。
- *
- * 用整数比较 `10 * score` 与 `k * max`：浮点里 `0.6 * 60` 是 36.000004，
- * 会把"满分 60 拿 60 分"判成低档（实测踩到过）。
+ * 分值方块档位，按**满分比例**（80% / 60% / 40%）算，不是绝对分；没有 `maxScore`
+ * 就没有档位，**绝不用硬编码的 80 分当界限**（AGENTS.md C10）。
+ * 比较走整数 `10 * score` 与 `k * max`，浮点误差会把满分判成低档。
  */
 export function scoreTier(score: number, maxScore: number | null, delivered: boolean): ScoreTier {
   if (delivered) return 'is-done';
@@ -264,10 +230,8 @@ export interface StatusChip {
 }
 
 /**
- * 状态芯片三态（SPEC 7.11）。
- *
- * **不要**用 `status` 原值渲染——库里还有 `pending` / `new` / 空串三种历史写法
- * （`cards.rs:22-32`）。
+ * 状态芯片三态（SPEC 7.11）。**不要**用 `status` 原值渲染——库里还有
+ * `pending` / `new` / 空串三种历史写法。
  */
 export function statusChip(job: Job): StatusChip {
   if (isRejectedJob(job)) return { tone: 'bad', label: '不投递' };
@@ -291,6 +255,8 @@ export function addrFirstLine(raw: string | null | undefined): string {
 export interface CardView {
   readonly tid: string;
   readonly jobId: string;
+  /** 条目本身：打开详情时整条交付，父级不回列表反查（列表只是分页窗口）。 */
+  readonly job: Job;
   readonly title: string;
   readonly company: string;
   /** 原始公司名（未做「未知公司」占位替换），仅用于与聊天 Boss 的公司联动匹配。 */
@@ -310,12 +276,7 @@ export interface CardView {
 
 const DASH = '—';
 
-/**
- * 卡片展示模型：一次算完，模板只做插值。
- *
- * 空字段的兜底文案逐字固定（`cards.rs:126-152`）——
- * 「（无标题）」/「（未知公司）」/「面议」。
- */
+/** 卡片展示模型：一次算完，模板只做插值。空字段兜底为「（无标题）」/「（未知公司）」/「面议」。 */
 export function cardView(job: Job, maxScore: number | null): CardView {
   const title = job.title.trim() === '' ? '（无标题）' : job.title;
   const company = job.company.trim() === '' ? '（未知公司）' : job.company;
@@ -326,6 +287,7 @@ export function cardView(job: Job, maxScore: number | null): CardView {
   return {
     tid: tidSafe(job.job_id),
     jobId: job.job_id,
+    job,
     title,
     company,
     rawCompany: job.company.trim(),

@@ -1,40 +1,16 @@
-/*
- * Boss 消息页（M2）样式：右栏 chat-rail + 对话框 chat-detach + 自动投递条。
- *
- * 口径：冻结原型 prototypes/ui-v1 的 class 与尺寸逐条照抄（v3–v10 全部裁决），
- * 只做两处本仓库适配：
- *   1. 字号一律 `var(--fs-*)`（5 档的定义在 tokens.css，按 1920 基准乘
- *      `--ui-scale`）；`--rail-w` / `--detach-w` 在 `.page-chat` 上给一份静态兜底，
- *      运行期由 lib_ui/canvas.ts 的 syncCanvas() 用行内 style 覆写，行内优先级更高。
- *      右栏宽同样乘 --ui-scale：原型 L135 / L1319 写的就是 calc(300px * scale)；
- *      对话框宽不乘——原型 syncDetachWidth() 只有 50vw/80vw 与 600px 下限；
- *   2. 原型把自动投递条在展开时搬进对话框头，这里由页面用 v-if 两处二选一渲染，
- *      同一个 rail-auto-bar 与 auto-apply-bar 规则两处都适用。
- *
- * 禁止事项（C6 同族）：本文件不得出现 //! 或 /// 注释；
- * 块注释正文里不得出现反引号包起来的星号斜杠——同样的原因，会提前闭合注释。
- * 颜色一律取 tokens，不写字面色值（两处 light 主题微调除外，均带注释说明来源）。
- */
+/* Boss 消息页：右栏 chat-rail + 对话框 chat-detach + 自动投递条。类名与尺寸逐条照抄冻结原型。
+   字号一律 `var(--fs-*)`；`--rail-w` / `--detach-w` 在 :root 给静态兜底，
+   运行期由 lib_ui/canvas.ts 的 syncCanvas() 用行内 style 覆写。
+   自动投递条由页面 v-if 在两处二选一渲染，同一套规则两处都适用。 */
 
 /* ============================================================ *
- * 同屏聊天层：右栏 + 对话框（.app-body 的直接 flex 子项）
- * ============================================================ */
+   同屏聊天层：右栏 + 对话框（.app-body 的直接 flex 子项） */
 
-/* 静态兜底必须落在 `:root`，与原型逐字同一宿主（L135 --rail-w、L1085 --detach-w）。
- *
- * 为什么不是 `.app-body`（也不是退役前的 `.page-chat`）：自定义属性是**继承**的，
- * 任何比 `<html>` 更近的祖先一旦重新声明同名变量，就会把 `syncCanvas()` 写在
- * `documentElement` 行内 style 上的真实值整棵遮掉。行内样式只在「同一个元素」上
- * 才赢过样式表声明。实测过一次：宿主给 `.app-body` 时展开态对话框 computed
- * `width: var(--detach-w)` 拿到的仍是兜底 0px，产物里对话框实测只剩 1px 描边，
- * 投递列表也不被压缩（`--rail-w` 恰好因为两档数值与媒体查询对得上而看不出来）。
- *
- * 这两条只是「JS 还没跑」时的兜底，数值必须与 `lib_ui/canvas.ts` 同一公式；
- * 运行期真实来源永远是 syncCanvas() 写在 <html> 上的行内值（单一来源，REMAINING#3）。 */
+/* 静态兜底必须落在 `:root`：自定义属性会继承，任何更近的祖先重新声明同名变量，都会把
+   syncCanvas() 写在 documentElement 行内 style 上的真实值整棵遮掉（行内样式只在同一元素上赢）。 */
 :root {
-  /* 右栏基线宽：≥1360 为 360，以下收窄到 280（用户 m00933 加宽，原型是 300 / 260），
-   * 两者都乘 --ui-scale。数值与 lib_ui/canvas.ts 的 RAIL_W_WIDE / RAIL_W_NARROW 同源。
-   * 分档点 1360 的理由见 canvas.ts：再窄的窗口里对话框只有 50vw，右栏不能吃光正文区。 */
+  /* 右栏基线宽：≥1360 为 360，以下收窄到 280（是 300 / 260），
+   两者都乘 --ui-scale。数值与 lib_ui/canvas.ts 的 RAIL_W_WIDE / RAIL_W_NARROW 同源。 */
   --rail-w: calc(360px * var(--ui-scale));
   /* 对话框宽 = clamp(600px, 50vw, 80vw)，由 syncCanvas() 算好写进行内样式；
    * 兜底 0px 与原型一致（聊天默认收起、不渲染 detach，规格 A36）。**不乘 scale**。 */
@@ -68,12 +44,11 @@
   overflow: hidden;
 }
 
-/* 渐变高光描边（玻璃厚度感，原型 L1052-1060）落在 styles/layout.css 的
- * .chat-rail::before，与 .card::before 同族同宿主。那边要用
- * linear-gradient(currentColor 0 0) 当遮罩的 alpha 通道，而本文件（vue 系样式）按
- * tests/geometry.test.ts 的规定不得出现任何 hex / rgb 字面色值，所以手法留在契约层。 */
+/* 渐变高光描边（玻璃厚度感，原型）落在 styles/layout.css 的
+   .chat-rail::before，与 .card::before 同族同宿主。那边要用
+   linear-gradient(currentColor 0 0) 当遮罩的 alpha 通道，而本文件（vue 系样式）按 */
 
-/* 展开态：主对话框接管，右栏让位（原型里的 .app-shell.is-chat-open .chat-rail{display:none}）。 */
+/* 展开态：主对话框接管，右栏让位（里的 .app-shell.is-chat-open .chat-rail{display:none}）。 */
 .app-shell.is-chat-open .chat-rail {
   display: none;
 }
@@ -116,31 +91,9 @@
   margin-left: auto;
 }
 
-/* 收起对话框：对话框左缘外侧、列缝里的一条竖条（用户显式要求覆盖 SPEC A16 的禁竖排）。
- *
- * 口径演变（用户 m04278「默认样式不变」→ m04550 定形状 → m04575「c1，贴住线框」
- * → m04611「不要影响 boss 列表的布局，这个箭头悬浮起来」
- * → **m01669「boss 列表遮挡了它们，默认光带放到 boss 消息外框的左侧，
- * 在岗位列表和 boss 消息的中间」**）：
- *
- * 1. **默认态是光带** —— 200px 高、透明底，一条贯穿的细亮线 + 柔光晕；
- *    常驻装饰，不抢视觉。
- * 2. **悬停换成双 chevron** —— 用户给定的形状（两笔各 10px 粗、圆头圆角，
- *    笔画在尖端由 stroke-linejoin: round 自然收成圆弧，不是尖角）。
- *    C1 配色：linear-gradient 从 --primary 斜铺到 --primary-text，越朝右越亮。
- * 3. **盒宽 = 列缝宽（6px）** —— m01669 之前盒子是 22px 且 left: 0，整个压在
- *    Boss 列表的会话行上，用户判为遮挡。现在盒子外移到 .app-body 的列缝里，
- *    右缘贴住对话框左边框，**水平方向一格都不进 Boss 列表，也不进岗位列表**。
- *    悬停只把里面那枚 chevron 就地 scaleX 生长（不再向左位移 40px）。
- *
- * 为什么 position: absolute + right: 100%：纯浮层，不进流 —— Boss 列表因此能贴住
- * 对话框左边框。chevron 的 overflow: visible 让它能在 6px 盒内画出 46 单位的图形，
- * 但 transform 不含任何水平位移，所以图形始终留在列缝与对话框边缘一带。
- *
- * 悬停的每一步都有过渡（用户 m04373）：细线淡出 160ms、chevron 300ms 走 --ease-glass
- * （scaleX 0→1），观感是"细线长成箭头"，不是硬切。
- * 按钮本体一直接管指针（否则 :hover 永远不触发）；伪元素与 SVG 都 pointer-events: none，
- * 指针不会因为移到图形上而闪断。 */
+/* 收起对话框的把手：对话框左缘外侧、.app-body 列缝里的一条竖条（盒宽 = 列缝宽 6px，
+   不进 Boss 列表也不进岗位列表）。默认态是贯穿细亮线 + 柔光晕，悬停长成双 chevron
+   （scaleX 0→1 就地生长，不做水平位移）。纯浮层不进流：absolute + right: 100%。 */
 @property --chat-rail-angle {
   syntax: '<angle>';
   inherits: false;
@@ -150,7 +103,7 @@
 .chat-detach-collapse {
   position: absolute;
   z-index: 3;
-  /* 用户 m01669：按钮原先 left: 0 + 22px 宽，整个盒子压在 Boss 列表的会话行上，
+  /* 按钮原先 left: 0 + 22px 宽，整个盒子压在 Boss 列表的会话行上，
      两者重叠。现在把盒子整体外移到对话框外的列缝里（宽度取 .app-body 的 6px 列缝），
      盒子右缘贴住对话框左边框 —— Boss 列表一格不动，按钮也不再盖住任何会话行。 */
   right: 100%;
@@ -175,7 +128,7 @@
   outline: none;
 }
 
-/* 常态光带（用户 m01669）：挪到「Boss 消息外框的左侧」——也就是岗位列表与
+/* 常态光带：位于「Boss 消息外框的左侧」——也就是岗位列表与
    对话框之间那条 .app-body 的 6px 列缝里，**不再压在 Boss 列表的会话行上**。
    盒子只有 6px 宽，所以光带做成贴着外框左缘的一道 2px 竖光 + 一层向右的柔光晕。 */
 .chat-detach-collapse::after {
@@ -245,16 +198,8 @@
   }
 }
 
-/* 双 chevron（用户 m04550 给的形状，m04575 选 C1 渐变版）。
- *
- * 几何：viewBox 46x52，两笔「M5 5 L23 26 L5 47」「M23 5 L41 26 L23 47」，
- * stroke-width 10 + linecap/linejoin 全 round —— 尖端是两个对称的 10px 圆角。
- * 笔间距 18，两笔不粘连。
- *
- * 用户 m01669：原先悬停 translateX(-40px) 让箭头浮到对话框左缘之外、**悬在 Boss 列表上**，
- * 被用户判为遮挡。按钮盒已移到 .app-body 的 6px 列缝里，箭头改为**在列缝内就地浮出**：
- * 只做透明度 + 横向缩放的生长，不再产生任何水平位移，因此既不盖 Boss 列表，
- * 也不侵入岗位列表。整块宽度收窄到列缝宽度，右缘贴住对话框左边框。 */
+/* 双 chevron：viewBox 46x52，两笔 10px 粗、圆头圆角（linejoin: round 收成圆弧）。
+ * 只在列缝内就地生长，不做任何水平位移。 */
 .chat-detach-chevrons {
   position: absolute;
   right: 0;
@@ -347,7 +292,7 @@
 .chat-rail-list {
   display: flex;
   flex-direction: column;
-  /* 行间距 2 → 8（用户 m01669「增加 boss 列表的间距」）：截图里相邻两行的玻璃边
+  /* 行间距 2 → 8：相邻两行的玻璃边
      几乎粘在一起，读起来像一整块而不是一列卡片。只加行间缝，行内 padding 不动，
      每行自身的尺寸与点击热区保持原样。 */
   gap: 8px;
@@ -396,7 +341,7 @@
   align-items: center;
   justify-content: center;
   /* 放大到 32px：图标按钮放大后行高由头像决定，头像跟着抬一档，
-     同时给名字 / 摘要两行多留出 4px 的呼吸（用户：卡片内容行间距加大）。 */
+     同时给名字 / 摘要两行多留出 4px 的呼吸。 */
   width: 32px;
   height: 32px;
   border-radius: 9px;
@@ -405,14 +350,14 @@
   color: var(--on-primary-deep);
   font-size: var(--fs-sm);
   font-weight: 650;
-  /* 头像顶边的迎光内高光已移除（用户裁决：卡片以外不再出高光边）。 */
+  /* 头像顶边的迎光内高光已移除：卡片以外不出高光边。 */
   box-shadow: none;
 }
 
 .friend-main {
   display: flex;
   flex-direction: column;
-  /* 名字与摘要之间的行间距（用户：卡片内容行间距加大）。
+  /* 名字与摘要之间的行间距。
      保持 ≤ 8px：再大会让 .friend 高过对话框列表内其它行。 */
   gap: 5px;
   min-width: 0;
@@ -435,7 +380,7 @@
   white-space: nowrap;
 }
 
-/* 副行的三种状态（用户 m01427：已送达 / 已读 / 未读 显示不同颜色）。
+/* 副行的三种状态：已送达 / 已读 / 未读 显示不同颜色。
    顺序即轻重：未读最重（正文色 + 加粗）、已读次之（绿）、已送达最淡（当前 --text-3）。 */
 .friend-msg.is-unread {
   color: var(--text-1);
@@ -464,14 +409,9 @@
   flex: 0 0 auto;
 }
 
-/* 行内操作列（打招呼 / 简历）：原先在对话区顶部的 chat-head，已按裁决下沉到行内。
- * 默认隐藏，行 hover / 选中 / 键盘聚焦时才浮现——否则每一行都挂两个按钮，
- * 列表会变成一片按钮墙，扫视会话的效率反而下降。 */
-/* 操作列收成**同一行的图标按钮**（用户：打招呼 + 移除竖排把卡片撑高了，
- * 行高必须与其它 Boss 一致；后又要求图标放大并并排）。
- * 横排 + 单个 31px 高，与放大后的头像（32px）齐平，行高仍由头像决定，
- * 不随「有几个操作」变；图标 21px。
- * 悬停时用左侧 tooltip 报出文字与 data-testid，按钮本身只画图形。 */
+/* 行内操作列（打招呼 / 简历）：默认隐藏，行 hover / 选中 / 键盘聚焦时才浮现。两个图标
+   并排成一行、单个 31px 高，与 32px 的头像齐平，行高仍由头像决定；悬停时用左侧 tooltip
+   报出文字与 data-testid。 */
 .friend-acts {
   display: inline-flex;
   flex-direction: row;
@@ -514,8 +454,7 @@
 }
 
 /* 悬停提示：向右让开自己、盖到好友摘要上（本行右侧到列表边缘只有约 20px，
- * 放右侧会被 .friend 的 overflow: hidden 裁掉）。已在 opacity 过渡里出现，
- * 不用 display 切换，收起态不影响行高。 */
+   放右侧会被 .friend 的 overflow: hidden 裁掉）。已在 opacity 过渡里出现， */
 .friend-act-label {
   position: absolute;
   right: calc(100% + 4px);
@@ -582,7 +521,7 @@
   display: flex;
   flex-direction: column;
   /* 靠左：Boss 列表的引导/空态与列表条目同一条左基线，居中排版在窄栏里
-   * 会和上方搜索框、下方条目错位（用户反馈「没有靠左」）。 */
+   * 会和上方搜索框、下方条目错位。 */
   align-items: flex-start;
   justify-content: center;
   gap: 8px;
@@ -592,7 +531,7 @@
 }
 
 /* .state-title / .state-sub / .state-glyph 用 vue-dashboard.css 的全局真值
- * （原型 L901-912：玻璃盒 glyph + fs-md 标题 + fs-sm 副文），此处不再覆写。 */
+ * （玻璃盒 glyph + fs-md 标题 + fs-sm 副文），此处不再覆写。 */
 
 .rail-guide {
   font-size: var(--fs-sm);
@@ -615,7 +554,7 @@
   min-width: 0;
   box-sizing: border-box;
   overflow-wrap: anywhere;
-  /* 原型 L1179：错误卡入场 rail-in，与 bubble-in 同族（淡入 + 轻微位移）。 */
+  /* （错误卡入场 rail-in，与 bubble-in 同族（淡入 + 轻微位移）。 */
   animation: rail-in var(--dur) var(--ease-out);
 }
 
@@ -636,7 +575,7 @@
   white-space: normal;
 }
 
-/* 原型 L1187 逐字。只动 opacity/transform，走合成层，不触发 backdrop-filter
+/* 逐字。只动 opacity/transform，走合成层，不触发 backdrop-filter
  * 每帧重算；减少动态效果由 controls.css 的全局媒体查询统一封顶，这里不重复。 */
 @keyframes rail-in {
   from { opacity: 0; transform: translateY(-4px) scale(0.99); }
@@ -652,8 +591,7 @@
 }
 
 /* ============================================================ *
- * 对话框：宽度走 flex-basis 过渡（禁止 translateX，A15 要求 position: static）
- * ============================================================ */
+   对话框：宽度走 flex-basis 过渡（禁止 translateX，A15 要求 position: static） */
 
 .chat-detach {
   flex: 0 0 0;
@@ -665,9 +603,7 @@
   display: flex;
   flex-direction: column;
   border-radius: var(--radius);
-  /* 底色与岗位列表卡片**同一枚令牌**（用户：两个窗口的底色要一致，不要多处定义）。
-   * 改底色只改这里这一处（`.job-card` 在 vue-dashboard.css 里同值），
-   * 别再加第二份透明度或第二个色值去「微调」观感。 */
+  /* 底色与岗位列表卡片同用 --glass-0，改底色只改 tokens.css 这一处。 */
   background: var(--glass-0);
   backdrop-filter: blur(var(--blur-1)) saturate(var(--saturate-1));
   -webkit-backdrop-filter: blur(var(--blur-1)) saturate(var(--saturate-1));
@@ -686,10 +622,9 @@
   display: none;
 }
 
-/* 展开态不再套第二层外框（用户 m01129「聊天框展开时，外层边框不要显示」）：
- * 对话框根节点自身的 1px 高光描边与卡片外投影都去掉，底色+模糊留着，
- * 展开后它就是主内容区本身，而不是「主内容之上再浮一张卡」。
- * 收起态（右栏让位时那 0 宽的一格）不触发 is-open，规则不生效。 */
+/* 展开态不再套第二层外框：
+   对话框根节点自身的 1px 高光描边与卡片外投影都去掉，底色+模糊留着，
+   展开后它就是主内容区本身，而不是「主内容之上再浮一张卡」。 */
 .chat-detach.is-open {
   box-shadow: none;
 }
@@ -731,9 +666,8 @@
   min-width: 0;
   flex: 1 1 auto;
   overflow-y: hidden;
-  /* 收起按钮悬停时会向左侧外扩（用户 m04611「不要影响 boss 列表的布局，这个箭头悬浮起来」）。
-   * 横向裁切放开，箭头才能「浮」到对话框左缘之外；纵向仍裁，免得内容/列表溢出到桌面。
-   * 外扩的是绝对定位的浮层，不在流里，所以 Boss 列表宽度与位置一格都不动。 */
+  /* 收起按钮悬停时向左侧外扩：横向裁切放开，箭头才能浮到对话框左缘之外；纵向仍裁，免得内容
+     溢出到桌面。外扩的是绝对定位的浮层，不在流里，列表宽度与位置不动。 */
   overflow-x: visible;
 }
 
@@ -748,9 +682,8 @@
 }
 
 /* 左段（Boss 列表）与右段（聊天）之间的分隔线：不再让列表自己画 border-right，
- * 而是画在聊天流的第一列内边距上（用户 m01063「中间的间距太大了」）。
- * 原来 border-right 的 1px 是叠在 --rail-w 之外的，等于多占一格；
- * 现在线贴着聊天区文字起排的位置，列表与分隔线之间不再多出 1px 的空白。 */
+   而是画在聊天流的第一列内边距上。
+   原来 border-right 的 1px 是叠在 --rail-w 之外的，等于多占一格； */
 .chat-detach-chat {
   border-left: 1px solid var(--hairline);
 }
@@ -776,8 +709,7 @@
 }
 
 /* 右列：AI 生成在上、发送在下，整列与左侧输入框**完全同高同底**，
- * 两颗按钮固定 34px、中间留 6px 细缝，一起在外框里垂直居中
- * （用户：刚好像消息发送框那么高；AI 生成上方不该多出空白）。 */
+   两颗按钮固定 34px、中间留 6px 细缝，一起在外框里垂直居中 */
 .chat-detach-actions {
   flex: 0 0 auto;
   display: flex;
@@ -797,7 +729,7 @@
   border-radius: var(--radius-sm);
 }
 
-/* AI 生成胶囊：紧贴发送按钮正上方，只保留一圈流动光带（用户：去掉炫彩底色）。 */
+/* AI 生成胶囊：紧贴发送按钮正上方，只保留一圈流动光带。 */
 .chat-detach-ai {
   position: relative;
   margin: 0;
@@ -810,11 +742,9 @@
   isolation: isolate;
 }
 
-/* 流动光带（用户：移除炫彩效果、保留光带并一直顺时针流动）：
-   主色同族的三段亮弧在深色轨道上绕行，遮罩只留 1px 描边。
-   复用折叠把手的 --chat-rail-angle（@property 注册过角度才能补间），
-   与 chat-rail-sweep 同一套 0deg→180deg + 对称配色，循环首尾无跳变，
-   所以一直 inifinite 跑也不会闪。 */
+/* 流动光带：主色同族的三段亮弧在深色轨道上顺时针绕行，遮罩只留 1px 描边。
+   复用折叠把手的 --chat-rail-angle（@property 注册过角度才能补间），与
+   chat-rail-sweep 同一套 0deg→180deg 加对称配色，循环首尾无跳变。 */
 .chat-detach-ai::before {
   content: '';
   position: absolute;
@@ -846,7 +776,7 @@
   pointer-events: none;
 }
 
-/* 底色：原先粉紫炫彩（--accent-soft / --primary-soft）已按用户要求移除，
+/* 底色：原先的粉紫炫彩（--accent-soft / --primary-soft）已移除，
    只留一层浅玻璃让光带有承载面。 */
 .chat-detach-ai::after {
   content: '';
@@ -868,7 +798,7 @@
   animation: none;
 }
 
-/* 原型 L2422：对话框空态的 glyph 是 40×40 的圆盒（右栏与列表空态仍用 44×44 方盒）。 */
+/* （对话框空态的 glyph 是 40×40 的圆盒（右栏与列表空态仍用 44×44 方盒）。 */
 .chat-detach .state-glyph.is-round {
   width: 40px;
   height: 40px;
@@ -879,12 +809,12 @@
   flex: 1 1 auto;
   min-width: 0;
   resize: none;
-  /* 原型 L1123：保住用户输入的换行，同时长词不撑破。 */
+  /* （保住用户输入的换行，同时长词不撑破。 */
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
 
-/* 原型 L1117：发送按钮不参与换行，窄档也不会被 textarea 挤成两行。 */
+/* （发送按钮不参与换行，窄档也不会被 textarea 挤成两行。 */
 .chat-detach-compose .btn {
   flex: 0 0 auto;
   white-space: nowrap;
@@ -895,20 +825,17 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  /* 长会话的渲染隔离（用户 m01994：消息列表刷新会卡住）。
-   * `content-visibility: auto` 让浏览器跳过视口外气泡的布局与绘制，只保留
-   * `contain-intrinsic-size` 估算的高度占位；滚回去时再按需补算。
-   * 本元素已经有确定的高度（flex 撑满），自动高度不受影响。 */
+  /* 长会话的渲染隔离：content-visibility 跳过视口外气泡的布局与绘制，回到视口再按需补算；
+     contain-intrinsic-size 给出估算高度占位，本元素自身高度已由 flex 撑满，不受影响。 */
   content-visibility: auto;
   contain-intrinsic-size: auto 48px;
-  /* 原型 L1113：聊天区内边距 12px 14px（pages.css 那份是契约宿主，不动它，
+  /* （聊天区内边距 12px 14px（pages.css 那份是契约宿主，不动它，
    * 这里按对话框作用域覆盖，交接表 D 行）。 */
   padding: 12px 14px;
 }
 
-/* 原型 L1116：1200 档聊天区只有 340px，气泡按 80% 收口、宁可压 Boss 列表段
- * （可降到 240px）也不逐字换行（用户裁决 U 复核）。契约宿主 pages.css 的 76%/anywhere
- * 不改，这里只在对话框作用域覆盖。 */
+/* （1200 档聊天区只有 340px，气泡按 80% 收口、宁可压 Boss 列表段
+   （可降到 240px）也不逐字换行。契约宿主 pages.css 的 76%/anywhere */
 .chat-detach-chat .bubble {
   max-width: 80%;
   overflow-wrap: break-word;
@@ -922,27 +849,24 @@
   contain: layout paint;
 }
 
-/* 原型 L1196：气泡入场 bubble-in —— 只在**这批节点新建**的那一帧播一次。
- * ChatThread.vue 在 onBeforeUpdate 里给根节点挂 is-entering 类，下一帧摘掉（直接改 DOM，
- * 不进响应式状态）。原先 animation 常驻，任何远程结果整体替换都会让全部气泡重播
- * 下拉 + 缩放，那正是「点 Boss 看对话卡一秒」的可感知部分（用户 2026-11-25）。 */
+/* （气泡入场 bubble-in —— 只在**这批节点新建**的那一帧播一次。
+   ChatThread.vue 在 onBeforeUpdate 里给根节点挂 is-entering 类，下一帧摘掉（直接改 DOM，
+   不进响应式状态）。原先 animation 常驻，任何远程结果整体替换都会让全部气泡重播 */
 .chat-detach-chat.is-entering .bubble {
   animation: bubble-in var(--dur) var(--ease-out);
 }
 
-/* 原型 L1201 逐字（淡入 + 下方 4px 起步），与 rail-in 同族。
- * 原来的 `scale(0.985)` 已去掉：视觉几乎不可见，却让每个气泡强制独立合成层
- * （40 条 = 40 层，重建时逐层重合成）。 */
+/* 逐字（淡入 + 下方 4px 起步），与 rail-in 同族。
+   原来的 scale(0.985) 已去掉：视觉几乎不可见，却让每个气泡强制独立合成层 */
 @keyframes bubble-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
 }
 
 /* ============================================================ *
- * 自动投递条（`auto-apply-bar`）
- * ============================================================ */
+   自动投递条（auto-apply-bar） */
 
-/* 原型 L521-525：状态条整行**不换行**，且 flex 0 0 auto + min-width 0——
+/* （状态条整行**不换行**，且 flex 0 0 auto + min-width 0——
  * 放不下时自然让位给右侧计数，而不是把整条撑成两行。 */
 .auto-apply-bar {
   display: flex;
@@ -957,21 +881,14 @@
   flex: 0 0 auto;
 }
 
-.rail-auto-bar {
-  margin: 8px 10px 2px;
-  /* 计数已挪进列表头；条内只剩状态标签与按钮。按钮靠右由条内的 .spacer 撑开
-   * （space-between 只管两端的盒，acts 盒本身是内容宽，按钮会粘着标签）。 */
-}
-
 /* 对话框头里的条：标题行 `.chat-detach-head-row` 是本条的直接父级，它是个
- * `display:flex` 行，所以本条是一个 flex 项目。条本身取内容宽，右侧贴边由
- * 标题行里的弹性占位撑开，条内不再靠内边距把按钮推离边框。 */
+   display:flex 行，所以本条是一个 flex 项目。条本身取内容宽，右侧贴边由 */
 .chat-detach-head .auto-apply-bar {
   margin: 0 2px 0 8px;
   flex: 0 0 auto;
 }
 
-/* 原型 L528-531：状态标签是 fs-xs / 字重 560 / 单行。 */
+/* （状态标签是 fs-xs / 字重 560 / 单行。 */
 .auto-apply-label {
   display: inline-flex;
   align-items: center;
@@ -990,7 +907,7 @@
   background: var(--text-3);
 }
 
-/* 原型 L537：running 态文字仍是正文色，状态只由**点色**表达（绿点 + 光晕）。 */
+/* （running 态文字仍是正文色，状态只由**点色**表达（绿点 + 光晕）。 */
 .auto-apply-label.is-running {
   color: var(--text-1);
 }
@@ -1004,12 +921,12 @@
   color: var(--warn);
 }
 
-/* 原型 L540：paused 只有琥珀点，**没有光晕**——光晕只属于 running。 */
+/* （paused 只有琥珀点，**没有光晕**——光晕只属于 running。 */
 .auto-apply-label.is-paused::before {
   background: var(--warn);
 }
 
-/* 原型 L541：按钮组 flex 0 0 auto，窄档不吃宽。 */
+/* （按钮组 flex 0 0 auto，窄档不吃宽。 */
 .auto-apply-acts {
   display: inline-flex;
   align-items: center;
@@ -1017,12 +934,8 @@
   flex: 0 0 auto;
 }
 
-/* 主按钮（开始自动投递 / 继续）在自动投递条里不要任何底色（用户 m01085
- * 「全局翡翠绿渐变底 删除」，指的就是这一枚上的那块绿）：渐变底与投影都不铺，
- * 文字改走正文色，悬停/按下只提亮文字；running 态的警示药丸在 .btn-pause 上另写。
- * 描边同样改回中性发丝线——全局 .btn-primary 的描边是半透明主色，绿底一并去掉后
- * 只剩它挂在外面，旁人只看见「一个绿框」（用户 m01122「这里为什么是绿色边框」）。
- * 只动颜色/阴影，盒模型与排版一律不碰——外框、内边距、高度都保持原样。 */
+/* 主按钮在自动投递条里不铺渐变底与投影，文字走正文色，描边回到中性发丝线，
+ * 悬停/按下只提亮文字。只动颜色与阴影，盒模型与排版不碰。 */
 .auto-apply-acts .btn-primary {
   background: transparent;
   border-color: var(--hairline);
@@ -1083,15 +996,15 @@
   margin-left: 2px;
 }
 
-/* idle：结束按钮不出现（原型用 data-mode 选择器隐藏，这里用 v-if，规则留作兜底）。 */
+/* idle：结束按钮不出现（用 data-mode 选择器隐藏，这里用 v-if，规则留作兜底）。 */
 .auto-apply-bar[data-mode='idle'] [data-testid='auto-greet-stop-btn'] {
   display: none;
 }
 
-/* 「暂停」主按钮的警示色（原型 .btn-pause；controls.css 未定义，在此补齐）。 */
-/* 「暂停」主按钮的警示色（原型 L326-327 .btn-pause，用户裁决 D）。
- * 数值走令牌 --btn-pause-*（浅色覆盖在 tokens.css 的 light 块）；悬停按原型是**改描边**，
- * 不是 filter 提亮。 */
+/* 「暂停」主按钮的警示色（ .btn-pause；controls.css 未定义，在此补齐）。 */
+/* 「暂停」主按钮的警示色（ .btn-pause）。 */
+ 数值走令牌 --btn-pause-*（浅色覆盖在 tokens.css 的 light 块）；悬停按原型是**改描边**，
+/* 不是 filter 提亮。 */
 .btn-pause {
   border-color: var(--btn-pause-border);
   background: var(--btn-pause-bg);
@@ -1102,12 +1015,8 @@
   border-color: var(--btn-pause-border-hover);
 }
 
-/* ============================================================ *
- * 提示行（瞬态）
- * ============================================================ *
- * 求职期望行（.expect-row 与 chat-expect-* 锚点）已按 SPEC-001 Rev3/Rev5 退役：原型
- * L926-927 明写「求职期望已并入筛选条件面板；打分试算已移除」，四档基线图右栏也没有这行。
- * 期望数据仍由概览筛选面板的「读取期望职位」承载，api 封装与契约面不动。 */
+/* ---------- 提示行（瞬态） ----------
+ * 求职期望行已退役，期望数据由概览筛选面板的「读取期望职位」承载。 */
 
 /* 两条瞬态提示：右栏只有 300/260 宽，按 K9「错误必须可读」保留全文，但收小字。 */
 .chat-note {
@@ -1146,18 +1055,15 @@
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
-  /* 用户 m02288：错误文案再长也不许把对话框撑高到看不见消息。
-     长报错在条内滚动，行数上限 4 行左右；短句照旧自适应高度。 */
+  /* 错误文案再长也不许把对话框撑高到看不见消息。 */
+/* 长报错在条内滚动，行数上限 4 行左右；短句照旧自适应高度。 */
   max-height: calc(var(--fs-sm) * 6);
   overflow-y: auto;
   overflow-wrap: anywhere;
 }
 
-/* 消息流末尾的说明条（用户 m01273）：「已是最新消息」这类不是错误，
-   用小一号的灰字 + 一条淡分隔线，不抢消息的视觉。
-   用户 m01764：位置从「输入框上方」挪进消息流末尾（紧接最后一条气泡），
-   所以去掉 margin-top / padding-top / border-top —— 它上方不再有输入框要隔开，
-   分隔线会读成「又切了一刀」。 */
+/* 消息流末尾的说明条：「已是最新消息」这类不是错误，用小一号灰字，不抢消息视觉。
+   位置紧接最后一条气泡而不是输入框上方，所以不加上边距与上分隔线。 */
 .detach-hint {
   flex: 0 0 auto;
   margin: 10px 12px 4px;
@@ -1168,9 +1074,9 @@
   overflow-wrap: anywhere;
 }
 
-/* 「已是最新消息」在 Boss 列表标题行里的那一份（用户 m01764：放到 boss 列表的最上方）。
+/* 「已是最新消息」在 Boss 列表标题行里的那一份，放在列表最上方。 */
    标题行是 44px 定高 flex，提示跟在标题 / 未读徽标之后，靠 margin-left: auto 与
-   刷新按钮前的 spacer 并排右靠；放不下就省略号，不撑高标题行。 */
+/* 刷新按钮前的 spacer 并排右靠；放不下就省略号，不撑高标题行。 */
 .rail-fresh {
   flex: 0 1 auto;
   min-width: 0;
@@ -1183,6 +1089,5 @@
 }
 
 /* 这里原先有一段 @media (max-width: 900px) 把右栏与对话框堆成整行，已按交接表 H 行删除：
- * 原型 L1339-1341 是用户硬约束「页面最小宽度 1200px；1200 是唯一基线布局（右栏与主列始终
- * 同排、网格卡始终 3/2 列），小于 1200 保持 1200 布局并出现横向滚动条——不做任何落底/单列
- * 降级。app-shell 已有的 min-width 1200px 承接这条口径。 */
+   原型 是用户硬约束「页面最小宽度 1200px；1200 是唯一基线布局（右栏与主列始终
+   同排、网格卡始终 3/2 列），小于 1200 保持 1200 布局并出现横向滚动条——不做任何落底/单列 */

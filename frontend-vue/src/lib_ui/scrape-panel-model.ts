@@ -1,21 +1,15 @@
 /**
- * 抓取互斥按钮与进度文案的纯逻辑（C9 的文案在这里逐字定死）。
- *
- * 三态：idle（未在跑）/ running（在跑）/ paused（用户暂停）。
- * 注意"暂停"就是 `scrape_stop`——sidecar 停止后进度仍保留，
- * 再点「继续抓取」会重新 `scrape_start`。所以本文件只负责**显示成什么**
- * 与**点了发哪条命令**，不负责真正的抓取编排。
+ * 抓取互斥按钮与进度文案的纯逻辑。三态：idle / running / paused；「暂停」就是
+ * `scrape_stop`（进度保留），再点「继续抓取」会重新 `scrape_start`。本文件只负责显示什么
+ * 与点击发哪条命令，不负责抓取编排。
  */
 import type { ScrapeProgress, ScrapeUpdate } from '../api/types';
 
 export type ScrapeButtonState = 'idle' | 'running' | 'paused';
 
 /**
- * `max_jd` 输入框的上限。
- *
- * 与后端 `backend-tauri/src/core/domain/app_config.rs:162` 的 `MAX_JD_CAP = 500` 对齐：
- * 超过它 `set_limit` 会**直接拒绝**（不是静默夹住），所以界面先夹一次，
- * 避免用户看到「保存失败但值已经生效」。这是后端常量，不是业务门槛。
+ * `max_jd` 输入框的上限，与后端 `MAX_JD_CAP = 500` 对齐：超过它 `set_limit` 会直接拒绝
+ * 而不是静默夹住，所以界面先夹一次，免得出现「保存失败但值已生效」。
  */
 export const MAX_JD_CEILING = 500;
 
@@ -44,9 +38,7 @@ export function fromProgress(p: Partial<ScrapeProgress> | null | undefined): Scr
 }
 
 /**
- * 输入：进度里的 `running` + 用户是否点过暂停。
- *
- * 用户点了暂停但 sidecar 还没退出（`running` 仍为 true）时保持 running：
+ * 输入：进度里的 `running` + 用户是否点过暂停。点了暂停但 sidecar 还没退出时仍算 running，
  * 只有真的停了才显示「继续抓取」。
  */
 export function buttonState(running: boolean, pausedByUser: boolean): ScrapeButtonState {
@@ -121,11 +113,8 @@ export function startDisabled(starting: boolean, running: boolean): boolean {
 }
 
 /**
- * 数据库里三条 `status` 之外，计算模式的选择。
- *
- * 大模型打分可选中：选中后顶栏多一个 0-100 的初筛输入（`llm_prefilter`），
- * 语义是「规则分低于该值就不调大模型」，默认 50（`DEFAULT_LLM_PREFILTER`）。
- * 初筛判定在后端 `scoring_llm::decide`，前端只负责选值与落库。
+ * 数据库里三条 `status` 之外的计算模式选择。选中大模型打分后顶栏多一个 0-100 的初筛输入
+ * （`llm_prefilter`，默认 50）：规则分低于它就不调大模型。初筛判定在后端，前端只负责选值与落库。
  */
 export interface ScoreModeSeg {
   readonly key: 'rule' | 'llm';
@@ -197,10 +186,8 @@ export const FEED_SKIPPED_TAG = '跳过';
 export const FEED_MAX = 300;
 
 /**
- * `ScrapeUpdate` → 事件流一行（`panel.rs` 的 `to_feed_line`）。
- *
- * 只把「岗位」这一型转成行：日志/登录/畸形/退出/重启各有自己的去处
- * （日志走 `list_logs`，其余进提示），混进事件流会淹掉进度信息。
+ * `ScrapeUpdate` → 事件流一行。只转「岗位」这一型：日志 / 登录 / 畸形 / 退出 / 重启各有
+ * 去处，混进事件流会淹掉进度信息。
  */
 export function toFeedLine(u: ScrapeUpdate): FeedLine | null {
   if (u.kind !== 'job') return null;

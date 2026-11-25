@@ -1,15 +1,8 @@
-/* 分域样式：布局骨架（页面容器、顶栏、卡片、栅格）。
- *
- * 与 `tokens.css` 的分工：那里只有变量与基础重置，所有**形状**在这里。
- * 类名与 TS 版 `skeleton-web/src/styles/*.css` 逐字一致——E2E 与视觉比对都依赖它。
- *
- * 注意：本文件不得出现两个斜杠加叹号（或三个斜杠）开头的 Rust 文档注释，
- * 否则整份样式表被浏览器静默丢弃。
- */
+/* 分域样式：布局骨架（页面容器、顶栏、卡片、栅格）。tokens 只给变量与重置，形状都在这里。
+ * 类名与只读参考逐字一致，E2E 与视觉比对依赖它。只用块注释。 */
 
 /* ---------- 应用外壳 ----------
- * 整页不设不透明底色：窗口的亚克力透上来才是 Liquid Glass 的底。
- * min-height 用 100% 而不是 100vh：WebView 里 100vh 会把横向滚动条也算进去。 */
+   整页不设不透明底色：窗口的亚克力透上来才是 Liquid Glass 的底。 */
 .app-shell {
   display: flex;
   flex-direction: column;
@@ -18,16 +11,8 @@
   /* 去边界感：顶栏与页面主体共用同一块玻璃面板，外壳不再留缝。 */
   padding: 0 0 14px;
   gap: 0;
-  /* 窗口外形 = DWM 的 8px 弧（用户 m03488 / m03505 裁决）。
-   *
-   * 透明客户区的四个方角只有系统能裁：前端 `.app-shell` 的 `border-radius` 只裁自己
-   * 那一层，裁不到窗口矩形，弧外仍会漏出一块桌面方角。所以外形交给
-   * `apply_round_corners`（DWMWCP_ROUND = 8px），这里用**同样的半径**
-   * `--shell-radius` 画一层同心弧，两层不互相啃，也不需要为躲弧而留透明缝：
-   * 外壳真正贴满窗口，四角干净。
-   *
-   * `overflow: hidden` 仍是硬要求：内容按这个弧裁，否则顶栏/卡片会在角上探出去。
-   * 内部卡片继续用 `--radius`（16px），与窗口外形无关。 */
+  /* 窗口外形 = DWM 的 8px 弧：外壳用同样的 `--shell-radius` 画同心弧，两层不互相啃。
+   * */
   margin: 0;
   height: 100%;
   border-radius: var(--shell-radius);
@@ -97,45 +82,8 @@
   padding-bottom: 2px;
 }
 
-/* ---------- 概览页：投递列表撑满剩余空间 ----------
- * 用户裁决「投递列表默认撑满下发的空间」。
- *
- * 本页滚动交给列表内部的网格（`.job-body.is-fill`），页面自身不再滚：
- * 列表以上的横幅、以下的运行日志/抓取/期望/试算全是固定高度，页面一旦
- * 还能滚，列表的「撑满」就没有可参照的高度，永远是内容高度。
- * 窄窗口（< 1100px）退回页面滚动：那里一行放不下四列，硬撑会把卡片压扁。 */
-.dashboard.is-fill-page {
-  overflow: hidden;
-}
-
-.dashboard.is-fill-page > .app-error,
-.dashboard.is-fill-page > .app-notice {
-  flex: 0 0 auto;
-}
-
-.dashboard.is-fill-page > .job-list {
-  flex: 1 1 auto;
-  min-height: 220px;
-}
-
-.dashboard.is-fill-page > .log-wrap,
-.dashboard.is-fill-page > .scrape-card,
-.dashboard.is-fill-page > .empty-state {
-  flex: 0 0 auto;
-}
-
-@media (max-width: 1100px) {
-  .dashboard.is-fill-page {
-    overflow-y: auto;
-  }
-  .dashboard.is-fill-page > .job-list {
-    flex: 0 0 auto;
-  }
-}
-
 /* ---------- 卡片 ----------
- * Liquid Glass 的核心形状：半透底 + 模糊 + 渐变高光边 + 内外阴影。
- * 【不许改成 border + 纯色】：那会退化成普通的半透明面板。 */
+   Liquid Glass 的核心形状：半透底 + 模糊 + 渐变高光边 + 内外阴影。 */
 .card {
   position: relative;
   display: flex;
@@ -153,22 +101,8 @@
   background-image: none;
 }
 
-/* M4 卡片高光边（iOS 风格，随光源变化）。两道高光**都画在同一条 1px 边框环上**
- * （同一个 ::before 盒、同一套 mask），区别只在透明度：
- *  · 默认：左上、右下各一道亮弧（光从两个对角来），常驻。
- *  · 指针落在卡上：环上再叠一块以指针为圆心的径向光斑（半径 300px，中心 100%
- *    不衰减），落在**同一条边**上——不是另起一层 div，所以不会有一块影子跑到边框内侧。
- *
- * 历史教训（用户 m01636 / m01701 / m01748）：曾经插过一个独立的 `.hl-light` 子元素
- * 来画光斑，它自算几何、没对齐到边框，而且进卡/离卡是两层交叉淡变，肉眼是明显的割裂。
- * 现在光斑回到 ::before 的 background 里，唯一会动的只有 opacity 与 background-position。
- * 颜色只经令牌（红线 8）。
- *
- * 伪元素必须是「拉伸铺满」而不是 `inset: 0`：`.card` 与 `.job-card` 都是
- * `display: flex` 的列容器，绝对定位的子盒按**内容盒**取横轴位置和宽度，
- * 用 `inset: 0` 会让高光环在内容区里多缩进一条内边距，卡底那一截就只剩
- * 默认值（几乎看不见）。改成 left/top/right/bottom 皆为 0 + width/height 100%
- * 才与 border-box 对齐。 */
+/* 卡片高光边：默认对角弧与指针光斑都画在同一条 1px 边框环上（同一个 ::before + 同一套 mask）。
+   伪元素必须用 left/top/right/bottom: 0 + width/height: 100% 铺满，不能用 `inset: 0`—— */
 .card::before,
 .card::after {
   content: '';
@@ -200,8 +134,7 @@
 /* 非 .card 的玻璃表面（聊天 rail、Boss 好友项、岗位卡、决策记录/敏感库）共用同一套高光伪元素。 */
 .hl-surface { position: relative; }
 
-/* 默认高光弧单独落在 ::after 上（::before 专给指针光斑用）。两条规则的出处见下方
- * 「高光本体」段：`.card::after` 与 `.hl-surface::after` 共用同一套对角渐变。 */
+/* 默认高光弧落在 ::after 上，::before 专给指针光斑用。 */
 .hl-surface::before,
 .hl-surface::after {
   content: '';
@@ -223,15 +156,8 @@
   transition: none;
 }
 
-/* 默认高光 = 一块 1px 边框环，左上↔右下两道对角亮弧（135deg），画在 ::after 上常驻。
- *
- * 起点是 `--spec-peak`（不透明纯白），随后在 0%→34% 里连续衰减到透明：
- * iOS 的边光不是「一条均匀的淡线」，而是最亮的那一点向外迅速变暗。
- *
- * **每一层只配一块渐变**（用户 m01973）：::after 只有默认弧，::before 只有指针光斑。
- * 曾经让 ::before 不点亮时也画默认弧、点亮时换成光斑，结果进卡瞬间默认弧被直接换掉、
- * 没有任何过渡可看。现在默认弧只靠 opacity 淡出/淡入（main.ts 补间），
- * 光斑只靠 --hl-fade 淡出，两层都不换背景。 */
+/* 默认高光：::after 上的 135deg 双对角弧，起点 `--spec-peak` 在 0%→34% 衰减到透明。
+ * **每层只配一块渐变**：::before 只画指针光斑，两层都靠 opacity 淡入淡出，不换背景。 */
 .card::after,
 .hl-surface::after {
   background: linear-gradient(
@@ -248,25 +174,14 @@
   opacity: var(--spec-strength);
 }
 
-/* 指针在卡内：在**同一条边框环**上叠一道指针光斑（用户 m01609 裁决：「使用鼠标光斑，
- * 不衰减，对命中的地方向两侧对称衰减 300px 的光带」，m01701 追加「必须在边框上」）。
- *
- * --hl-x / --hl-y 是 main.ts 每次 pointermove 写下的指针真实位置（卡内百分比），
- * 圆心就落在这里，所以光斑永远骑在边框上，不会偏到卡内或卡外。
- * 中心 100%（--spec-peak）不打折，向两侧对称衰减，300px 外归零。
- *
- * 位置过渡走 background-position：光标在卡内移动时是「流过去」。
- *
- * 进卡（m01748 / m01776 / m01804 / m01838，时长见 --hl-restore-ms = 220ms）：默认对角弧
- * 从 --spec-strength 淡到 0，亮在它上面的指针光斑从第一帧起就是全亮；
- * 离卡时反过来：光斑 --hl-fade 1 → 0，默认弧 opacity 0 → 1。两段同一时长、同时起跑。 */
+/* 指针光斑：叠在同一条边框环上，圆心是 main.ts 写入的 --hl-x / --hl-y（卡内百分比），
+   中心 100% 不衰减，向两侧对称衰减 300px。位置过渡走 background-position。 */
 .card.is-lit::before,
 .hl-surface.is-lit::before {
   --spot-x: var(--hl-x, 50%);
   --spot-y: var(--hl-y, 50%);
   /* 指针离开时由 main.ts 补间 1 → 0，光斑据此整体变暗；进卡时回到 1。
-   * 不挂在 opacity 上：这一层的 opacity 要让给默认对角弧（它们是对立的两个伪元素），
-   * 两个动画写同一个属性会互相顶掉。 */
+   不挂在 opacity 上：这一层的 opacity 要让给默认对角弧（它们是对立的两个伪元素）， */
   --hl-fade: 1;
   /* 亮在默认弧之上：默认弧淡出（进卡）／淡入（离卡）时是透过它看到光斑，
    * 光斑自己的亮度全程不变。默认弧画在 ::after 上，它不做定位、盖不住抬起来的 ::before。 */
@@ -287,10 +202,9 @@
     background-position 90ms var(--ease-out);
 }
 
-/* 右栏的渐变高光边（M2 玻璃质感，原型 L1052-1060 逐字照抄三档 stop）。
- * 与上面的 .card::before 同一族手法，也必须留在本文件：这里的 #000 只是遮罩的
- * alpha 通道、不是配色；而 vue 系三份样式表按 tests/geometry.test.ts 明令不得出现
- * hex / rgb 字面色值，宿主随族放在契约层。 */
+/* 右栏的渐变高光边（M2 玻璃质感，逐字照抄三档 stop）。
+   与上面的 .card::before 同一族手法，也必须留在本文件：这里的 #000 只是遮罩的
+   alpha 通道、不是配色；而 vue 系三份样式表按 tests/geometry.test.ts 明令不得出现 */
 .chat-rail::before {
   content: '';
   position: absolute;
@@ -350,13 +264,6 @@
   flex-wrap: wrap;
 }
 
-.col {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-
 .spacer {
   flex: 1 1 auto;
   min-width: 0;
@@ -371,14 +278,6 @@
   text-align: center;
 }
 
-.empty-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
 .hint {
   margin: 8px 0 0;
   font-size: var(--fs-xs);
@@ -391,12 +290,11 @@
 }
 
 /* ---------- 响应式 ----------
- * 窄窗（<1180px）收紧内边距；更窄（<900px）允许整页横向滚动而不是把表格压扁，
- * 表格列一旦被压会导致数字与文字重叠，比滚动条难看得多。 */
+   窄窗（<1180px）收紧内边距；更窄（<900px）允许整页横向滚动而不是把表格压扁， */
 @media (max-width: 1180px) {
   .app-shell {
     /* 只收横向内边距与底部留白，不再把 `padding` 一把改成 8px —— 那会把基础样式的
-     * `padding: 0 0 14px` 连顶栏一起覆盖，顶栏凭空多出 8px 上内边距。 */
+     * */
     padding: 0 8px 10px;
   }
   .card-head,
@@ -406,22 +304,11 @@
   }
 }
 
-/* 面板自身的底色 / 磨砂归各自的样式文件：
- *   .drawer        → drawer.css
- *   .sensitive-panel → sensitive.css
- *   .config-card   → pages.css
- *   .filter-panel  → vue-dashboard.css
- *   .rail-panel / .friend → vue-chat.css
- * 本文件只留下「它们共享的模糊口径」，不再跨文件改写背景与 backdrop-filter。 */
+/* 面板自身的底色与磨砂归各自的样式文件（drawer / sensitive / pages / vue-dashboard / vue-chat），
+ * 本文件只留它们共享的模糊口径。 */
 
-/* 高光位置可动画：注册自定义属性为 <length>/<percentage>。
- *
- * initial-value 必须与 CSS 里读这两个变量的兜底值一致（50% / 0%）：注册过的属性
- * 一旦在根上拿到 initial-value，就会向下继承；节点上没有写过变量时读到的是
- * initial-value 而不是 `var(--hl-x, 50%)` 的兜底。
- *
- * 缓动不挂在这里：`.hl-light` 自己是绝对定位层，它的 background-position 才是真正
- * 要缓动的值；在宿主上给 --hl-x 再挂一层 transition 会让位移被缓动两次（慢半拍）。 */
+/* 高光位置可动画：把 --hl-x / --hl-y 注册为 <length>/<percentage>。
+   initial-value 必须与 `var()` 的兜底值一致（50% / 0%），注册过的属性会向下继承。 */
 @property --hl-x {
   syntax: '<length-percentage>';
   inherits: true;

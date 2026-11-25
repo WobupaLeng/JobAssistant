@@ -41,8 +41,10 @@ import { useDrawerPresence } from '../lib_ui/use-drawer';
 
 const props = withDefaults(
   defineProps<{
-    /** `null` = 关着。 */
+    /** `null` = 还没有数据（刚点开的头一帧）。 */
     job?: Job | null;
+    /** 开合的唯一来源：页面持 jobId，抽屉只负责画与收。 */
+    open?: boolean;
     /** 门槛，来自 `get_scoring_spec`（C10）；`null` = 还没读到。 */
     minScore?: number | null;
     /** 满分，来自 `get_scoring_spec`（C10）。 */
@@ -50,7 +52,7 @@ const props = withDefaults(
     /** 当前列表页签：决定底部动作按钮（`pending` / `delivered` / `rejected`）。 */
     tab?: string;
   }>(),
-  { job: null, minScore: null, scoreMax: null, tab: 'pending' },
+  { job: null, open: false, minScore: null, scoreMax: null, tab: 'pending' },
 );
 
 const emit = defineEmits<{
@@ -62,43 +64,11 @@ const emit = defineEmits<{
 
 /** 展开 / 收起过渡：展开由 watch 触发，收起点击即刻广播 close。 */
 const { panel, animateOpen, animateClose } = useDrawerPresence(() => emit('close'));
-/**
- * 点击抽屉以外即关闭。
- *
- * 三条约束，缺一条就会出现「点了没反应」：
- * 1. **挂 `click` 而不是 `pointerdown`**：打开发生在一次 pointerdown → pointerup → click
- *    的末尾，关闭判据若挂在 pointerdown 上，用户「下一次」按住任意位置的第一个事件就把
- *    抽屉关掉了。
- * 2. **`pressOutside` 记的是按下起点**：在面板里按下、拖到外面松开时，浏览器补发的
- *    click 目标是两者的共同祖先，只看 target 会把一次拖选当成点外部。
- * 3. **打开那次 click 本身不算「点外面」**（`openedAt` 冷却）：打开由卡片的 click 发起，
- *    同一次 click 继续冒泡到本监听器时抽屉已经开着、起点又落在卡片（面板外），
- *    于是被同一击关掉——实测控制台里就是 `card click → job prop -> id → doc click` 后
- *    立刻 `job prop -> null`。列表卡片与抽屉是同一棵树的兄弟分支，这一击必然同时命中
- *    打开与关闭两条路径，只能按「刚刚打开」把它滤掉。
+/*
+ * 关闭只有两条路：遮罩自己的 `@click`，面板内部的点击用 `@click.stop` 挡住不外溢。
+ * 不挂 document 级监听——它会和打开抽屉的那一次 click 撞车（同一次点击先挂载、再被判成
+ * 「点在外面」），表现为点了卡片什么都没出现。
  */
-let pressOutside = true;
-/** 最近一次「由 null 变成有值」的时刻：这之后的第一次 click 只可能是打开它的那一击。 */
-let openedAt = 0;
-
-function onDocPointerDown(ev: PointerEvent): void {
-  const el = ev.target as HTMLElement | null;
-  pressOutside = el === null || el.closest('[data-testid="job-detail-drawer"]') === null;
-}
-
-function onDocClick(ev: MouseEvent): void {
-  const outside = pressOutside;
-  pressOutside = true;
-  if (!props.job) return;
-  if (hasHigherOverlay('drawer')) return;
-  const el = ev.target as HTMLElement | null;
-  if (el === null) return;
-  if (el.closest('[data-testid="job-detail-drawer"]') !== null) return;
-  if (!outside) return;
-  // 打开它的那一击与关闭判据是同一个事件：同一轮事件循环内到达的这次 click 一律放过。
-  if (performance.now() - openedAt < 120) return;
-  close();
-}
 /** 补拉后的完整岗位（`jd_text` 在列表接口里是空的）。 */
 const full = ref<Job | null>(null);
 const jdLoading = ref(false);
@@ -143,7 +113,6 @@ watch(
   (job) => {
     void load(job);
     if (job) {
-      openedAt = performance.now();
       // 面板节点在这一帧之后才存在，等 tick 完再挂展开类（pan.ts 内部会强制回流）。
       void nextTick(animateOpen);
     }
@@ -152,7 +121,7 @@ watch(
 );
 
 // Esc 关闭。挂 window 而不是面板：用户焦点可能还停在列表里。
-// 分层判据（SPEC §6.1 / A10）：决策记录与配置在抽屉之上，它们开着时这层不出手。
+// 分层判据：决策记录与配置在抽屉之上，它们开着时这层不出手。
 function onKeydown(ev: KeyboardEvent): void {
   if (ev.key !== 'Escape') return;
   if (!props.job) return;
@@ -163,18 +132,14 @@ function onKeydown(ev: KeyboardEvent): void {
 
 onMounted(() => {
   window.addEventListener('keydown', onKeydown);
-  document.addEventListener('pointerdown', onDocPointerDown, true);
-  document.addEventListener('click', onDocClick);
 });
 onBeforeUnmount(() => {
   alive = false;
   window.removeEventListener('keydown', onKeydown);
-  document.removeEventListener('pointerdown', onDocPointerDown, true);
-  document.removeEventListener('click', onDocClick);
 });
 
 const j = computed<Job | null>(() => full.value);
-const isOpen = computed(() => j.value !== null);
+const isOpen = computed(() => props.open === true);
 const title = computed(() => (j.value ? detailTitle(j.value) : '岗位详情'));
 const company = computed(() => (j.value ? detailCompany(j.value) : DASH));
 const headChips = computed(() => (j.value ? detailHeadChips(j.value) : []));
@@ -201,10 +166,8 @@ const footActions = computed(() =>
 function act(a: DetailAct): void {
   if (!j.value) return;
   /*
-   * 动作会改岗位状态（不投递 / 已投递 / 待投递），抽屉要跟着收——走同一条收起回程。
-   *
-   * job_id 随事件一起交出去：页面不能靠 `detailJob` 反查（那是当前列表页的快照，
-   * 抽屉里的这条未必还在其中，落空就会静默无动作）。
+   * 动作会改岗位状态，抽屉跟着走同一条收起回程。`job_id` 随事件一起交出去：页面不能靠
+   * `detailJob` 反查（那是当前列表页的快照，抽屉里这条未必还在其中，落空会静默无动作）。
    */
   animateClose();
   emit('act', a, j.value.job_id);
@@ -244,6 +207,7 @@ defineExpose({ patch, closeDetail, jdLoading, jdError });
     role="dialog"
     aria-label="岗位详情"
     aria-modal="false"
+    @click.stop
   >
     <div class="drawer-head">
       <span class="card-title" data-testid="job-detail-title">{{ title }}</span>

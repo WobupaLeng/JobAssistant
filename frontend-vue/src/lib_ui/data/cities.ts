@@ -1,24 +1,7 @@
 /**
- * BOSS 直聘城市编码表（省级 → 城市，官方全量）。
- *
- * 数据来源：BOSS 直聘官网接口
- *   https://www.zhipin.com/wapi/zpgeek/common/data/city.json
- * 抓取日期 2026-11-22，取 `zpData[]` 的 `subLevelModelList[]` 两层：
- * 第一层是省级（含直辖市 / 自治区 / 特别行政区），第二层是可投放的城市。
- * 共 34 个省级、373 个城市，城市全部带官方 `pinyin`（用于输入框搜索）。
- *
- * 为什么是常量而不是运行时拉取：
- *   1. 前端禁止直连网络（AGENTS.md 3：渲染进程不碰系统 API，一切经 invoke），
- *      BOSS 的接口也没有 CORS 放行；
- *   2. 编码写错不会报错，只会表现为「筛不出岗位」——所以宁可用官方快照钉死在源码里，
- *      也不要在运行时拼一个可能失效的请求；
- *   3. 城市表极少变动，需要更新时按上面的 URL 重新抓一次替换本文件，
- *      跑 `npm test` 里的城市表用例即可确认没抄坏。
- *
- * 为什么仍保留 `CITIES`（8 个热门城市）：它是旧版 `web/src/api.ts` 的默认候选，
- * 也是 `CITY_DEFAULT = 深圳` 的落点；城市面板打开时先展示热门，再按省级展开全量。
- * 两层数据必须互相包含：`CITIES` 里的每个编码都必须在 `PROVINCES` 里找得到，
- * 由 `tests/options.test.ts` 的用例守着。
+ * BOSS 直聘城市编码表（省级 → 城市，官方全量，均带官方 `pinyin`）。快照取自 city.json 的
+ * `zpData[].subLevelModelList[]` 两层；钉在源码里是因为前端禁止直连网络，且编码写错不会报错、
+ * 只会「筛不出岗位」。`CITIES`（热门城市）是面板默认展示，编码必须在 `PROVINCES` 里找得到。
  */
 
 import type { Opt } from '../options';
@@ -648,15 +631,9 @@ function normPinyin(raw: string): string {
 }
 
 /**
- * 拼音首字母（音节级）。
- *
- * BOSS 的 `pinyin` 是**连线**写的（`shenzhen`），没有音节分隔，`Intl.Segmenter`
- * 也切不开（实测整串当一个词），所以这里自己按声母/韵母规则贪心切分：
- * `shenzhen` → `['shen','zhen']` → `s z`。
- *
- * **切分口径是「够用」，不是「学术正确」**：`xian` 既可为 `xi-an`（西安）
- * 也可为 `xian`（县），`haerbin` 是 `ha-er-bin` 这种零声母。
- * 搜索只需要「结果集是正确结果的超集」，所以宁可切宽一点。
+ * 拼音首字母（音节级）。`pinyin` 是连写的（`shenzhen`）且 `Intl.Segmenter` 切不开，
+ * 这里按声母 / 韵母规则贪心切分：`shenzhen` → `['shen','zhen']` → `s z`。口径是「够用」
+ * 而不是学术正确（`xian` 既可为西安也可为县），搜索只需要结果集是正确结果的超集。
  */
 export function pinyinSyllables(pinyin: string): string[] {
   const s = pinyin.toLowerCase().replace(/[^a-z]/g, '');
@@ -724,10 +701,8 @@ export function cityName(code: string): string {
 }
 
 /**
- * 输入框搜索：中文名 / 拼音全拼 / 拼音首字母 / 编码，四种都认，大小写与空格不敏感。
- *
- * 空查询返回**空数组**而不是全量——调用方在没有输入时应该展示热门与省级列表，
- * 而不是把 373 条一次性铺出来。
+ * 输入框搜索：中文名 / 拼音全拼 / 拼音首字母 / 编码，大小写与空格不敏感。空查询返回
+ * 空数组而不是全量，调用方此时应展示热门与省级列表。
  */
 export function searchCities(query: string): CityHit[] {
   const q = query.trim().toLowerCase();

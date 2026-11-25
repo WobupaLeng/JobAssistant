@@ -1,10 +1,7 @@
 /**
- * 敏感库的纯逻辑：页签 / 关键字 / 全选 / 批量删除的可见性判定。
- *
- * 命令层在 `api/commands/sensitive.ts`，这里只管"该显示什么"。
- * 为什么独立成文件：`sensitive_list` 的 `kind` 只有三态，而"页签"是
- * 前端概念（把 `stored` 与 `rejected` 分开展示）；映射写错不会报错，
- * 只会静默返回全部——正是 C3 那类失效，所以用单测钉住。
+ * 敏感库的纯逻辑：页签 / 关键字 / 全选 / 批量删除的可见性判定。命令层在
+ * `api/commands/sensitive.ts`，这里只管该显示什么。页签是前端概念（把 `stored` 与
+ * `rejected` 分开展示），映射写错不会报错、只会静默返回全部，所以用单测钉住。
  */
 import type { SensitiveRecord } from '../api/types';
 
@@ -30,10 +27,8 @@ export function sensitiveKind(tab: SensitiveTab): 'all' | 'stored' | 'rejected' 
 }
 
 /**
- * 本地再按 `kind` 过滤一次。
- *
- * 后端已按 `kind` 过滤，但列表是分页拉的、且删除后要就地更新，
- * 所以本地这份判定必须与后端口径**逐字一致**（`stored` / `rejected`）。
+ * 本地再按 `kind` 过滤一次：列表分页拉取且删除后要就地更新，判定口径必须与后端一致
+ * （`stored` / `rejected`）。
  */
 export function matchesKind(record: SensitiveRecord, tab: SensitiveTab): boolean {
   const kind = sensitiveKind(tab);

@@ -1,15 +1,7 @@
 /**
- * M4 决策记录页的纯逻辑：运行日志 seq 游标、决策行视图模型、筛选。
- *
- * 决策记录状态机：
- * 但运行日志增量改用 **seq 游标**（根 AGENTS.md §7.1）：
- * 后端 `list_logs(since)` 是闭区间（ts_ms >= since），游标那一毫秒会重送；
- * 旧版按 (ts,level,message) 多重集去重，同毫秒多条会误删。这里改为
- * 「since 走时间戳保证不漏 + afterSeq 过滤保证不重」，恰好一次。
- *
- * 决策行按冻结原型的 `.dl-row` 四列网格渲染（时间 / 行为 / 分数变化 / 原因），
- * 不用五列表格。分数变化复用 lib_ui/logfmt 的 scoreDelta（两列皆 null
- * 时回落 reason 解析，绝不显示 0 → 0）。
+ * 决策记录页的纯逻辑：运行日志 seq 游标、决策行视图模型、筛选。日志增量用 **seq 游标**：
+ * `list_logs(since)` 是闭区间，游标那一毫秒会重送，所以「since 保证不漏 + afterSeq 过滤保证
+ * 不重」才恰好一次。分数变化复用 `scoreDelta`（两列皆 null 时回落 reason 解析）。
  */
 
 import type { DecisionRecord, LogRow } from '../../api/types';

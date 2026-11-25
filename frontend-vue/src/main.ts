@@ -1,13 +1,7 @@
 /**
- * Vue 入口。
- *
- * 顺序有讲究：
- * 1. `bootstrapTheme()` 先跑：它把 `data-theme` 打到 `<html>` 上。首帧那一刻
- *    `index.html` 的内联脚本已经打过一次，这里补的是「系统偏好在首帧后才变」
- *    与「storage 被禁用」两种情况；两处判据必须一致，否则会闪一帧。
- * 2. 样式表 `styles/index.css` 只在这里 import 一次——它内部按 C4 的顺序
- *    `@import` 那 11 份分域 CSS，顺序就是层叠契约，别在别处再引。
- * 3. 最后才 `mount`：先有样式、先有主题，再有 DOM。
+ * Vue 入口，顺序固定：先 `bootstrapTheme()` 打 `data-theme`（判据须与 index.html
+ * 的内联脚本一致，否则闪一帧）→ 再 import `styles/index.css`（内部按 C4 顺序
+ * `@import`，顺序即层叠契约，别处不许再引）→ 最后 `mount`。
  */
 import { createApp } from 'vue';
 
@@ -24,29 +18,10 @@ const theme = bootstrapTheme();
 applyPalette(readPalette(), theme);
 applyFontScale(readFontScale());
 
-// M4：卡片高光随指针（光源）变化。事件委托，卡片组件无需逐个改造。
-//
-// 两层，各配一块渐变，永不互换（用户 m01973）：
-//   默认对角弧 —— `.card::after` / `.hl-surface::after`，左上、右下两道弧（135deg），常驻；
-//   指针光斑   —— `.is-lit::before`，以指针为圆心的径向光斑（半径 300px，中心纯白）。
-//
-// 规则（用户 m01609 裁决）：**指针就是光源，光斑以指针为圆心**——中心 100% 纯白、
-// 不按指针到边框的距离打折；亮度自中心向两侧对称衰减，300px 处归零。
-// 因此这里写进 --hl-x / --hl-y 的是指针在卡内的真实相对位置（百分比）。
-// 位置变化走 `background-position` 的 transition，光标在卡内移动时光斑是「流过去」的。
-//
-// 转换（用户 m01748 / m01776 / m01804 / m01838 / m01933 裁决）：两段同时、逐帧、
-// 同一段时长（--hl-restore-ms = 220ms）：
-//   进卡：默认对角弧从当前亮度淡到 0，指针光斑从第一帧起就是全亮；
-//   离卡：指针光斑留在最后停下的位置逐渐变暗（--hl-fade 1 → 0），
-//         默认对角弧逐渐变亮（→ 1）直到 --spec-strength。
-// 两者动**不同**的属性：默认弧动它自己的 opacity，光斑动卡片上的 --hl-fade。
-// 都去补间 ::before 的 opacity 的话，两条动画写同一个属性，后挂的会顶掉先挂的。
-//
-// 状态一律自己记账，**不读** `getComputedStyle(card, '::after').opacity`：
-// Chromium 对伪元素的 computed style 不返回 Web Animations 补间中的值，读到的永远是
-// CSS 里的静态满值，于是每次进卡都从满亮重来一遍（用户 m01999「一直存在」、
-// m02013「移出还闪一次」就是这么来的）。记账 + `cancel` 前先落盘，才接得上。
+// 卡片高光随指针移动（事件委托，组件无需改造）。两层渐变永不互换：常驻对角弧在
+// `.card::after`，指针光斑在 `.is-lit::before`（写 --hl-x / --hl-y）。进卡 / 离卡两段补间
+// 同 220ms 但动不同属性（弧动 opacity、光斑动 --hl-fade），写同一个会互相顶掉。状态自己
+// 记账，不读伪元素的 computed opacity——Chromium 不返回补间中的值。
 const HL_SURFACES = '.card, .hl-surface, .sensitive-card';
 /** 恢复时长，与 tokens.css 的 --hl-restore-ms 一致（改一处须同改另一处）。 */
 const HL_RESTORE_MS = 220;
@@ -84,8 +59,7 @@ function trackArc(st: LitState, anim: Animation, from: number, to: number): void
       st.arc = to;
       return;
     }
-    // progress 不在 Animation 上（它在 KeyframeEffect 上），lib.dom 里没有，这里取同一条时间线：
-    // 补间是 linear + 无 delay，所以「已播放时长 / 总时长」就是进度。
+      // 补间是 linear 无 delay，用「已播放时长 / 总时长」当进度。
     const timing = anim.effect?.getComputedTiming();
     const played = typeof anim.currentTime === 'number' ? Number(anim.currentTime) : 0;
     const total = typeof timing?.duration === 'number' ? timing.duration : HL_RESTORE_MS;
@@ -100,9 +74,8 @@ function trackArc(st: LitState, anim: Animation, from: number, to: number): void
   tick();
 }
 
-/** 默认对角弧（卡片自己的 ::after）从 from 补到 to。
- *  fill 'both'：没有它，动画一结束 opacity 就退回 CSS 的静态值——默认弧与指针光斑
- *  是同一条边框环上的两层，退了就等于「过渡结束的瞬间跳一下」。首帧也要靠它兜住。 */
+/** 默认对角弧从 from 补到 to。`fill: 'both'` 必需：否则动画一结束 opacity
+ *  就退回 CSS 静态值，过渡结束的瞬间会跳一下。 */
 function fadeDefaultArc(card: HTMLElement, st: LitState, from: number, to: number): void {
   const frames = { duration: HL_RESTORE_MS, easing: 'linear', delay: 0, fill: 'both' } as const;
   const anim = card.animate([{ opacity: from }, { opacity: to }], { ...frames, pseudoElement: '::after' });
@@ -110,17 +83,16 @@ function fadeDefaultArc(card: HTMLElement, st: LitState, from: number, to: numbe
   trackArc(st, anim, from, to);
 }
 
-/** 进卡（用户 m01838）：默认对角弧从当前亮度淡到 0，指针光斑从第一帧起就是全亮。 */
+/** 进卡：默认对角弧从当前亮度淡到 0，指针光斑从第一帧起就是全亮。 */
 function enterLight(card: HTMLElement, st: LitState): void {
   fadeDefaultArc(card, st, st.arc, 0);
 }
 
-/** 离卡（用户 m01804）：光斑逐渐变暗、默认光带逐渐变亮，两条同时走完。 */
+/** 离卡：光斑逐渐变暗、默认对角弧逐渐变亮，两条同时走完。 */
 function restoreDefaultLight(card: HTMLElement, st: LitState): void {
   const frames = { duration: HL_RESTORE_MS, easing: 'linear', delay: 0, fill: 'both' } as const;
   fadeDefaultArc(card, st, st.arc, 1);
-  // 光斑的亮度只由 --hl-fade 表达（CSS 里逐个 stop 乘上它），不进状态：
-  // 它只会从 1 淡到 0，中途再进卡就由 stopSpot 取消、回到 1。
+  // 光斑亮度只由 --hl-fade 表达，不进状态：它只会 1 → 0，再进卡时由 stopSpot 取消。
   st.spotAnim = card.animate([{ '--hl-fade': '1' }, { '--hl-fade': '0' }], frames);
 }
 
@@ -160,8 +132,7 @@ document.addEventListener('pointerout', (ev) => {
   if (to && from.contains(to)) return;
   const st = stateOf(from);
   if (!st.lit) return;
-  // 顺序要紧：先把当前两段补间的亮度记进状态再取消（否则默认弧跳到满值、光斑跳到 1），
-  // 然后摘 .is-lit 让 ::before 的光斑停在最后位置，最后挂两段同时起跑的淡出/淡入。
+  // 顺序要紧：先记账再取消补间，然后摘 .is-lit，最后挂两段淡出/淡入。
   stopSpot(from, st);
   st.lit = false;
   from.classList.remove('is-lit');
@@ -170,27 +141,15 @@ document.addEventListener('pointerout', (ev) => {
 });
 
 /**
- * 窗口拖动兜底（用户 m04113「窗口顶部空白区域不能拖到窗口」）。
- *
- * 窗口 `decorations: false`，拖动只能靠 Tauri 的 `data-tauri-drag-region`；而它只认
- * **被点到的那一个元素**，事件不从子节点冒泡。顶栏里每块可视物件（品牌名、平台卡、
- * 打分分段、token 读数、配置 / 敏感库 / 主题、三个窗口键）都把 pointerdown 抢走，
- * 于是「顶栏看着大片空白、按下去却拖不动」。做法与两处 WebView2 的反直觉行为
- * 都写在 `lib_ui/drag-allow` 里，这里只负责挂上。
+ * 窗口拖动兜底：`data-tauri-drag-region` 只认被点到的那一个元素、不冒泡，
+ * 顶栏里的可点物件会抢走 pointerdown。细节见 `lib_ui/drag-allow`，这里只挂上。
  */
 installDragAllow(document);
 
 /**
- * 窗口变化（用户：窗口变化也要有契合的过渡）。
- *
- * WebView2 的 resize 是逐帧连续的，拖动边框时布局本来就跟手，不需要（也不该）
- * 给尺寸补间——那会让内容滞后于窗口，错觉成卡顿。真正生硬的是**落定那一帧**：
- * 从 1200px 一次跳到最大化的宽高时，网格换列、表格重排都是瞬切的。
- *
- * 做法：resize 期间记时，停下来 140ms 后给 `.app-shell` 挂一次性的 `.shell-resized`，
- * 播一段 200ms 的落定淡入（`styles/motion.css` 的 shell-settle），动画结束后自摘。
- * 只动外层容器的 opacity，不动任何子元素几何——布局口径一个字没改。
- * 时间常数与 motion.css 的 shell-settle 时长一致（改一处须同改另一处）。
+ * 窗口落定过渡：resize 期间不给尺寸补间（会让内容滞后），只在停下 140ms 后给
+ * `.app-shell` 挂一次性的 200ms 淡入（`styles/motion.css` 的 shell-settle）。
+ * 时长须与 shell-settle 一致。
  */
 const RESIZE_IDLE_MS = 140;
 let resizeTimer = 0;

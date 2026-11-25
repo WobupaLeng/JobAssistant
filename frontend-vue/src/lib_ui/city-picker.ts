@@ -1,18 +1,7 @@
 /**
- * 城市选择器的状态机与键盘规则（纯逻辑，不碰 DOM 与框架）。
- *
- * **为什么放在 `lib_ui/` 而不是 `features/scrape/`**：它是纯状态机（只吃
- * `PROVINCES` / `searchCities`，不碰命令、不碰业务规则），而消费方是
- * `components/CityPicker.vue`。放在 `features/` 会让 `components → features`
- * 成为向上引用，与 `frontend-vue/AGENTS.md` §2 的
- * `pages → features → components → lib_ui` 方向相反。
- *
- * `components/CityPicker.vue` 只负责把这里算出的字段铺到模板上；所有
- * 「什么时候开 / 关」「上下键走到哪一条」「回车选中哪一条」都在本文件里，
- * 因此可以脱离组件单测（`frontend-vue/AGENTS.md` §6：vitest 只给纯逻辑写单测）。
- *
- * 契约：城市始终是**单值** 9 位编码 `string`，本文件不理解也不改写编码语义，
- * `cityName()` 的兜底（未知编码原样回显）由数据层保证。
+ * 城市选择器的状态机与键盘规则（纯逻辑，不碰 DOM 与框架）。消费方是
+ * `components/CityPicker.vue`，放 `features/` 会构成向上引用。开 / 关、上下键走位、回车选中
+ * 都在本文件里，可脱离组件单测。城市始终是单值 9 位编码 `string`，本文件不解释编码语义。
  */
 
 import {
@@ -26,11 +15,8 @@ import {
 export type PickerMode = 'browse' | 'search';
 
 /**
- * 浏览态里 ↑ / ↓ 作用在哪一列。
- *
- * 规格要求「省份列 ↑↓ 切省、→ 进城市列、Enter 选中市」，所以上下键必须先知道
- * 焦点在哪一列；把这一位放进状态机而不是留在组件的 ref 里，是为了让键盘规则
- * 可以脱离组件单测。
+ * 浏览态里 ↑ / ↓ 作用在哪一列（省份列切省、→ 进城市列、Enter 选中市）。放进状态机而不是
+ * 组件的 ref，键盘规则才能脱离组件单测。
  */
 export type PickerColumn = 'province' | 'city';
 
@@ -87,7 +73,7 @@ export function openPicker(state: PickerState): PickerState {
 }
 
 /**
- * 关闭面板：搜索词必须清空（用户裁决第 4 条：任何关闭路径都要清词）。
+ * 关闭面板：任何关闭路径都要清空搜索词。
  * 选中值不在这里处理——它由调用方 emit 出去。
  */
 export function closePicker(state: PickerState): PickerState {
@@ -138,12 +124,8 @@ export function searchSelection(state: PickerState): string | null {
 }
 
 /**
- * 键盘总调度：返回 `{ state, commit }`。
- *
- * - `commit` 非空表示「这一下要选中该编码并关闭面板」，由组件负责 emit；
- * - `null` 表示只是移动 / 切模式 / 关闭，组件只需把 `state` 写回。
- *
- * `Esc` 的关闭由组件处理（它还要把焦点还给触发按钮），这里只服务列表导航。
+ * 键盘总调度：返回 `{ state, commit }`。`commit` 非空表示选中该编码并关闭面板（组件负责
+ * emit）；`null` 表示只是移动 / 切模式，组件把 `state` 写回即可。`Esc` 由组件处理。
  */
 export function handleKey(
   state: PickerState,

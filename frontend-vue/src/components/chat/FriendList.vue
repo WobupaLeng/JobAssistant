@@ -1,10 +1,8 @@
 <script setup lang="ts">
 /**
- * Boss 列表（`rail`）—— 收起态挂在右栏 `aside.chat-rail`，
- * 展开态挂在对话框左段 `.chat-detach-rail`。**同一套渲染，两处实例**。
- *
- * 两处的 `data-testid` 前缀不同（`chat-rail-*` / `chat-detach-rail-*`），
- * 所以不会撞车；SPEC §4.4 要求「全站唯一」的只有自动投递条，不在本组件里。
+ * Boss 列表：收起态挂在右栏 `aside.chat-rail`，展开态挂在对话框左段
+ * `.chat-detach-rail`，同一套渲染两处实例。testid 前缀不同（`chat-rail-*` /
+ * `chat-detach-rail-*`），不会撞车。
  */
 import { computed, ref } from 'vue';
 
@@ -36,7 +34,7 @@ const props = withDefaults(
     /** 可移除的行（手动打招呼新增的占位 HR）；判定在页面层，组件只渲染按钮。 */
     removableUids?: readonly string[];
     /**
-     * 标题旁徽标的未读总数（用户：数字挂在「Boss 列表」旁，且与远端未读同步）。
+     * 标题旁徽标的未读总数（数字挂在「Boss 列表」旁，与远端未读同步）。
      * 不传则退回组件内对 friends 的求和；页面传入时以页面口径为准。
      */
     unread?: number;
@@ -88,12 +86,12 @@ const ids = computed(() => ({
   unread: (uid: string) => `${unreadPrefix(props.prefix)}-${uid}`,
 }));
 
-/* 空态标题走常量（CHAT_EMPTY_TITLE，原型 L2342 逐字），带搜索词时才换成匹配失败口径。 */
+/* 空态标题走常量 CHAT_EMPTY_TITLE，带搜索词时才换成匹配失败口径。 */
 const emptyText = computed(() =>
   props.search.trim() === '' ? CHAT_EMPTY_TITLE : '没有匹配的会话',
 );
 
-/** 标题旁的计数是**未读消息条数**，不是会话数（用户 m01427）。0 时不渲染。 */
+/** 标题旁的计数是**未读消息条数**，不是会话数。0 时不渲染。 */
 const unreadSum = computed(() => unreadTotal(props.friends));
 
 function onSearch(ev: Event): void {
@@ -108,10 +106,9 @@ defineExpose({ listEl });
 <div class="rail-panel" :data-prefix="props.prefix">
     <div class="rail-head">
       <span class="rail-title">{{ props.title }}</span>
-      <!-- 未读消息条数（用户 m01427），不是会话数；一条未读都没有时不显示这个徽标。 -->
+      <!-- 未读消息条数，不是会话数；一条未读都没有时不显示这个徽标。 -->
       <span v-if="unreadSum > 0" class="chip" :data-testid="ids.count">{{ unreadText(unreadSum) }}</span>
-      <!-- 显式传入的未读数优先（用户：数字要挂在「Boss 列表」旁、与远端未读同步）；
-           组件内部不再自行统计，避免与页面口径出现两个数。 -->
+      <!-- 显式传入的未读数优先；组件内部不再自行统计，避免与页面口径出现两个数。 -->
       <span v-else-if="(props.unread ?? 0) > 0" class="chip" :data-testid="ids.count">{{ unreadText(props.unread ?? 0) }}</span>
       <slot name="rail-head" />
       <span class="spacer" />
@@ -217,14 +214,12 @@ defineExpose({ listEl });
           :title="friendName(f)"
           @click="emit('pick', f.uid)"
         >
-          <!-- 行内操作列：原先「生成打招呼 / 选简历」挤在对话区顶部的 chat-head 里，
-               那一行已按裁决移除。下沉到每一行后，「对谁打招呼」不再靠选中态隐式决定，
-               用户点哪一行就是对谁操作。@click.stop 防止同时触发整行的 pick。 -->
+          <!-- 行内操作列：「对谁打招呼」由被点的那一行决定，不靠选中态隐式决定。
+               @click.stop 防止同时触发整行的 pick。 -->
           <span class="avatar" aria-hidden="true">{{ friendName(f).slice(0, 1) }}</span>
           <span class="friend-main">
             <span class="friend-name" :data-testid="`friend-name-${f.uid}`">{{ friendName(f) }}</span>
-            <!-- 副行按「未读 / 已读 / 已送达」上色（用户 m01427）。状态词只管我发的最后一条，
-                 对方发的最后一条不加词——与 Boss 页面一致。 -->
+            <!-- 副行按「未读 / 已读 / 已送达」上色。状态词只管我发的最后一条，对方发的不加词。 -->
             <span
               class="friend-msg"
               :class="`is-${friendMsgTone(f)}`"
@@ -258,8 +253,8 @@ defineExpose({ listEl });
             >{{ unreadText(f.unread) }}</span>
           </span>
           <span class="friend-acts">
-            <!-- 两个操作竖排文字药丸会把行撑到 50px+（用户：卡片高度不一），
-                 改画 16px 图标、同一行并排；文字标签在悬停 / 键盘聚焦时浮在按钮左侧。 -->
+            <!-- 两个操作画 16px 图标、同一行并排，避免文字药丸把行撑高；文字标签在悬停 /
+                 键盘聚焦时浮在按钮左侧。 -->
             <span
               role="button"
               tabindex="0"

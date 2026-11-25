@@ -1,8 +1,5 @@
 /**
- * `commands_chat.rs` 的 7 条命令。
- *
- * 全部平铺（键名 = Rust 参数名，需要驼峰的 `resumeId` 由 `alias` 兜），
- * 唯一例外是「一给就是整份 XReply」的读取接口，本来也无参数形状可挑。
+ * `commands_chat.rs` 的 7 条命令。除无参读取接口外全部平铺，键名 = Rust 参数名。
  */
 
 import { invokeFlat, invokeNone } from '../invoke';
@@ -32,18 +29,11 @@ export function chatMessagesLocal(uid: string): Promise<MessagesReply> {
 }
 
 /**
- * 为某个岗位在 Boss 上**建立会话**，返回这条会话的真实 uid。
- *
- * 只给「还没打过招呼」的岗位用：这种岗位在会话列表里根本不存在，前端拿不到 uid，
- * 硬点一个自编的占位 uid 只会报「找不到这条会话」。后端会打开岗位页点「立即沟通」，
- * 由 Boss 自己建会话。
- *
- * 注意：它会**真的在 Boss 上建立一条会话**（和用户手动点「立即沟通」等价），
- * 所以只能由用户点击触发，不得在挂载/轮询里自动调用。
+ * 为某个岗位在 Boss 上**建立会话**，返回真实 uid。只给「还没打过招呼」的岗位用。
+ * 它等价于用户手动点「立即沟通」，所以只能由点击触发，**不得在挂载/轮询里自动调用**。
  */
 export function chatOpen(jobId: string): Promise<OpenReply> {
-  // 平铺参数键名 = Rust 参数名（`job_id`）。Tauri 平铺参数**不支持** `#[serde(alias)]`，
-  // 发驼峰只会得到「missing required key job_id」。
+  // 平铺参数键名 = Rust 参数名（`job_id`），Tauri 平铺参数不支持 alias。
   return invokeFlat<OpenReply>('chat_open', { job_id: jobId });
 }
 
@@ -53,20 +43,16 @@ export function chatMessages(uid: string): Promise<MessagesReply> {
 }
 
 /**
- * 发一条消息给 HR。
- *
- * 平铺：`{ uid, text, job_id? }`。**`job_id` 非空时后端会顺带把该岗位标记为已投递**
- * （「聊过就算投过」的唯一入口，前端不要再补一次 `mark_delivered`）。
- *
- * 回执的 `text` 是**真正发出去的正文**（后端可能截断），列表要显示它而不是本地输入。
+ * 发一条消息给 HR。平铺 `{ uid, text, job_id? }`。`job_id` 非空时后端顺带把该岗位标记为
+ * 已投递（「聊过就算投过」的唯一入口，前端不要再补一次 `mark_delivered`）。
+ * 回执的 `text` 是**真正发出去的正文**（可能被截断），列表要显示它。
  */
 export function chatSend(uid: string, text: string, jobId?: string | null): Promise<SendReply> {
   const trimmed = jobId?.trim() ?? '';
   return invokeFlat<SendReply>('chat_send', {
     uid,
     text,
-    // 键名必须是蛇形：Tauri 平铺参数按 Rust 参数名取值，发 `jobId` 会被当成未知键
-    // 静默丢弃——那会让「聊过就算投过」永远不生效。
+    // 键名必须是蛇形：发 `jobId` 会被当成未知键静默丢弃，「聊过就算投过」永不生效。
     job_id: trimmed.length > 0 ? trimmed : undefined,
   });
 }

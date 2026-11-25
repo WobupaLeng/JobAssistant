@@ -1,13 +1,8 @@
 <script setup lang="ts">
 /**
- * M4 决策记录页（ARCH-003 阶段 3）。固定窗 .decisions-modal，双视图：
- * 决策日志（list_decisions → .dl-row 四列网格）/ 运行日志（list_logs seq 游标增量）。
- * 可独立 mount（无必需 props）；App.vue 接线由总控汇合时做。
- *
- * 运行日志增量走 seq 游标（features/logs/model）：since 用回执 now 保证不漏，
- * afterSeq 过滤闭区间重送保证不重（根 AGENTS.md §7.1，同毫秒多条不会永久丢失）。
- * 自动刷新每 2 秒一次，仅在「运行日志 + 开关开」时发 IPC；setTimeout 链在
- * WebView 挂起时自然停摆（C16），不做 Date.now 追赶；离开本页即杀。
+ * 决策记录页，固定窗双视图：决策日志（`list_decisions`）与运行日志（`list_logs` seq 游标增量）。
+ * 增量走 seq 游标：`since` 用回执 `now` 保证不漏，`afterSeq` 过滤闭区间重送保证不重。自动刷新仅
+ * 在「运行日志 + 开关开」时每 2 秒发一次 IPC，挂起时自然停摆，离开本页即杀。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { clearLogs, listLogs } from '../api/commands/logs';
@@ -54,10 +49,8 @@ const decDone = ref(false);
 /** 库里决策总数（不受已加载条数影响）。 */
 const decTotal = ref(0);
 /**
- * 各档（按 `decisionTone` 归属）的**全库**条数。
- *
- * 界面只加载了前几页，用已加载行去数必然偏小——这正是「排除/入库/其它
- * 总条数不对」的根因；计数一律走后端 `decision_counts`。
+ * 各档（按 `decisionTone` 归属）的**全库**条数。界面只加载了前几页，用已加载行去数必然
+ * 偏小，所以计数一律走后端 `decision_counts`。
  */
 const decToneCounts = ref<Record<'bad' | 'primary' | 'other', number>>({
   bad: 0,
@@ -168,10 +161,8 @@ async function loadDecisions(): Promise<void> {
 }
 
 /**
- * 无限滚动：拿当前最后一条的 id 当 `beforeId`，再取 10 条更旧的。
- *
- * `afterId` 只能取「比游标更新」的记录，往下翻必须用 `beforeId`（见 store_ports）。
- * 返回不足一页即到底；到底或正在加载时直接返回，滚到底不会连发。
+ * 无限滚动：拿当前最后一条的 id 当 `beforeId` 再取 10 条更旧的（`afterId` 只能取比游标
+ * 更新的记录，往下翻必须用 `beforeId`）。不足一页即到底；到底或正在加载时直接返回。
  */
 async function loadMoreDecisions(): Promise<void> {
   if (decLoading.value || decLoadingMore.value || decDone.value) return;
@@ -234,7 +225,7 @@ function close(): void {
   emit('navigate', 'dashboard');
 }
 
-/* Esc 关闭（SPEC §6.1 / A10）：决策记录是最上面那一层，它不需要查「上层」。 */
+/* Esc 关闭：决策记录是最上面那一层，它不需要查「上层」。 */
 function onKeydown(ev: KeyboardEvent): void {
   if (ev.key === 'Escape') close();
 }
@@ -265,7 +256,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <!-- 窗体锚点 decisions-panel 已唯一，页容器不再重复挂 page-logs（SPEC-001 AC9）。 -->
+  <!-- 窗体锚点 decisions-panel 已唯一，页容器不再重复挂 page-logs。 -->
   <section class="page page-logs">
     <div
       class="decisions-modal hl-surface is-open pan-modal"

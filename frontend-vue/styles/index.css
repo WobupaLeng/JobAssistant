@@ -1,12 +1,5 @@
-/* 样式入口：顺序即 C4 契约（frontend-vue/AGENTS.md）。
- *
- * posts 级联里同优先级规则「后者胜出」，所以这里的顺序不是风格偏好：
- * tokens 定义变量，layout/controls/jobs 消费它们，页面级样式（pages）必须
- * 早于面板级覆盖（filter），否则筛选面板的展开体会被页面规则压回去。
- * 改名或重排会让界面外观静默变化——没有报错，只是「看起来不对」。
- *
- * 增加新样式表时：先确认它只消费前面的变量，再追加到末尾，不要插在中间。
- */
+/* 样式入口：顺序即 C4 契约。tokens 定义变量，layout/controls/jobs 消费它们，
+   pages 必须早于面板级覆盖 filter。重排会让外观静默变化，没有报错。 */
 @import './tokens.css';
 @import './layout.css';
 @import './controls.css';

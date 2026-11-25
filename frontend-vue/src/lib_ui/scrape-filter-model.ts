@@ -1,26 +1,7 @@
 /**
- * 筛选草稿：C12 的双写 + 只提交 diff。
- *
- * 三件事必须一起看，否则一定踩坑：
- *
- * 1. **双写**：`localStorage["aja.scrape_filter_draft"]` 只作兜底。
- *    真正的权威是后端 `app_config.scrape_defaults`——它跨机器、跨重装都在。
- *    顺序是「后端先、本地后」，`applyBackend()` 返回值 0 才回落到本地草稿
- *    （口径同 `filter.rs:970-989`）。
- * 2. **只发 diff**：`diffArgs()` 只输出变了的 14 个驼峰键。整份回传会把
- *    用户没动过的项也写一遍，后端 `null` 语义是「删除该键」，等于每次保存
- *    都把未设置的项清空（`filter.rs:922-950`）。
- * 3. **400ms 防抖**：改动频繁（点芯片、拖数字），立刻存会打爆命令层；
- *    防抖放在调用方（`debounce`），这里只提供纯函数。
- *
- * 选项表全部来自 `lib_ui/options.ts`（C15：常量表只有一份）。
- *
- * **搜索关键词不在草稿里**（`exclude` 是「排除关键词」，两回事）：
- * 搜索词直接进 `scrape_start` 的 `keywords`，不进 `ScrapeDefaultsArgs` 的
- * 14 个键——`keywords` 由页面层持有，`BACKEND_KEYS` 表里
- * 只有 `排除关键词 → excludeKeywords`。把两者混成一条，界面会把「排除词」
- * 当搜索词发出去，搜不到任何东西且不报错。本文件的 `searchKeywords()`
- * 是这条边界的唯一出口。
+ * 筛选草稿：双写 + 只提交 diff。权威是后端 `scrape_defaults`，`localStorage` 只作兜底；
+ * 整份回传会把后端 `null` 语义当成「删除该键」；400ms 防抖在调用方。**搜索关键词不在草稿里**：
+ * `exclude` 是排除词，搜索词直接进 `scrape_start` 的 `keywords`，混成一条会发错。
  */
 import type { ScrapeDefaultsArgs } from '../api/types';
 import { splitList } from './text';
@@ -200,10 +181,7 @@ function clampPages(v: unknown): number {
 }
 
 /**
- * 单行文本 → 草稿。
- *
- * **任何脏数据都不能抛**：草稿是本地缓存，用户可能手改过、也可能是旧版本
- * 写的。未知键丢弃，非法值回落默认（`filter.rs:452-520`）。
+ * 单行文本 → 草稿。**任何脏数据都不能抛**：未知键丢弃，非法值回落默认。
  */
 export function decode(raw: string | null | undefined): FilterDraft {
   const d = createDraft();
@@ -285,10 +263,8 @@ export function decode(raw: string | null | undefined): FilterDraft {
 // ---------------------------------------------------------------- 选项开关
 
 /**
- * 多选开关：已在选里就移除，否则追加，然后**按表顺序**重排。
- *
- * 重排不是洁癖：`diffArgs` 用位置逐个比对，顺序不稳会让「只改了选择」
- * 变成一串假 diff。
+ * 多选开关：已在选里就移除，否则追加，然后**按表顺序**重排——
+ * `diffArgs` 用位置逐个比对，顺序不稳会产生假 diff。
  */
 export function toggleCode(sel: readonly string[], code: string, table: CodeTable): string[] {
   if (sel.includes(code)) return sel.filter((c) => c !== code);
@@ -324,15 +300,8 @@ export const BACKEND_KEYS: readonly BackendKey[] = [
 ];
 
 /**
- * 写入用 `name`（驼峰，`set_scrape_defaults` 的 `ScrapeDefaultsArgs` 别名），
- * 读取用的却是**蛇形**键——`get_app_config.scrape_defaults` 是
- * `collect_scrape_defaults()` 按库里 `scrape_defaults.<snake>` 去掉前缀后拼的
- * （`backend-tauri/src/core/domain/app_config.rs:310-330`，
- * `KEY_SCRAPE_COMPANY_SCALE = "scrape_defaults.company_scale"` 等 14 条）。
- *
- * 两个方向**不是**同一个字符串：驼峰写、蛇形读。9 个多词键曾经因此重启后回读不中，
- * 单字键（city/salary/experience/degree/industry）恰好两种写法相同，掩盖了这个缺陷。
- * 这张表与 `BACKEND_KEYS` 一一对应，改一处必须改一处。
+ * 读取用的键：写入走驼峰 `name`，读回是蛇形（后端按 `scrape_defaults.<snake>` 拼出）。
+ * 多词键两种写法不同，单字键恰好相同会掩盖这个缺陷。本表与 `BACKEND_KEYS` 一一对应。
  */
 export const BACKEND_READ_KEYS: Readonly<Record<keyof ScrapeDefaultsArgs, string>> = {
   city: 'city',
@@ -400,12 +369,8 @@ function sameValue(a: unknown, b: unknown): boolean {
 }
 
 /**
- * 只发变化的键。
- *
- * - `known` 是「界面上次从后端读到的值」；第一次打开时传 `{}`。
- * - `{}` 表示没有任何变化，**不要发** `set_scrape_defaults`（发了也是空写）。
- * - `founded` 为空时该键不出现：`null` 与「没改」在语义上无法区分，
- *   发 `null` 会清掉用户已有的年限设置。
+ * 只发变化的键。`known` 是上次从后端读到的值，首次传 `{}`；返回 `{}` 时**不要发**
+ * `set_scrape_defaults`。`founded` 为空时该键不出现——`null` 会被当成「删除该键」。
  */
 export function diffArgs(known: Partial<ScrapeDefaultsArgs>, d: FilterDraft): ScrapeDefaultsArgs {
   const out: Record<string, unknown> = {};
@@ -436,12 +401,7 @@ function strList(v: unknown): string[] | null {
   return out;
 }
 
-/**
- * 后端 `scrape_defaults` → 草稿，返回**采纳了多少个字段**。
- *
- * 返回 0 说明后端没有可用值（`null` / `{}` / 全脏），调用方应回落到本地草稿。
- * 逐个字段独立采纳：后端只有一半字段时，另一半保留默认（`filter.rs:970-1040`）。
- */
+/** 后端 `scrape_defaults` → 草稿，返回**采纳了多少个字段**：0 表示无可用值，应回落本地草稿。 */
 export function applyBackend(d: FilterDraft, backend: unknown): number {
   if (backend === null || typeof backend !== 'object' || Array.isArray(backend)) return 0;
   const src = backend as Record<string, unknown>;
@@ -612,10 +572,8 @@ export const KW_DUPLICATE_NOTE = '这个关键词已经在列表里了';
 export const KW_REQUIRED_NOTE = '请先填关键词，多个关键词用逗号或顿号分隔';
 
 /**
- * 把一段自由文本并进关键词列表：按分隔符切开、trim、去空、**保留原有顺序**去重。
- *
- * 与 `splitList` 的唯一差别是「在已有列表基础上追加」，并明确报告
- * 「追加了几个」——界面靠 `added.length === 0` 判断要不要提示重复。
+ * 把一段自由文本并进关键词列表（切开、trim、去空、保留原顺序去重），
+ * 并报告追加了几个——界面靠 `added.length === 0` 判断要不要提示重复。
  */
 export function mergeKeywordList(
   current: readonly string[],
@@ -637,10 +595,8 @@ export function normalizeKeywords(raw: readonly string[]): string[] {
 }
 
 /**
- * `scrape_start` 的 `keywords` 载荷：**只来自搜索关键词列表**。
- *
- * 严禁在这里读 `draft.exclude`——排除词是「命中即否决」的过滤条件，
- * 当搜索词发出去等于搜一堆本来要排除的东西。
+ * `scrape_start` 的 `keywords` 载荷，**只来自搜索关键词列表**：
+ * 严禁读 `draft.exclude`，排除词是「命中即否决」的过滤条件。
  */
 export function searchKeywords(keywords: readonly string[]): string[] {
   return normalizeKeywords(keywords);

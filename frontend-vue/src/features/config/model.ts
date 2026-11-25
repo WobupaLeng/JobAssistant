@@ -1,18 +1,7 @@
 /**
- * M3 配置页的纯逻辑（草稿 / diff / 掩码），与视图解耦便于单测。
- *
- * 配置草稿与状态机：只保留冻结原型
- * （UI-SPEC-chat-detach-v3 §11 v6）留下的三张卡：大模型 / 提示词 / 技能。
- * 高级卡（门槛 / 上限 / 预筛 / 关键词 / token）已被用户裁决删除，不在本页。
- *
- * 写入铁律（根 AGENTS.md §2 / frontend-vue C11）：
- * - **只提交 diff**：没改的键不进 patch（整份回传会把未设置项清空）。
- * - **空串写 ''，不是 null**：null 在后端是「删除该键 = 恢复出厂」，与「清空值」不同。
- * - **API Key 掩码不回写**：留空 = 不改；以 **** 开头的掩码值一律丢弃。
- * - 本页无门槛 / 上限控件，故只走 set_app_config，不触发 set_limit。
- *
- * 温度（`temperature` / `greet_temperature`）与文本字段共用 diff，但落库时转成
- * 数字并夹进 [0, 2]；解析不出的值不进 patch，界面同时给出提示。
+ * 配置页的纯逻辑（草稿 / diff / 掩码），与视图解耦便于单测。**只提交 diff**（整份回传会把
+ * 未设置项清空）；**空串写 `''` 不是 `null`**（后端把 null 当「删除该键 = 恢复出厂」）；
+ * **API Key 掩码不回写**（留空 = 不改，掩码值一律丢弃）。
  */
 
 import type { AppConfigReply } from '../../api/types';
@@ -32,10 +21,8 @@ export interface ConfigDraft {
 }
 
 /**
- * 参与编辑与 diff 的字段全集：六项文本 + 两个温度。
- *
- * 温度**以字符串承载**（和文本字段同一套 diff 逻辑）：数字类型的草稿一碰
- * `v-model.number` 就会把「0.」变成 0，用户还没打完就被改写。落库前再夹区间。
+ * 参与编辑与 diff 的字段全集：六项文本 + 两个温度。温度以字符串承载，否则
+ * `v-model.number` 会把还没打完的「0.」变成 0；落库前再夹区间。
  */
 export const TEXT_FIELDS = [
   'base_url',
@@ -76,11 +63,8 @@ export function temperatureText(v: number | null | undefined, dflt: number): str
 }
 
 /**
- * 解析用户填的温度。
- *
- * - 空串 → `null`（空 = 不改，**不能**回落成出厂值，否则「清空保存」会凭空写一次库）
- * - 非数字 → `null`（调用方据此提示错误，绝不猜测）
- * - 越界 → 夹进 [0, 2]；两位小数，与后端归一化一致
+ * 解析用户填的温度：空串 → `null`（空 = 不改，**不能**回落成出厂值，否则「清空保存」会凭空
+ * 写一次库）；非数字 → `null`，由调用方提示错误；越界夹进 [0, 2]，两位小数与后端一致。
  */
 export function parseTemperature(raw: string, _dflt: number): number | null {
   const t = (raw ?? '').trim();
@@ -115,11 +99,8 @@ export function draftFromReply(cfg: AppConfigReply): ConfigDraft {
 }
 
 /**
- * 计算「只含改动字段」的 patch。
- *
- * - 文本字段：trim 后与基线不同才进 patch，值写 trim 后的串；**清空写 ''，不写 null**。
- * - API Key：非空且不以 **** 开头才进 patch（掩码 / 留空都丢弃）。
- * - 绝不产出 null，绝不产出 min_score / api_key_hint（后者由 api 层 sanitize 再兜一道）。
+ * 计算「只含改动字段」的 patch：文本字段 trim 后与基线不同才进（清空写 `''` 不写 `null`）；
+ * API Key 非空且不以 **** 开头才进。绝不产出 `null`，也不产出 `min_score` / `api_key_hint`。
  */
 export function buildPatch(draft: ConfigDraft, stored: ConfigDraft): Record<string, unknown> {
   const patch: Record<string, unknown> = {};

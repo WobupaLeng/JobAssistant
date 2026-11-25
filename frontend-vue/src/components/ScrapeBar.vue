@@ -1,10 +1,7 @@
 <script setup lang="ts">
 /**
- * 抓取条：三态按钮 + 限额 + 条件筛选入口 + 一句话进度（C9 文案）。
- *
- * 所有按钮文案与禁用规则来自 `lib_ui/scrape-panel-model.ts`，组件只画。
- * `scrape_start` 由父级发（它要包一层 `{args}`，并且要处理返回值），
- * 这里只 emit 意图。
+ * 抓取条：三态按钮 + 限额 + 条件筛选入口 + 一句话进度。按钮文案与禁用规则来自
+ * `lib_ui/scrape-panel-model.ts`，组件只画；`scrape_start` 由父级发，这里只 emit 意图。
  */
 import { computed } from 'vue';
 import { MAX_JD_CEILING } from '../lib_ui/scrape-panel-model';
@@ -113,9 +110,9 @@ function onMain(): void {
           @change="onMinScore"
         />
       </label>
-      <!-- 条件筛选的常驻入口（用户裁决：工具栏上必须有，不能只靠列表空态）。
+      <!-- 条件筛选的常驻入口：工具栏上必须有，不能只靠列表空态。
            抽屉本身挂在 `DashboardPage` 的 `.job-fill` 里，这里只管开关。 -->
-      <!-- 常驻入口。用 .btn（不是 .btn-ghost）：幽灵态在抓取条的玻璃底上完全透明，
+      <!-- 常驻入口。用 .btn（不是 .btn-ghost）：幽灵态在抓取条底色上完全透明，
            只剩一行小字，用户会当成「按钮没了」。打开时切到 is-on 显示激活态。 -->
       <button
         class="btn btn-sm scrape-filter-btn"

@@ -1,38 +1,6 @@
-/* 动效：列表与分数变化的过渡。
- *
- * 来源：只读参考 `skeleton-web/src/styles/jobs.css`（`list-fade` 0.24s）与本项目
- * `controls.css` 里已有的 `row-in`。曲线按 `frontend-vue/.agents/skills/apple-design`
- * 的约定换成项目令牌 `--ease-out`（cubic-bezier(0.16,1,0.3,1)，快出缓收），
- * 时长压到 180~260ms——旧版已经是这个量级，不做更长的「炫技」动画。
- *
- * 只动 opacity / transform：这两样走合成层，不会让 backdrop-filter 每帧重算。
- */
+/* 动效：列表与分数变化的过渡。曲线用 `--ease-out`，时长 180~260ms。
+ * 只动 opacity / transform：走合成层，不会让 backdrop-filter 每帧重算。 */
 
-/* 整表刷新：列表数据换了一批时，让新表从下方 6px 处淡入。
- * 旧版的宽度来自 `.list-fade { animation: list-fade ... }`；这里同时兼容
- * 「类挂在 tbody 上」和「类挂在表格容器上」两种结构。 */
-.list-fade,
-.list-fade > tbody {
-  animation: list-fade 0.24s var(--ease-out) both;
-}
-
-/* 第二个类名：刷新时 `<tbody class>` 在 `list-fade` 与 `list-fade list-fade-b`
- * 之间交替，属性值真的变了，浏览器才会重播动画（同名类重设不会重播）。
- * 它本身不带任何声明，只是让选择器匹配到不同的值。 */
-.list-fade-b {
-  animation-name: list-fade-b;
-}
-
-@keyframes list-fade-b {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
 
 @keyframes list-fade {
   from {
@@ -81,8 +49,7 @@
 }
 
 /* 尊重系统的「减少动态效果」：保留淡入淡出（对理解有帮助），去掉位移与缩放。
- * 这条必须写在 motion.css 里而不是别处——它是子片段函数 `motion_fade_class`
- * 的唯一数据来源，放在一个地方才好核对。 */
+   这条必须写在 motion.css 里而不是别处——它是子片段函数 `motion_fade_class` */
 @media (prefers-reduced-motion: reduce) {
   .list-fade,
   .list-fade > tbody,
@@ -101,37 +68,22 @@
   }
 }
 
-/* ============================================================================
- * 交互 / 弹层 / 布局变化的过渡（用户：不改布局与功能，给所有交互、弹窗、窗口变化补过渡）
- *
- * 位置必须是本文件末尾：本文件排在 layout / controls / jobs / drawer 之后，
- * 同特异性规则「后者胜出」，面板与按钮的过渡才不会被前面几份样式表压回去。
- * （drawer.css 自带 `drawer-in-play` 进场关键帧；这里补的是**退场**与其余面板的进出。）
- *
- * 只动 opacity / transform / flex-basis：背景与模糊走合成层，不逐帧重排。
- * 布局口径（尺寸、定位、层级、间距）一个字不改——这里只有过渡属性与关键帧。
- * ========================================================================== */
+/* 交互 / 弹层 / 布局变化的过渡。位置必须在本文件末尾：同特异性下后者胜出，
+   否则面板与按钮的过渡会被前面几份样式表压回去。 */
 
-/* ---------- 0. 过渡长度：可调试的单一来源 ----------
- * 用户反馈「聊天窗展开速度太快」：把展开 / 收起相关的时长收进令牌，
- * 后续要调速只改这里（深色浅色同一套，与主题无关所以不进 tokens.css）。
- *   --detach-dur  对话框宽度补间（原 --dur 320ms → 520ms，越收越缓）
- *   --pan-dur     面板进场 / 退场（原 200~320ms → 280ms）
- *   --drawer-dur  抽屉展开 / 收起（与面板同一时长、同一条曲线，见第 6 段） */
+/* ---------- 0. 过渡长度：单一来源（与主题无关，故不进 tokens.css）----------
+   --detach-dur  对话框宽度补间
+   --pan-dur     面板进场 / 退场 */
 :root {
   --detach-dur: 520ms;
   --pan-dur: 280ms;
   --drawer-dur: 280ms;
 }
 
-/* ---------- 1. 弹层进场：统一「轻微放大 / 侧滑 + 上浮」的玻璃展开 ----------
- * 各面板原本各用一套时长与曲线（220 / 280 / 320 / 160ms 四处），且 config / decisions、
- * 主题面板 / 城市选择器用 `display:none → flex` 或条件渲染，切换那一帧无法补间。
- * 这里统一到 `--pan-dur` + 同一条 `--ease-out`：
- *   .pan-pop     浮层（主题面板 / 城市选择器 / 主题与字体菜单）：略缩放下落
- *   .pan-modal   居中大窗（配置 / 决策记录）：缩放 + 下移 10px 归位
- *   .drawer      侧边抽屉：`.is-open` 由 v-show 切换时靠下面的关键帧进场（见第 6 段）
- * 类名由各组件在打开那一帧挂上（见 src/lib_ui/pan.ts），不在样式层猜状态。 */
+/* ---------- 1. 弹层进场：统一到 `--pan-dur` + `--ease-out` ----------
+   .pan-pop     浮层（主题面板 / 城市选择器 / 菜单）：略缩放下落
+   .pan-modal   居中大窗（配置 / 决策记录）：缩放 + 下移 10px 归位
+   .drawer      侧边抽屉：`.is-open` 靠第 6 段的关键帧进场 */
 .pan-pop {
   animation: pan-pop calc(var(--pan-dur) * 0.72) var(--ease-out) both;
 }
@@ -141,15 +93,14 @@
 }
 
 /* 遮罩统一铺开：抽屉 / 筛选 / 敏感库三处盖层原本是瞬现，属于「弹窗」范畴。
- * 不用透明度过渡（用户要求），改成从中心 98.5% 铺到满屏。 */
+ * 不用透明度过渡，改成从中心 98.5% 铺到满屏。几何与材质归各自的样式表，这里只补动画。 */
 .drawer-backdrop,
-.drawer-mask,
 .filter-backdrop,
 .sensitive-backdrop {
   animation: overlay-spread calc(var(--pan-dur) * 0.72) var(--ease-out) both;
 }
 
-/* 浮层从侧下方略微抬起并放大到位；**不含透明度**（用户要求不做淡入淡出）——
+/* 浮层从侧下方略微抬起并放大到位；**不含透明度**——
  * 浮层本身就是不透明玻璃，缩放到位已经足够交代「从哪来」。 */
 @keyframes pan-pop {
   from {
@@ -181,8 +132,7 @@
 }
 
 /* ---------- 2. 内容切换：四态（loading / error / empty / data）与页签互斥区落位 ----------
- * 不用透明度：这些块在滚动容器里，用一点从下往上的位移交代「换内容了」，
- * 幅度只有 6px，不会让人误以为页面在跳。 */
+   不用透明度：这些块在滚动容器里，用一点从下往上的位移交代「换内容了」， */
 .job-state,
 .rail-state,
 .rail-error,
@@ -201,7 +151,7 @@
   animation: content-in 0.26s var(--ease-out) both;
 }
 
-/* 批量条的动作组：`[hidden]` 显隐切换时给一排按钮一次极轻的落位。 */
+/* 批量条的动作组： */
 .batch-actions:not([hidden]) {
   animation: content-in 0.22s var(--ease-out) both;
 }
@@ -221,9 +171,8 @@
 }
 
 /* ---------- 3. 窗口变化：拉伸时内容不被瞬间拉扯 ----------
- * `::view-transition` 不用于窗口 resize；这里用外壳上的一次性 class（由 main.ts 在
- * resize 结束后摘除）让整块界面在尺寸落定后轻轻回正一下，避免「咔嚓」跳变。
- * 用极小的缩放而不是透明度：整屏内容量太大，做透明度会看到明显的灰一下。 */
+   `::view-transition` 不用于窗口 resize；这里用外壳上的一次性 class（由 main.ts 在
+   resize 结束后摘除）让整块界面在尺寸落定后轻轻回正一下，避免「咔嚓」跳变。 */
 .shell-resized {
   animation: shell-settle 0.2s var(--ease-out) both;
 }
@@ -238,13 +187,7 @@
 }
 
 /* ---------- 4. 列表切换：滚动换带（不做淡入淡出） ----------
- * 页签 / 排序 /「查看全部」原本是同一帧直换，眼睛只看到画面闪一下；
- * 用户要求用**滚动**交代这次换代，而不是透明度。
- *
- * 做法：`JobListView` 在换代时换 key 重建卡片，这里让这批卡片从下方 24px 处
- * 依次滑入原位，并按网格列数错开起步——观感是列表整体往上滚了一带。
- * 列数用 nth-child(3n + k) 表达：三列 / 两列 / 单列三档断点都落在同一组序号上，
- * 不需要额外读窗口宽度。只碰 transform，网格尺寸与滚动条位置不动。 */
+   `JobListView` 换代时换 key 重建卡片，卡片从下方 24px 依次滑入，按网格列数错开起步。 */
 .job-grid > .job-card {
   animation: list-roll-in 0.34s var(--ease-out) both;
 }
@@ -271,13 +214,8 @@
 }
 
 /* ---------- 5. 窗口级切换：聊天对话框展开 / 收起 / 换页 ----------
- * · 对话框出画：`.chat-detach[hidden]` 恢复成 vue-chat.css 的 `display: none`，
- *   **这里不再用零宽盒顶替**。零宽盒在视口里仍然是一个盒子，而 `.chat-detach` 是
- *   fixed 定位、挂在 `.app-shell` 末尾，它会压住右栏与列表右侧一条缝的指针事件，
- *   实测后果是「岗位详情打不开、点卡片没反应」。收起即 `display: none`，节点彻底
- *   离场，不多占一个像素、也不吃任何事件。
- * · 展开仍有补间：`flex-basis` 从 0 长到 `--detach-w`，展开态规则在 vue-chat.css 的
- *   `.chat-detach.is-open` 上，这里只补一条过渡声明。 */
+   收起必须是 `display: none`：零宽盒仍是 fixed 定位的盒子，会压住右栏与列表右侧的
+   指针事件，表现为「点卡片没反应」。展开时 `flex-basis` 从 0 长到 `--detach-w`， */
 .chat-detach {
   transition:
     flex-basis var(--detach-dur) var(--ease-glass),
@@ -301,21 +239,10 @@
   }
 }
 
-/* ---------- 6. 抽屉展开 / 收起：同一套动画、同一条时长 ----------
- * 用户要求「抽屉展开和收起统一过渡动画和时间」。四个抽屉（岗位详情 / 条件筛选 /
- * 敏感库 / 底部批量条）在契约样式里各走各的：
- *   drawer.css   .drawer              220ms + .22,1,.36,1，只有进没有收
- *                .scrape-filter-bar   220ms，开场动画写在基础规则上（重渲染即重播）
- *   sensitive.css .sensitive-panel    220ms + --ease-glass，靠 opacity 收放
- * 这里用 `.drawer-anim` 一个类把三者收编（类由 src/lib_ui/pan.ts 挂）：
- *   · 展开：从哪边来就从哪边滑 vs. 居中窗 → 由各抽屉自己的基础 transform 决定，
- *     本段只负责把 transform 补间到「无位移」，所以左边抽屉从左侧、右边抽屉从右侧、
- *     居中窗从 0.96 放大，**方向不会互相写反**。
- *   · 收起：组件按下关闭键时先挂 `.is-closing` 留一帧回程（见 lib_ui/pan.ts），
- *     过渡结束才真的关；`.drawer.is-open` 那条进场关键帧在这期间摘掉，
- *     避免关闭瞬间从关键帧首帧重放。
- *   · 只碰 transform：不做透明度（用户要求），不做宽度 / 高度补间
- *     （抽屉右栏高度靠 top/bottom 撑满，改高等于改布局，也会带动内部滚动条抖）。 */
+/* ---------- 6. 抽屉展开 / 收起：同一套动画与时长 ----------
+   四个抽屉（岗位详情 / 条件筛选 / 敏感库 / 底部批量条）共用 `.drawer-anim`（由
+   src/lib_ui/pan.ts 挂）：展开由各抽屉的基础 transform 决定从哪边来，本段只补间到无位移；
+   收起时先挂 `.is-closing` 留一帧回程，过渡结束才真的关。 */
 .drawer-anim,
 .drawer.drawer-anim {
   transition: transform var(--drawer-dur) var(--ease-out);
@@ -325,24 +252,21 @@
   animation: none;
   transform: none;
   /* 基础态在 drawer.css 里写着 `opacity: 0`（为进场关键帧服务），而本段按「只碰 transform」
-   * 的约定不再补透明度。两者相叠的结果是：位移回到 0 了，面板却一直是全透明的——
-   * 遮罩照常出现、Esc 照常可用，但看起来就是「点了没反应」「抽屉里什么都没有」。
-   * 打开态必须把不透明度显式补回 1，否则这条链永远断在这里。 */
+   的约定不再补透明度。两者相叠的结果是：位移回到 0 了，面板却一直是全透明的——
+   遮罩照常出现、Esc 照常可用，但看起来就是「点了没反应」「抽屉里什么都没有」。 */
   opacity: 1;
 }
 
 /* `.drawer-anim` 由 `playOpen()` 在展开时补上、`onBeforeUnmount` 之前一直挂着；
- * 但它也可能根本没被挂上（例如节点已经是打开态才 mount）。所以这里再按「纯打开态」
- * 补一条兜底，让「.is-open 即可见」成为不依赖动画类的不变量。 */
+   但它也可能根本没被挂上（例如节点已经是打开态才 mount）。所以这里再按「纯打开态」 */
 .drawer.is-open {
   opacity: 1;
 }
 
 /* 收起态（关闭后那一帧）：三个抽屉各回各家。
- *   .drawer / .scrape-filter-bar 的基础 transform 在 drawer.css 里已经写成
- *   translateX(±24px)，所以收起只要把 translate 收回基础值即可；
- *   sensitive-panel 的基础是 translate(-50%,-50%) scale(0.98)，收起同理。
- *   三者用同一时长、同一曲线，方向各由基础 transform 决定，不会写反。 */
+   .drawer / .scrape-filter-bar 的基础 transform 在 drawer.css 里已经写成
+   translateX(±24px)，所以收起只要把 translate 收回基础值即可；
+   sensitive-panel 的基础是 translate(-50%,-50%) scale(0.98)，收起同理。 */
 .drawer.is-closing {
   transform: translateX(24px);
 }
@@ -356,8 +280,7 @@
 }
 
 /* 左抽屉的「打开态」：`.is-open` 由 DashboardPage 的 `filterOpen` 直接驱动，
- * 所以关闭那一帧就摘掉，位移回程立刻开播（不再等 `.is-closing`、不再排队）。
- * 节点由页面层留到 `closePanel()` 的过渡结束再卸，离场这一段看得见。 */
+   所以关闭那一帧就摘掉，位移回程立刻开播（不再等 `.is-closing`、不再排队）。 */
 .scrape-filter-bar.is-open {
   transform: none;
 }
@@ -368,14 +291,9 @@
   transform: none;
 }
 
-/* ---------- 6.1 敏感库：本段只留补间，不写任何自身几何或材质 ----------
- * 用户反馈「被遮挡的部分变透明了」，并要求「我不需要透明」。结论落在 sensitive.css
- * （`.sensitive-panel` 的底色 / 磨砂 / 层级 / pointer-events 都归它一家写），
- * 本文件只负责「开合怎么动」——transform 的起点、终点与时长。
- *
- * 这条边界是硬约束：同一元素的自身几何与材质只允许一个文件定义，否则同特异性
- * 覆盖会互相吃掉，改动一处会在完全无关的地方冒出来（本次已多次踩中）。
- * tests/geometry.test.ts 的 OWNERSHIP 守卫盯着它。 */
+/* ---------- 6.1 敏感库：本段只留补间 ----------
+   `.sensitive-panel` 的底色 / 磨砂 / 层级 / pointer-events 全归 sensitive.css，本文件只管
+   transform 的起止与时长。同一元素的几何与材质只允许一个文件定义， */
 .sensitive-panel {
   transition: none;
 }
@@ -392,8 +310,7 @@
 }
 
 /* ---------- 7. 减少动态效果：位移 / 缩放全部去掉 ----------
- * controls.css 已有一条全局 0.01ms 封顶；用户明确要求不做淡入淡出，所以这里
- * 直接 `animation: none`（不是换成只淡版本），前庭敏感时一律瞬间到位。 */
+   controls.css 已有一条全局 0.01ms 封顶；这里不做淡入淡出，所以 */
 @media (prefers-reduced-motion: reduce) {
   .pan-pop,
   .pan-modal,

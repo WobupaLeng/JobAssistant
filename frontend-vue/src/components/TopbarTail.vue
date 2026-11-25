@@ -1,30 +1,8 @@
 <script setup lang="ts">
 /**
- * 顶栏尾段：计分模式分段 / 敏感库入口 / token 读数 / 配置 / 主题。
- *
- * 为什么单独一个组件：`AppShell` 必须保持「不 import 页面、不含业务」，
- * 而这一段要读 `get_scoring_spec` 与 token 统计。放在 `components/` 并只
- * 通过 props/emit 通信，数据由持有它的 `DashboardPage` 喂进来（C13 插槽原则）。
- *
- * 落位（SPEC-001 决策 7 / AC10）：
- * 顶栏是一行，本组件由概览页 teleport 进 `AppShell` 的 `.tb-embed`，
- * 顺序按冻结 SPEC §11.3：`scrape-mode-segmented` → `sensitive-open` → token → 配置。
- * 尾段再分两组（用户 m04039）：`.tb-tools`（分段 · token · 配置 · 敏感库，紧贴登录按钮）
- * 与 `.tb-theme`（主题，独占右端）。
- *
- * 两处口径别改回去：
- * - **满分 / 门槛 chip 不在这里**（legacy-baseline §160「满分口径 `.score-spec` 已迁出顶栏」）——
- *   它挂在 `.card.log-standalone` 卡头（`LogCard`），锚点 `score-spec` 全站恰好一处；
- * - **配置按钮是 `shell-config-btn`**（原型 L1407 / SPEC §11.3 / 断言 A31），
- *   二级导航时代那个 `nav-config` 已随页签退役。
- * - **token 读数两份 DOM**（原型 L1400-1406，断言 A32）：≥1360 走 `.tb-tokens`
- *   （锚点 `token-total`），<1360 折叠成一枚 chip（锚点 `token-total-chip`，类名
- *   `.tb-token-chip`——本仓库 `.tb-stats` 已被日志卡的 C9 进度块占用）。两者各唯一一份，
- *   读数文案都是「累计 N token」，折叠 chip 的 title 给全量读数。
- * - **分项读数**（原型 L1402-1403，Chief 派单接线）：模型打分/打招呼两枚 `rail-stat`
- *   与分隔线住在 `.tb-tokens` 内，1360–1599 随原型隐藏；数据来自既有 config DTO
- *   （tokens_greet/tokens_score），零新增 invoke。Rust 核心暂无累计写入路径，
- *   读数为旧库遗留值（见 HANDOFF 偏差②更正），前端不造数。
+ * 顶栏尾段：计分模式分段 / 敏感库入口 / token 读数 / 配置 / 主题。单独成组件是为了让
+ * `AppShell` 不含业务，数据由 `DashboardPage` 经 props/emit 喂进来。满分 / 门槛 chip 在日志卡头
+ * 而不在顶栏；token 读数有两份 DOM（≥1360 走 `.tb-tokens`，窄屏折叠成一枚 chip）。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
@@ -85,23 +63,14 @@ const emit = defineEmits<{
 
 /**
  * 大模型打分被选中时才露初筛输入框——规则打分下它没有意义，
- * 常驻会把顶栏撑乱（SPEC §11.3 的落位顺序不变）。
+ * 常驻会把顶栏撑乱（落位顺序不变）。
  */
 const llmActive = computed(() => props.segs.some((s) => s.key === 'llm' && s.active));
 
 /* ---------------- 主题面板（调色板 + 字号）
- *
- * 用户裁决：主题 / 调色板 / 字号三组收成一枚「主题」按钮，点开才展开。
- * 面板 teleport 到 body：这一行住在 `header.topbar`，顶栏带 backdrop-filter
- * （会新建包含块），面板若留在原地会卡在顶栏这条 46px 的带子里被裁掉。
- *
- * **开合状态归本组件自己**（用户 m04113「主题现在打不开」）。此前它由概览页持有一份、
- * 经 emit 回写，面板挂在 `<body>` 上跟按钮不在同一棵子树，任何一边没对齐就表现为
- * 「点了没反应」——这类纯 UI 的开关不该跨组件往返。
- *
- * 定位与 `CityPicker` 同一套口径：量触发按钮矩形，下面放得下就向下展，否则翻上。
- * 面板根节点带 `data-overlay="popover"`，概览页的全局 pointerdown 会据此放行。
- */
+ * 面板 teleport 到 body：顶栏带 backdrop-filter 会新建包含块，留在原地会被 46px 的带子裁掉。
+ * 开合状态归本组件自己（面板挂在 body 上，跟按钮不在同一棵子树）。根节点带
+ * `data-overlay="popover"` 供全局 pointerdown 放行。 */
 interface PanelBox {
   top: number;
   left: number;
@@ -219,13 +188,10 @@ function onPrefilterInput(ev: Event): void {
 
 <template>
   <div class="tb-tail">
-    <!-- 左半段 .tb-tools：打分分段 + token 读数 + 配置 + 敏感库，紧贴登录按钮。
-         用户 m04039：这组「与主题分开，靠近登录按钮」。主题单独落在右端 .tb-theme。 -->
+    <!-- 左半段 .tb-tools：打分分段 + token 读数 + 配置 + 敏感库，紧贴登录按钮。 -->
     <div class="tb-tools">
-    <!-- 打分方式分段 + 初筛线（用户裁决：移到登录按钮右边）。
-         登录动作住在 `PlatformCard`（同一行 `.tb-embed` 内），本组件紧随其后，
-         所以 DOM 顺序上恰好就是「登录按钮 → 规则/大模型分段 → 初筛线」。
-         初筛线只在选中大模型时出现：规则打分下它没有意义，常驻会把顶栏撑乱。 -->
+    <!-- 打分方式分段 + 初筛线：登录动作在 `PlatformCard`，本组件紧随其后。
+         初筛线只在选中大模型时出现，规则打分下没有意义。 -->
     <div
       v-if="segs.length > 0"
       class="segmented scoring-after-login"
@@ -271,10 +237,8 @@ function onPrefilterInput(ev: Event): void {
         <span class="seg-prefilter-text">才走大模型</span>
       </label>
     </div>
-    <!-- 原型 L1400-1406：同一枚读数两种 DOM，CSS 在窄窗断点处互换显隐（A32 各唯一 1 份）。
-         分项（模型打分/打招呼）与分隔线住 .tb-tokens 内，窄窗才折叠；
-         折叠 chip 的 title 给全量三值（原型 L1406 逐字格式）。数据来自既有 config DTO
-         的 tokens_* 三键，由后端 add_tokens 累加。 -->
+    <!-- 同一枚读数两种 DOM，CSS 在窄窗断点互换显隐，各唯一 1 份。
+         数据来自 config DTO 的 tokens_* 三键，由后端累加。 -->
     <span class="tb-tokens" :title="`累计 ${tokenText(tokensTotal)} token`">
       <span>累计 <b class="token-total" data-testid="token-total">{{ tokenText(tokensTotal) }}</b> token</span>
       <i class="tb-sep" aria-hidden="true"></i>
@@ -290,8 +254,7 @@ function onPrefilterInput(ev: Event): void {
     <button class="btn btn-sm btn-ghost" type="button" data-testid="shell-config-btn" @click="emit('open-config')">
       配置
     </button>
-    <!-- 敏感库紧跟在「配置」右侧（用户 m02692）。它原先排在打分分段之后，
-         现在与配置同属「贴登录按钮」这一组，顺序：… 分段 · token · 配置 · 敏感库。 -->
+    <!-- 敏感库紧跟「配置」右侧，同属「贴登录按钮」这一组。 -->
     <button
       class="btn btn-sm btn-ghost"
       type="button"
@@ -302,9 +265,7 @@ function onPrefilterInput(ev: Event): void {
       敏感库
     </button>
     </div>
-    <!-- 主题按钮独占尾段右端 .tb-theme（用户 m04039：主题位置保持不变）。
-         与左边那组之间留一条 auto 边距，两组各占一头；按钮与面板是同一个
-         `<body>` 外的两层宿主，页面用 `themePanelOpen` 统管开合。 -->
+    <!-- 主题按钮独占尾段右端 .tb-theme，与左边那组各占一头。 -->
     <div class="tb-theme">
     <button
       ref="triggerEl"
@@ -335,10 +296,7 @@ function onPrefilterInput(ev: Event): void {
       >
         <div class="theme-row">
           <span class="theme-row-label">明暗</span>
-          <!-- 只有深 / 浅两枚按钮（用户 m04203「主题中多了一个深色的选择」）：
-               此前这里还并排着一枚「翻转」按钮，它显示的也是「☾ 深色 / ☀ 浅色」，
-               与右侧两枚并列时看起来就是同一个选项出现两次。翻转能力由两枚并列按钮
-               本身覆盖，多余的这枚已删除。 -->
+          <!-- 只有深 / 浅两枚按钮：翻转能力由这两枚并列覆盖，不要再加一枚「翻转」。 -->
           <div class="theme-modes" data-testid="theme-mode-group">
             <button
               v-for="m in MODES"

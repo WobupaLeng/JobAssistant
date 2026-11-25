@@ -1,196 +1,8 @@
-/* ============================================================================
- * 页面级样式：Boss 消息 / 配置 / 决策记录
- *
- * 数值全部取自旧版 `skeleton-web/src/styles/chat.css` 与 `config.css`
- * （逐项抄写，不重新设计）：.chat-grid 的 280px + 1fr、.bubble 的 76%、
- * .config-card 的圆角与间距等。改数值前先去旧版对照，别凭观感调。
- *
- * 注意：本文件必须只用斜杠星号块注释。行内反引号在注释里也是安全的，但
- * 反引号引用的「斜杠斜杠注释」不是 CSS 注释，会让整份样式表失效。
- * 另外：注释里禁止出现反引号包住的块注释开头标记——那会被当成注释提前闭合，
- * 后面所有规则被当作非法 token 丢弃（实测 dist CSS 只生成了约一半）。
- * ========================================================================== */
+/* 页面级样式：Boss 消息 / 配置 / 决策记录。数值逐项抄自只读参考，不重新设计。
+ * 只用块注释，且注释正文不得出现反引号包住的块注释标记——会提前闭合并丢掉后续规则。 */
 
 /* ============================================================================
- * 1. Boss 消息
- * ========================================================================== */
-
-.chat-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-}
-
-/* 左栏固定 280px：比这更窄时「未读角标 + 时间」会换行 */
-.chat-grid {
-  display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 12px;
-  height: 520px;
-  min-height: 0;
-}
-
-.chat-side {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-}
-
-.chat-skeleton {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.chat-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  overflow-y: auto;
-  padding-right: 2px;
-  min-height: 0;
-}
-
-.chat-item {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  width: 100%;
-  padding: 9px 11px;
-  text-align: left;
-  cursor: pointer;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-sm);
-  background: var(--glass-1);
-  color: var(--text-1);
-  transition:
-    background var(--dur-fast) var(--ease-glass),
-    border-color var(--dur-fast) var(--ease-glass);
-}
-
-.chat-item:hover {
-  background: var(--glass-2);
-  border-color: var(--hairline-strong);
-}
-
-.chat-item.is-active {
-  background: var(--primary-soft);
-  border-color: var(--primary);
-}
-
-.chat-item-top {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.chat-item-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-item-time {
-  flex: 0 0 auto;
-  font-size: var(--fs-2xs);
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
-}
-
-.chat-item-sub {
-  font-size: var(--fs-xs);
-  color: var(--text-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-item-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-2xs);
-  color: var(--text-3);
-}
-
-.chat-item-company {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.unread {
-  flex: 0 0 auto;
-  min-width: 17px;
-  padding: 0 5px;
-  border-radius: var(--radius-pill);
-  background: var(--bad);
-  color: #fff;
-  font-size: var(--fs-2xs);
-  line-height: 16px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-
-.chat-main {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-  min-width: 0;
-}
-
-.chat-head {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.chat-head-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  /* 名称与副标题必须各占一行；inline 排列会让两段文字挤在一行叠字 */
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-}
-
-.chat-head-name {
-  display: block;
-  max-width: 100%;
-  font-size: var(--fs-sm);
-  font-weight: 620;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-head-sub {
-  display: block;
-  max-width: 100%;
-  font-size: var(--fs-2xs);
-  color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-head-actions {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+   1. Boss 消息 */
 
 .chat-feed {
   flex: 1 1 auto;
@@ -307,43 +119,6 @@
   color: var(--text-3);
 }
 
-/* ---- 简历条 ---- */
-
-.resume-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px 8px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-sm);
-  background: var(--glass-1);
-}
-
-/* ---- 输入区 ---- */
-
-.chat-send {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.chat-input {
-  flex: 1 1 auto;
-  min-height: 52px;
-  max-height: 160px;
-  resize: vertical;
-}
-
-.chat-send .btn {
-  flex: 0 0 auto;
-  height: 32px;
-}
-
-.chat-wrap .error-bar {
-  margin-top: 8px;
-}
-
 /* 窄屏：左栏收窄，再到单列上下排布 */
 @media (max-width: 1180px) {
   .chat-grid {
@@ -364,25 +139,7 @@
 }
 
 /* ============================================================================
- * 2. 配置
- * ========================================================================== */
-
-.config-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-}
-
-.config-tools {
-  padding: 9px 14px;
-}
-
-.config-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+   2. 配置 */
 
 .config-card {
   border: 1px solid var(--hairline);
@@ -439,25 +196,8 @@
   border-top: 1px solid var(--hairline);
 }
 
-.cfg-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 12px;
-}
-
-.cfg-grid-3 {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px 12px;
-}
-
-/*
- * 大模型卡片分两行：
- *   第一行 Key + Base URL（两个长串，各占一半）
- *   第二行 模型 + 打分温度 + 话术温度（模型名短、温度窄，按内容给宽度）
- * 每一行都用独立的 grid：一行 flex-wrap 折行会把第二行整体挤到第三行，
- * 改宽度时对不上就单独调这一行。
- */
+/* 大模型卡片分两行独立 grid：Key + Base URL 各占一半，模型与两个温度按内容给宽。
+ * 用 flex-wrap 会把第二行整体挤到第三行。 */
 .cfg-row-llm {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -478,48 +218,14 @@
   min-width: 0;
 }
 
-.cfg-value {
-  font-size: var(--fs-md);
-  font-weight: 640;
-  color: var(--text-1);
-  font-variant-numeric: tabular-nums;
-}
-
-.cfg-value-sm {
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  color: var(--text-2);
-  line-height: 1.5;
-}
-
 .cfg-hint {
   font-size: var(--fs-2xs);
   color: var(--text-3);
   line-height: 1.5;
 }
 
-@media (max-width: 900px) {
-  .cfg-grid,
-  .cfg-grid-3 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  /* 窄窗口：两行各自再折一次，Key / URL 上下排，模型 / 温度 / 温度 折成两列 */
-  .cfg-row-llm,
-  .cfg-row-llm:last-child {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 /* ============================================================================
- * 3. 决策记录
- * ========================================================================== */
-
-.log-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-}
+   3. 决策记录 */
 
 .log-tools {
   align-items: center;
@@ -532,77 +238,10 @@
   flex: 0 0 auto;
 }
 
-.log-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--fs-sm);
-}
-
-.log-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: 6px 8px;
-  text-align: left;
-  font-size: var(--fs-2xs);
-  font-weight: 560;
-  color: var(--text-3);
-  letter-spacing: 0.03em;
-  background: var(--glass-2);
-  border-bottom: 1px solid var(--hairline);
-  white-space: nowrap;
-}
-
-.log-table tbody td {
-  padding: 7px 8px;
-  border-bottom: 1px solid var(--hairline);
-  vertical-align: middle;
-}
-
-.log-table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.035);
-}
-
-.log-row.is-rejected td {
-  color: var(--text-2);
-}
-
 .log-time {
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.log-company {
-  font-size: var(--fs-xs);
-  color: var(--text-1);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 220px;
-}
-
-.log-title {
-  font-size: var(--fs-2xs);
-  color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 220px;
-}
-
-.log-score {
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.log-old {
-  color: var(--text-3);
-}
-
-.log-arrow {
-  margin: 0 4px;
-  color: var(--text-3);
 }
 
 .score-num {
@@ -621,38 +260,14 @@
   color: var(--text-3);
 }
 
-.log-reason {
-  color: var(--text-2);
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
 .log-table td.empty {
   padding: 22px 8px;
   text-align: center;
   color: var(--text-3);
 }
 
-/* ============================================================================
- * 4. 日志页：运行日志 + 决策日志双视图（用户裁决第 ⑦ 条）
- *
- * 只追加，不改上面既有规则。背景一律透明/半透明玻璃令牌——页面根容器
- * 不得有不透明底色，否则 WebView 的亚克力层会被整块吃掉。
- * 注意：本文件禁止 //! 与 /// 注释（Rust 语法会让整份样式表被静默丢弃）。
- * ========================================================================== */
-
-.log-wrap {
-  /* 页面本体：透明，只有卡片自己是玻璃 */
-  background: transparent;
-  min-height: 0;
-}
-
-.log-body {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  gap: 10px;
-}
+/* ---------- 4. 日志页：运行日志 + 决策日志双视图 ----------
+ * 页面根容器不得有不透明底色，否则 WebView 的亚克力层会被整块吃掉。 */
 
 .log-view {
   display: flex;
@@ -809,37 +424,6 @@
 }
 
 /* ---------- 决策日志 ---------- */
-
-.log-kind {
-  white-space: nowrap;
-}
-
-.log-job {
-  max-width: 240px;
-}
-
-.log-reason.is-empty {
-  color: var(--text-3);
-  font-style: italic;
-}
-
-.log-score-val {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.log-score-val.is-up {
-  color: var(--good);
-}
-
-.log-score-val.is-down {
-  color: var(--bad);
-}
-
-.log-score-val.is-same {
-  color: var(--text-2);
-}
 
 .log-score-val.is-none {
   color: var(--text-3);

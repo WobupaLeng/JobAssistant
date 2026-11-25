@@ -1,37 +1,8 @@
 <script setup lang="ts">
 /**
- * 同屏聊天层（原「Boss 消息页」）。
- *
- * **决策溯源见改造入口 `App.vue`（ADR-004 只在那里落一处注释）**：聊天不再是一整页，
- * 本组件随之从 `pages/` 的整页升为壳级常驻层（图纸
- * [`SPEC-001-legacy-chat-merge`](../../docs/specs/SPEC-001-legacy-chat-merge.md) 决策 1）。
- * 文件名保留 `ChatPage.vue`：`tests/chat-contract.test.ts` / `geometry-collect.test.ts` /
- * `qa-testids.test.ts` 都按这个路径读源码取证，改名等于把 QA 锚点地图一起改掉。
- *
- * ## 口径
- * 结构与 testid 的唯一真源是冻结原型 `prototypes/ui-v1` + `docs/ui/UI-SPEC-chat-detach-v3.md`
- * （v3–v10 全部裁决），行为规则来自 `lib_ui/chat-model`。
- *
- * - 右栏 `aside.chat-rail` 常驻；对话框 `.chat-detach` 默认 `hidden`；
- * - 点任意 Boss ⇒ 展开（宽 `clamp(600px, 50vw, 80vw)`，下限 600），右栏让位；
- * - `chat-detach-close-btn` / `Esc` 收起并**保留** activeFriend，再点同一位重开；
- * - 全站唯一输入框在对话框聊天区底部；Boss 列表底部不设发送框。
- *
- * ## DOM 形状（SPEC §2.1 / §2.4 / A15）
- * 本组件是**多根 fragment**：`aside.chat-rail` 与 `.chat-detach` 直接成为外壳
- * `.app-body` 的 flex 子项，中间不再套 `<section class="page-chat">`。套一层就多出一个布局盒，
- * 对话框便不是「flex 压缩主列」而是被套住 —— A15 的 `position: static` 与主列宽度联动
- * 判据都要求它按 `.app-body` 的子项参与布局。两条瞬态提示行归右栏末尾；
- * 求职期望行已按 SPEC-001 Rev3/Rev5 退役（原型 L926-927：期望并入筛选条件面板，右栏没有那行）。
- *
- * ## 数据
- * 好友列表 / 消息 / 简历 / 期望职位都走 `src/api/commands/*`，本层不假设任何后端形状。
- * **层与概览同屏 ⇒ 会话列表在应用启动时就拉一次**（R1 的「不切页就能发现新消息」），
- * 自动投递状态由 `lib_ui/auto-heartbeat.ts` 的心跳驱动：**没有任何轮询**——状态只在
- * 「60~90 秒随机到期」「每次投递完成」「发完消息」「手动刷新」这几个时刻请求一次。
- *
- * ## 独立 mount
- * 本层不依赖 `App.vue`：测试可以直接 `mount(ChatPage)`（SPEC-001 测试口径「保留独立 mount」）。
+ * 同屏聊天层。文件名保留 `ChatPage.vue`：契约测试按这个路径读源码取证。右栏常驻，对话框默认
+ * `hidden`；点任意 Boss 展开且右栏让位；关闭按钮或 Esc 收起并**保留** activeFriend。会话列表
+ * 启动时拉一次，自动投递由 `auto-heartbeat.ts` 驱动，**没有任何轮询**。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
@@ -111,7 +82,7 @@ import { hasHigherOverlay } from '../lib_ui/overlay-stack';
 
 /**
  * 展开态上抛给 `App.vue` → `AppShell` 的 `.is-chat-open`：
- * 右栏让位与「列数 = 收起态 − 1」（SPEC §16.9 裁决 X）的 CSS 钩子都挂在那一个壳节点上。
+ * 右栏让位与「列数 = 收起态 − 1」的 CSS 钩子都挂在那一个壳节点上。
  * 本层不再 emit `navigate` —— 聊天不是页，没有可去的页。
  */
 const emit = defineEmits<{
@@ -138,15 +109,12 @@ const loadingMessages = ref(false);
 const note = ref('');
 /**
  * `note` 的语气：`bad` 红条（失败，可执行），`hint` 灰色说明（不是错误）。
- *
- * 用户 m01273：「已是最新消息」不是错误，别用红条 —— 它只是解释「为什么没新东西」。
- * 判据按文案前缀一次性给出，而不是在每个写入点各标一遍，避免二义性：
- * 成功提示无前缀（「消息已发送」），失败提示都带 `…失败：` 前缀。
+ * 判据只看文案前缀：失败提示都带 `…失败：`，成功提示无前缀。
  */
 const noteTone = computed<'bad' | 'hint'>(() => {
   const text = note.value;
   if (text === MESSAGES_FRESH_NOTE) return 'hint';
-  // 用户 m02288：读取失败占半个界面又不说怎么办。抓取/导航类失败一律按「重试」呈现。
+  // 读取/导航类失败一律按「重试」呈现。
   if (isRetryableNote(text)) return 'bad';
   if (/失败[:：]/.test(text)) return 'bad';
   return 'hint';
@@ -155,23 +123,13 @@ const noteTone = computed<'bad' | 'hint'>(() => {
 const topNote = computed(() => (noteTone.value === 'bad' ? note.value : ''));
 /** 消息流末尾灰色说明条用的那句。 */
 const bottomNote = computed(() => (noteTone.value === 'hint' ? note.value : ''));
-/**
- * 「已是最新消息」单独拎出来（用户 m01764）：它要出现**两处** ——
- * Boss 列表最上方 + 消息流末尾（自己那条消息的下方），都是灰色居中。
- * 其余灰色说明仍只走 `bottomNote`，不受影响。
- */
+/** 「已是最新消息」要出现**两处**：Boss 列表最上方 + 消息流末尾，都是灰色居中。 */
 const freshNote = computed(() => (note.value === MESSAGES_FRESH_NOTE ? note.value : ''));
 
 /**
- * 读取/建会话/发送失败时把原始技术文案换成一句「能照做」的话（用户 m02288）。
- *
- * 之前右栏直接贴 Playwright 原文（Page.goto 的 ERR_ABORTED 加整段 Call log），
- * 占掉半个界面，还让用户以为整个程序卡死了。原始文案仍进日志，
- * 界面上只留结论与下一步。
- *
- * 只认三类已知原因：导航被页面自身跳转打断（网络慢/风控）、浏览器连接断了、
- * 以及后端把「会话列表没拉到」当成「这条会话不存在」报上来。
- * 其余错误一律照原样显示 —— 不认识的失败编不出准确的话，别糊弄。
+ * 读取/建会话/发送失败时把 Playwright 原始文案换成一句「能照做」的话，
+ * 原文仍进日志。只认三类原因：导航被打断、浏览器断开、会话被报成不存在；
+ * 其余错误照原样显示。
  */
 const RETRY_READ = '读取消息失败：Boss 页面没打开（网络慢或被风控拦了一次）。再点一次这条会话即可，仍失败就点「刷新」。';
 const RETRY_FRIENDS = '读取会话失败：Boss 页面没打开（网络慢或被风控拦了一次）。点「刷新」重试。';
@@ -219,14 +177,9 @@ let unlistenLogin: UnlistenFn | null = null;
 let disposed = false;
 
 /* ------------------------------ 窗口宽度（宽度公式） --------------------------
- *
- * --detach-w / --rail-w 的写入已经统一收口到 AppShell 的 syncCanvas()（canvas.ts 是唯一
- * 公式来源，并且保证 --ui-scale 先于这两个变量落盘）。所以本页**不再**写行内样式：
- * 同一份样式表里 `.chat-detach.is-open { flex-basis: var(--detach-w) }` 直接吃行内值，
- * 静态兜底 720px 留在 vue-chat.css，首帧不会塌成 0 宽。
- *
- * 这里只保留一份只读的镜像给单测与调试用（defineExpose 出去），数值来自同一个函数，
- * 所以不会和 syncCanvas 打架。 */
+ * `--detach-w` / `--rail-w` 由 AppShell 的 syncCanvas() 写入（canvas.ts 是唯一公式来源），
+ * 本页不写行内样式，`.chat-detach.is-open { flex-basis: var(--detach-w) }` 直接吃变量，
+ * 静态兜底留在 vue-chat.css。这里只保留一份只读镜像给单测与调试。 */
 
 const innerWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth);
 const detachW = computed(() => detachWidth(innerWidth.value));
@@ -237,7 +190,7 @@ const chatW = computed(() => chatAreaWidth(innerWidth.value));
 const activeFriend = computed<Friend | null>(
   () => friends.value.find((f) => f.uid === ui.value.activeFriendsUid) ?? null,
 );
-// 排序口径统一在这里：草稿占位置顶 → 最近聊天在前 → 无时间戳的最后（用户 m01539）。
+// 排序口径统一在这里：草稿置顶 → 最近聊天在前 → 无时间戳的最后。
 const visibleFriends = computed(() => filterFriends(sortFriends(friends.value), search.value));
 const talkableFriend = computed(() => activeFriend.value);
 const canTalk = computed(() => talkableFriend.value !== null && isSendableFriend(talkableFriend.value));
@@ -246,18 +199,14 @@ const composeRef = ref<InstanceType<typeof ChatCompose> | null>(null);
 /* ---------------------------------- 加载 ------------------------------------ */
 
 /**
- * 「该不该跳过远端拉取」的账本（模块级，整个页面生命周期有效）。
- *
- * 不用 ref：它只影响要不要发请求，不参与渲染；放响应式里只会多一轮无谓更新。
+ * 「该不该跳过远端拉取」的账本（模块级，整个页面生命周期有效）。不用 ref：它只影响要不要
+ * 发请求，不参与渲染。
  */
 const messagesMemo = makeMessagesMemo();
 
 /**
- * 界面这屏消息属于哪条会话（空串 = 还没显示过任何人的会话）。
- *
- * 与 `ui.value.activeFriendsUid` 分开记：点开新会话时选中会先变，而消息要等
- * `loadMessages` 回来才换；重建会话时 uid 又会中途变一次。这条「屏上是谁」的账
- * 单独记，才能既不误清屏、也不把上一位的消息串到这一位身上。
+ * 界面这屏消息属于哪条会话（空串 = 还没显示过任何人的会话）。与 `activeFriendsUid` 分开
+ * 记：选中先变、消息要等 `loadMessages` 回来才换，重建会话时 uid 还会中途变一次。
  */
 const feedUid = ref('');
 
@@ -270,7 +219,7 @@ async function loadFriends(allowOpenSession = false): Promise<void> {
   const fresh = pending.filter((f, i) => !known.has(f.uid) && pending.findIndex((g) => g.uid === f.uid) === i);
   if (fresh.length > 0) friends.value = [...fresh, ...friends.value];
   // 本地缓存的会话列表：库里有就直接先渲染，远程拉到之后按 uid 就地合并。
-  // 不读它，界面上就只剩「正在加载 + 一句报错」，本地数据等于白存（用户：没有读本地数据）。
+  // 不读它，界面上就只剩「正在加载 + 一句报错」，本地数据等于白存。
   // 只在列表还空的时候补：已有内容时不该被一份可能更旧的缓存盖一下。
   if (friends.value.length === 0) {
     try {
@@ -294,7 +243,7 @@ async function loadFriends(allowOpenSession = false): Promise<void> {
       await sessionOpen('boss', 'chat');
       reply = await chatFriends();
     }
-    // 刷新不得改变展开态与选中（SPEC §3）：只把 activeFriend 的字段换成新的。
+    // 刷新不得改变展开态与选中：只把 activeFriend 的字段换成新的。
     // 顺序不变，不整体替换：远程行与现有行**按 uid 就地改写**，未变的行引用保持不变，
     // 只有真正变更的字段才触发那一行的重渲染（用户报「点刷新卡住」的根因是整表重建）。
     friends.value = mergeFriends(friends.value, reply.items);
@@ -330,7 +279,7 @@ async function loadMessages(uid: string): Promise<void> {
     /* 本地读取失败不阻断远程加载 */
   }
   // 会话列表里的 last_ts 说明服务端认为这条会话没有新消息，且上次已成功拉过同样的值
-  // → 直接用本地渲染，不打这一枪（用户：点开 Boss 每次都要等 historyMsg 卡住）。
+  // → 直接用本地渲染，不打这一枪，否则点开每位 Boss 都要等 historyMsg。
   // 每次进来都按当前 uid 重取：重建会话会把这个 uid 换掉，闭包里留旧对象会重复重建。
   const friend = friends.value.find((f) => f.uid === uid) ?? null;
   // 判据只看「上次拉取成功时的 last_ts 与此刻是否相等」，与**此刻消息表是否为空无关**：
@@ -354,7 +303,7 @@ async function loadMessages(uid: string): Promise<void> {
   } catch (e) {
     if (ui.value.activeFriendsUid !== uid) return;
     // 这条会话的 uid 在 Boss 上已经不存在（列表没拉到也算这一类）：按岗位重新建一次会话，
-    // 拿到真 uid 再抓。**不去列表里再找一遍**——那正是重复失败的那一步（用户 m02802）。
+    // 拿到真 uid 再抓，**不去列表里再找一遍**。
     // 重建成功后直接在本函数里按新 uid 再拉一次，**不递归**：新 uid 也落空时会无限重建。
     const rebound = await rebindDeadSession(friend, errText(e));
     if (rebound !== null) {
@@ -409,14 +358,9 @@ async function pick(uid: string): Promise<void> {
 }
 
 /**
- * 后端说「在 Boss 会话列表里找不到这条会话」时，重新在 Boss 上拿一次真实 uid。
- *
- * 为什么会有这种情况：会话列表可能没拉到（`getGeekFriendList` 这一次没回来，后端就把它
- * 当成「这条会话不存在」报上来），也可能是这条会话的 uid 已经失效。两种情况都只有
- * 「按岗位重新建会话」这一条真能走通的路 —— 继续去列表里找是白等（用户 m02802 拍板）。
- *
- * 只认这一句文案，别的失败一律不动：乱猜原因编不出准确的话。
- * 返回新 uid 与**换过 uid 的那一行**；不是这种错误 / 没有岗位信息 / 重建失败时返回 `null`。
+ * 后端报「在 Boss 会话列表里找不到这条会话」时重新拿一次真实 uid（列表没拉到或 uid 已失效
+ * 都会这么报，唯一走得通的路是按岗位重建会话）。只认这一句文案，别的失败一律不动。
+ * 返回新 uid 与换过 uid 的那一行；不是这种错误 / 没有岗位信息 / 重建失败时返回 `null`。
  */
 async function rebindDeadSession(
   friend: Friend | null,
@@ -440,13 +384,11 @@ async function rebindDeadSession(
 
 /**
  * 把一条占位会话变成 Boss 上的真实会话，返回真实 uid（失败返回空串并写好提示）。
- *
- * 用户点「立即沟通」后页面自己跳到聊天页，跳转地址里就带着本次会话的 id ——
- * 后端 `chat_open` 读的就是它，前端不做任何推断。
+ * 「立即沟通」后跳转地址里已带着本次会话的 id，后端 `chat_open` 读的就是它，前端不做推断。
  */
 async function openSessionFor(friend: Friend): Promise<string> {
   // 真实会话也带着岗位 id（`commands_chat.rs` 从库里落的 `job_id`）：uid 失效时
-  // 同一套「立即沟通」同样能把它接回来，所以不只占位行能建会话（用户 m02802）。
+  // 同一套「立即沟通」同样能把它接回来，所以不只占位行能建会话。
   const jobId = friend.job_id ?? (isPendingFriend(friend) ? pendingJobId(friend) : '');
   if (jobId === '') {
     note.value = '这条会话缺少岗位信息，无法在 Boss 上建立会话';
@@ -484,12 +426,8 @@ function close(): void {
 /* ------------------------- Boss 列表行内操作（下沉） ------------------------- */
 
 /**
- * 行内「打招呼」：先选中该行，再生成话术。
- *
- * 原先「生成打招呼」在对话区顶部，作用于「当前选中的人」；下沉到列表行后，
- * 点哪一行就是对谁操作，所以必须先 `pick` 把选中态对齐，否则会给上一行的人
- * 生成话术——那是最典型的错位。已选中时 `pick` 不会重载消息（幂等），
- * 所以重复点同一行是安全的。
+ * 行内「打招呼」：先选中该行，再生成话术。必须先把选中态对齐，否则会给上一行的人生成话术；
+ * 已选中时 `pick` 幂等（不重载消息），重复点同一行安全。
  */
 /** 手动打招呼新增的占位 HR 可移除：从内存与持久化里同时删除；不碰后端真实会话。 */
 const removableUids = computed(() => friends.value.filter(isPendingFriend).map((f) => f.uid));
@@ -601,12 +539,8 @@ async function sendGreet(): Promise<void> {
 }
 
 /**
- * 生成打招呼话术。`reply` 非空时走「根据 HR 回复生成」。
- *
- * 聊天页拿不到 JD（`Friend` 里没有 `jd_text`），所以这里把公司名交给后端
- * `findByCompany`：后端按公司名翻库里的岗位，用**整段 JD** 组提示词。
- * 翻不到时后端会退回按标题/公司写，并在回执 `jd_used=false` 里说清楚——
- * 界面据此提示，而不是让用户以为模型读了 JD。
+ * 生成打招呼话术。`reply` 非空时走「根据 HR 回复生成」。`Friend` 里没有 `jd_text`，所以把
+ * 公司名交给后端 `findByCompany` 翻库用整段 JD 组提示词；翻不到时回执 `jd_used=false`。
  */
 async function generateGreet(reply = ''): Promise<void> {
   const friend = talkableFriend.value;
@@ -662,14 +596,9 @@ function generateReply(): void {
 }
 
 /**
- * 输入框上方「AI 生成」（用户 m01148）：生成的句子**直接落进输入框**，不另开草稿框。
- *
- * 提示词三件套的来路：
- * - Boss 回复上下文：`aiReplyContext` 把最近几条消息压成一段文本，走 `reply` 字段；
- * - JD 详细：`findByCompany` 由后端按公司名翻库里的**整段 JD**（好友列表没有 jd_text）；
- * - 我的技能：后端从配置画像取，前端不碰。
- *
- * 与右栏「生成回复」的区别只在于落地方式：那边留在草稿框等确认，这里直接写进输入框。
+ * 输入框上方「AI 生成」：生成的句子**直接落进输入框**，不另开草稿框（右栏「生成回复」则留在
+ * 草稿框等确认）。提示词三件套：Boss 回复上下文走 `aiReplyContext` 的 `reply` 字段；JD 由后端
+ * 按公司名翻库拿整段；我的技能后端从配置画像取，前端不碰。
  */
 async function generateAiDraft(): Promise<void> {
   const friend = talkableFriend.value;
@@ -781,7 +710,7 @@ async function onAutoToggle(): Promise<void> {
       // 后端 `auto_greet_next` 也有同一道闸，这里是让用户当场看到原因。
       const st = await loginStatus('boss');
       // `unknown` = 浏览器（sidecar）还没拉起来；`no_login` 等 = 连上了但没登录。
-      // 两种情况都要拦下来，但**说法不能一样**（用户 m01784）：库里还有登录标记时，
+      // 两种情况都要拦下来，但**说法不能一样**：库里还有登录标记时，
       // 顶栏显示「已登录」，这时说「请先登录」等于让人去点已经写着已登录的按钮。
       if (!isLoggedIn(st.state)) {
         autoNote.value = st.state === 'unknown' && st.saved === true
@@ -831,7 +760,7 @@ function onResize(): void {
 function onKeydown(ev: KeyboardEvent): void {
   if (ev.key !== 'Escape') return;
   if (!ui.value.chatOpen) return;
-  // Esc 分层（SPEC §6.1 / A10）：一次 keydown 只关最上面那一层。
+  // Esc 分层：一次 keydown 只关最上面那一层。
   // 决策记录 / 配置 / 岗位抽屉 / 敏感库开着时，这层不出手（优先级表单源在
   // `lib_ui/overlay-stack.ts`，四个消费方共用，不在各自文件里抄选择器）。
   if (hasHigherOverlay('chat')) return;
@@ -840,47 +769,32 @@ function onKeydown(ev: KeyboardEvent): void {
 }
 
 /**
- * 登录态订阅（用户 m01325：登录成功后，所有「未登录 / 浏览器未连接」提示必须消失，
- * 直到再次未登录才重新出现）。
- *
- * 为什么要有它：本页的提示是**一次性快照**——`beat.start()` 只在挂载、开始投递、
- * 发消息时各读一次登录态，读到未登录就写一句 `note`/`autoNote` 然后停表。等用户
- * 在概览页（或刚弹出的浏览器里）真的登录上了，这句话没人去清，会一直挂在右栏。
- * 后端 `login-state` 事件（`lib.rs` 的旁路推送）正好是「登录态真的变了」的信号，
- * 所以在这里收口：变了就重新判一次，登录成功则清提示并重新开表。
- *
- * 非 Tauri 环境（vitest / 浏览器预览）`listenLoginState` 返回 no-op，不判断运行时。
+ * 登录态订阅：登录成功后「未登录 / 浏览器未连接」提示必须消失，直到再次未登录才重现。
+ * `beat.start()` 只在挂载、开始投递、发消息时各读一次登录态，之后没人去清，所以由后端
+ * `login-state` 旁路推送在这里收口。非 Tauri 环境 `listenLoginState` 返回 no-op。
  */
 async function onLoginState(payload: { platform?: string; state: string }): Promise<void> {
-  // 后端 `lib.rs` 的 login-state watcher 每 500ms 读一次快照，**只在值真的变了**才播。
-  // 可 `unknown` 是它的降级值（sidecar 不在线 → 快照读不到），于是「会话起来/断开」
-  // 来回抖时就可能播出一串 unknown → waiting → unknown……每一次都走完下面这套
-  // 「重新开表 + 重新轮询」，正好是用户 m02102 截图里 `login_status` 刷屏的来源。
-  // 所以这里先按「已知态」过滤：未知态不是结论，不该驱动任何后续动作。
+  // watcher 每 500ms 读一次快照，**只在值真的变了**才播；`unknown` 是降级值（sidecar 不在线
+  // 读不到快照），会话抖起来会播出一串 unknown → waiting → unknown，每一次都白跑一遍下面这套
+  // 流程。所以先按「已知态」过滤：未知态不是结论，不该驱动任何后续动作。
   if (!isKnownState(payload.state)) return;
   // 只有「从没登录」或「登录态真的变了」才值得动状态机：同态重复推送直接返回。
   if (payload.state === lastLoginState) return;
   lastLoginState = payload.state;
-  // 登录态确认变化 → 清掉当前登录类提示（`waiting` / `logged_in` / `closed` 都说明
-  // 「浏览器已经能答话」，那句「浏览器未连接：请先登录」已经过期；用户 m01992）。
-  // 原来这里只认 logged_in / no_login / closed，把 `waiting` 排除在外，于是那句提示
-  // 一直没人清。只清登录类，不能连「发送失败：……」一起抹掉——那是与登录无关的真错误。
+  // 登录态确认变化 → 清掉登录类提示（`waiting` / `logged_in` / `closed` 都说明浏览器已经能
+  // 答话）。只清登录类，不能连「发送失败：……」一起抹掉——那是与登录无关的真错误。
   const clearedNote = isSessionNote(note.value);
   const clearedAuto = isSessionNote(autoNote.value);
   if (clearedNote) note.value = '';
   if (clearedAuto) autoNote.value = '';
-  // 广播已消费：回执给后端，全员回话后它就不再每 5 秒补发（用户 m02396）。
+  // 广播已消费：回执给后端，全员回话后它就不再每 5 秒补发。
   // 放在清理之后、开表之前：开表可能重试几秒，没必要让后端陪着等。
   // 平台优先取事件里的原值，缺了才退回本页写死的 'boss'，免得确认对不上轮次。
   void loginAck(payload.platform ?? 'boss', payload.state);
   if (isLoggedIn(payload.state)) {
-    // 重新开表：`start()` 会再读一次登录态，成功则恢复心跳（投递节奏跟着回来）。
-    // 但它读不到登录态时会**立刻把引导语写回来**——那正是清完又冒出来的原因
-    // （用户 m02033：已登录 + 收到 logged_in，提示仍在）。
-    //
-    // 广播是**旁路推送**，不是可靠传输（订阅晚于广播 / WebView 在后台丢事件都会
-    // 让这次变化白丢），所以这里带确认：开表成功且提示确实清掉才算办成，否则
-    // 退避重试，最多 3 次（用户 m02345）。不再有定时轮询兜底（用户 m02245）。
+    // 重新开表：`start()` 会再读一次登录态，但它读不到时会**立刻把引导语写回来**。广播不是
+    // 可靠传输（订阅晚于广播 / WebView 在后台丢事件都会白丢），所以这里带确认：开表成功且提示
+    // 确实清掉才算办成，否则退避重试，最多 3 次。
     await withLoginAck(
       async () => {
         if (disposed) return true;
@@ -908,11 +822,9 @@ async function onLoginState(payload: { platform?: string; state: string }): Prom
 }
 
 /**
- * 这条提示是不是「登录类」（未登录 / 浏览器未连接）。
- *
- * 判据用文案前缀而不是错误码，与 `lib_ui/session.ts` 同一条理由：两类引导语都是
- * 前端自己写的常量，登录成功后要成对清掉它们，但不能误伤其它错误。新增登录类
- * 文案时把它加进 `LOGIN_NOTE_PREFIXES`。
+ * 这条提示是不是「登录类」（未登录 / 浏览器未连接）。判据用文案前缀而不是错误码：
+ * 引导语都是前端常量，登录成功后要成对清掉，但不能误伤其它错误。新增文案时加进
+ * `LOGIN_NOTE_PREFIXES`。
  */
 const LOGIN_NOTE_PREFIXES: readonly string[] = [
   '浏览器未连接',
@@ -923,17 +835,14 @@ const LOGIN_NOTE_PREFIXES: readonly string[] = [
 function isSessionNote(text: string): boolean {
   const t = text.trim();
   // `needsSession` 兜的是「尚未启动 / 没有会话」这类 sidecar 文案：它们同样是
-  // 「浏览器没连上」，登录成功后必须一起消失（用户 m01477：已登录但提示还在）。
+  // 「浏览器没连上」，登录成功后必须一起消失。
   if (needsSession(t)) return true;
   return LOGIN_NOTE_PREFIXES.some((p) => t.startsWith(p));
 }
 
 /**
- * 上一次**确认**过的登录态（只记已知态：`logged_in` / `no_login` / `waiting` / `error`）。
- *
- * 用来挡住 `login-state` 的重复推送与 `unknown` 抖动——两者都会把 `onLoginState`
- * 下面那套「重开心跳」白跑一遍，表现就是 `login_status` 请求刷屏（用户 m02102）。
- * 空串 = 还没收到过任何已知态。
+ * 上一次**确认**过的登录态（只记已知态）。用来挡住重复推送与 `unknown` 抖动，否则会白跑一遍
+ * 「重开心跳」，表现为 `login_status` 刷屏。空串 = 还没收到过任何已知态。
  */
 let lastLoginState = '';
 
@@ -968,7 +877,7 @@ onMounted(() => {
     consumeGreetDraft();
     // 心跳只受登录限制：已登录就开表（不论自动投递是否在跑），
     // 未登录 / 浏览器未连接则不开表，只给一句引导。这句引导随后由
-    // `subscribeLoginState` 在真的登录成功时清掉（用户 m01325）。
+    // `subscribeLoginState` 在真的登录成功时清掉。
     beat = startHeartbeat({
       onStatus(st) {
         autoStatus.value = st;
@@ -981,10 +890,10 @@ onMounted(() => {
     await beat.start();
     await subscribeLoginState();
     // 开表后若仍未登录，`beat.start()` 已把引导语写进 `note`/`autoNote`；
-    // 之后登录成功由 `onLoginState` 收到广播清掉，不再起轮询兜底（用户 m02245）。
+    // 之后登录成功由 `onLoginState` 收到广播清掉，不再起轮询兜底。
     // 后台已在跑的投递必须当场显示「暂停」。只在**一点都没读到**时补读：
     // `beat.start()` 成功时已经调过 `autoGreetStatus` 并 `onStatus` 了，
-    // 这里再打一发就是同一毫秒里的第二次请求（用户 m02102 的请求刷屏）。
+    // 这里再打一发就是同一毫秒里的第二次请求。
     if (beat.lastStatus() === null) {
       try {
         autoStatus.value = await autoGreetStatus();
@@ -1106,7 +1015,7 @@ defineExpose({
       @retry="loadFriends"
       @search="search = $event"
     >
-      <!-- 「已是最新消息」放 Boss 列表最上方（用户 m01764）：它说的是列表/会话这一层
+      <!-- 「已是最新消息」放 Boss 列表最上方：它说的是列表/会话这一层
            的取数结果，放在会话列表头顶比塞在消息流里更有归属感。 -->
       <template #rail-head>
         <span
@@ -1116,26 +1025,20 @@ defineExpose({
         >{{ freshNote }}</span>
       </template>
     </FriendList>
-    <!-- 右栏 aria-live 汇报区（SPEC §4.2 的 chat-rail-state-announce）：
-         与对话框里的 chat-detach-state-announce 同源，文案都由常量给出，不复制字面量。 -->
+    <!-- 右栏 aria-live 汇报区：与对话框里的 chat-detach-state-announce 同源，文案都由常量给出。 -->
     <span class="sr-only" data-testid="chat-rail-state-announce" aria-live="polite">{{
       CHAT_STATE_ANNOUNCE_TEXT
     }}</span>
 
-    <!-- 两条瞬态提示行（结论②保留：发送失败/会话启动的反馈依赖它，K9「错误必须可读」）。
-         求职期望行已按 SPEC-001 Rev3/Rev5 退役：原型 L926-927 明写「求职期望已并入筛选
-         条件面板；打分试算已移除」，四档基线图右栏也没有这一行；期望数据仍由概览筛选面板
-         的「读取期望职位」承载（DashboardPage.loadExpects 不动，api 封装与契约面都不动）。
-
-         展开态不渲染这条：对话框里的 #notices 会再渲染一份同源提示（用户 m01228：
-         「boss列表未展开聊天框时，这里显示了 2 次」）。两处必须**互斥**——ChatDetach
-         收起时用 [hidden] 改成零宽盒（motion.css）而不是 display:none，所以
-         不互斥时收起态那两份都会落在同一屏上，看起来就是同一句提示出现了两次。 -->
+    <!-- 两条瞬态提示行：发送失败 / 会话启动的反馈依赖它。
+         展开态不渲染这条，对话框里的 #notices 会再渲染一份同源提示，两处必须**互斥**——
+         ChatDetach 收起时用 [hidden] 改成零宽盒（motion.css）而不是 display:none，不互斥时
+         两份会落在同一屏上，看起来就是同一句提示出现了两次。 -->
     <template v-if="!ui.chatOpen">
       <div v-if="note !== ''" class="cfg-hint chat-note" data-testid="chat-note">{{ note }}</div>
       <!-- `onAutoNote` 会把同一句话同时写进 `note` 与 `autoNote`（那一行是给对话框
            #notices 与右栏共用一份来源），所以这里必须去重：内容相同时只留上面那条，
-           否则右栏会上下并排出现两条一模一样的提示（用户 m01228）。 -->
+           否则右栏会上下并排出现两条一模一样的提示。 -->
       <div
         v-if="autoNote !== '' && autoNote !== note"
         class="cfg-hint chat-note"
@@ -1216,14 +1119,14 @@ defineExpose({
     >
       <template #notices>
         <!-- 顶部只挂真错误（红条）：右栏的 note / autoNote 在对话框展开时看不到，这里同源再渲染一份。
-             灰色说明不占顶部，见下方 #footer（用户 m01273）。 -->
+             灰色说明不占顶部，见下方 #footer。 -->
         <div v-if="topNote !== '' || autoNote !== ''" class="detach-notes">
           <div v-if="topNote !== ''" class="detach-note" data-testid="chat-note-detach">{{ topNote }}</div>
           <div v-if="autoNote !== ''" class="detach-note" data-testid="auto-note-detach">{{ autoNote }}</div>
         </div>
       </template>
       <template #footer>
-        <!-- 消息流末尾的说明条（用户 m01273 → m01764）：不住在输入框上方了，
+        <!-- 消息流末尾的说明条：不住在输入框上方，
              而是跟着内容走、紧接最后一条气泡，灰色小字居中。
              「已是最新消息」同时也出现在 Boss 列表最上方（见 #rail-head）。 -->
         <div v-if="bottomNote !== ''" class="detach-hint" data-testid="chat-detach-hint">{{ bottomNote }}</div>

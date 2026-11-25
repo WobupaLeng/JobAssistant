@@ -1,25 +1,7 @@
 /**
- * Tauri 事件的**唯一**出口（与 `api/invoke.ts` 同理，不引 `@tauri-apps/api`）。
- *
- * 浏览器里的事件约定只有两个内部函数（Tauri 2 注入在同一份
- * `window.__TAURI_INTERNALS__` 上）：
- * - `transformCallback(fn)`：把 JS 回调登记进内部表，返回一个数字 id；
- * - `invoke('plugin:event|listen', { event, target, handler })`：登记监听，
- *   返回一个**取消监听的 id**（Tauri 内部叫 `eventId`）；
- * - `invoke('plugin:event|unlisten', { event, eventId })`：退订。
- *
- * 退订走的是 `invoke`（不是直接删回调表），所以 `unlisten` 本身也可能失败；
- * 这里对退订失败**静默**——卸载期报错没有用户可以补救的地方。
- *
- * **非 Tauri 环境（vitest / 浏览器预览）降级成 no-op**：返回一个什么都不做的
- * 退订函数。上层因此不必判断运行时，测试也不必造假桩。
- *
- * 冻结契约（后端 `backend-tauri/src/lib.rs:441-535`）：
- * 事件名 `login-state`，载荷蛇形三字段 `{ platform, state, logged_in }`；
- * `state ∈ waiting | logged_in | closed | error | no_login`；
- * `logged_in === (state === 'logged_in')`；
- * 只在 `(platform, state)` 变化时播（500ms 粒度），会话消失补播一次 `closed`；
- * **它是旁路推送**——权威仍是 `login_status` 查询，文案仍走 `scrape_drain`。
+ * Tauri 事件的**唯一**出口。非 Tauri 环境降级成 no-op 退订、不抛错；退订失败静默。
+ * `login-state` 只在 `(platform, state)` 变化时播，是**旁路推送**——权威仍是
+ * `login_status` 查询。
  */
 
 /** `login-state` 事件的名称（冻结契约，后端 `lib.rs:530` 逐字）。 */
@@ -65,11 +47,8 @@ export function hasTauriEvents(): boolean {
 }
 
 /**
- * 把任意形状的载荷收成 `LoginStatePayload`。
- *
- * 为什么不用 `as`：载荷来自 IPC，跨语言边界的信任边界就在这里。缺 `platform`
- * 或缺 `state` 的一律当「不认识」丢掉——宁可徽标不动，也不要拿半个状态去覆盖
- * 已知状态。`logged_in` 缺省时按 `state === 'logged_in'` 现算（与后端一致）。
+ * 把任意形状的载荷收成 `LoginStatePayload`。载荷来自 IPC，是信任边界，不能用 `as`
+ * 直接断言：缺 `state` 的当「不认识」丢掉，`logged_in` 缺省时按 `state` 现算。
  */
 export function normalizeLoginState(raw: unknown): LoginStatePayload | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -83,10 +62,7 @@ export function normalizeLoginState(raw: unknown): LoginStatePayload | null {
 }
 
 /**
- * 订阅 `login-state`。非 Tauri 环境返回 no-op 退订、**不抛错**。
- *
- * 返回的 Promise 只在「登记监听」这一步失败时 reject（IPC 本身出错）；
- * 回调里抛的异常不会污染监听（已就地捕获并转给 `onError`）。
+ * 订阅 `login-state`：只在登记监听失败时 reject；回调异常就地转给 `onError`。
  */
 export async function listenLoginState(
   handler: LoginStateHandler,

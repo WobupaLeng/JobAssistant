@@ -1,27 +1,16 @@
 /**
- * 抓取筛选的选项常量。
- *
- * **唯一真源是冻结原型 `prototypes/ui-v1/index.html`**（UI_READY 视觉与交互
- * 口径），以及原型逐字搬过来的抓取选项表
- * （改这里必须同步后端与 sidecar 的选项表）。
- * 这里一个值都不许自己编、不许增删、不许改顺序——
- * 这些 code 是 Boss 直聘的城市 / 经验 / 学历 / 规模 / 阶段 / 行业编码，
- * 写错只会表现为「筛不出岗位」，不会报错。
- *
- * 位置说明：Vue 版下沉到 `lib_ui/`，因为 `features/jobs/cards.rs:17 →
- * scrape/options::platform_name` 那条**同层横向依赖**在 AGENTS.md §2.3 里被
- * 点名要消除，而 `lib_ui` 是允许被任何层引用（不含反向引用）的最底层。
+ * 抓取筛选的选项常量。code 是 Boss 直聘的城市 / 经验 / 学历 / 规模 / 阶段 / 行业编码，
+ * 一个值都不许自己编、不许增删、不许改顺序——写错只会表现为「筛不出岗位」，不会报错。
+ * 改这里必须同步后端与 sidecar 的选项表；视觉口径的真源是冻结原型
+ * `prototypes/ui-v1/index.html`。
  */
 
 /** 选项：`[编码, 显示名]`。`code` 一律是字符串——有的是数字编码，有的形如 `sal:8-12`。 */
 export type Opt = readonly [code: string, name: string];
 
 // ---------------------------------------------------------------- 城市
-//
-// **全量城市表**（34 省级 / 373 城市）在 `data/cities.ts`，`CITIES` 只是其中的
-// 8 个热门城市：城市面板默认先展示热门，再按省级展开全量、支持输入框搜索。
-// 两层数据必须互相包含，由 `tests/options.test.ts` 的用例守着——
-// 这里一个编码都不许自己编：BOSS 的 city code 写错不会报错，只会「筛不出岗位」。
+// 全量城市表在 `data/cities.ts`，`CITIES` 只是 8 个热门城市：城市面板先展示热门，
+// 再按省级展开全量。两层数据必须互相包含，由 tests/options.test.ts 守着。
 export { CITIES } from './data/cities';
 
 /** 城市默认值（旧版 `useState('101280600')`）。 */
@@ -196,10 +185,8 @@ export const MAX_PAGES_MIN = 1;
 export const MAX_PAGES_MAX = 20;
 
 /**
- * 把选项值转成可安全放进 `data-testid` 的片段。
- *
- * 薪资编码形如 `sal:8-12`，冒号在 testid / CSS 选择器里会带来歧义，
- * 按 SPEC 7.7 统一把 `:` `/` `\` 空格 换成 `-`：`sal:8-12` → `sal-8-12`。
+ * 把选项值转成可安全放进 `data-testid` 的片段：`:` `/` `\` 空格 统一换成 `-`，
+ * 例如 `sal:8-12` → `sal-8-12`。
  */
 export function tidSafe(code: string): string {
   let out = '';
@@ -232,10 +219,8 @@ export function isCustomSalary(code: string): boolean {
 }
 
 /**
- * 由「下限 / 上限」两个输入产出薪资编码。
- *
- * 上限留空或 ≤ 下限 → 视为「{low}K以上」（哨兵 9999），与旧版一致。
- * 两个都空 → `null`（什么都不加）。
+ * 由「下限 / 上限」两个输入产出薪资编码：上限留空或 ≤ 下限 → 「{low}K以上」（哨兵 9999）；
+ * 两个都空 → `null`。
  */
 export function salaryCode(low: string, high: string): string | null {
   const lo = toU32(low);

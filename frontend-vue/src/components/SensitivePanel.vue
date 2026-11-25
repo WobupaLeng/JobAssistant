@@ -1,12 +1,8 @@
 <script setup lang="ts">
 /**
- * 敏感库抽屉：已入库 / 已排除的明细，支持搜索、多选、批量删除。
- *
- * 视觉与类名沿用冻结的 `styles/sensitive.css`（`.sensitive-backdrop` /
- * `.sensitive-panel.is-open` 已经在里面），本组件不新增布局规则。
- *
- * 抽屉不是路由页：C13 的页面分发是插槽，这里的开合由顶栏按钮控制，
- * 因此用 `position: fixed` 覆盖层而不是切页（原型同款）。
+ * 敏感库抽屉：已入库 / 已排除的明细，支持搜索、多选、批量删除。视觉与类名沿用
+ * `styles/sensitive.css`，本组件不新增布局规则。它不是路由页——开合由顶栏按钮控制，
+ * 所以用 `position: fixed` 覆盖层而不是切页。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { SensitivePage, SensitiveRecord } from '../api/types';
@@ -81,12 +77,9 @@ watch(
 );
 
 /**
- * 关闭：**立刻**通知父级卸载面板，不排任何计时器。
- *
- * 用户口径（本轮）：「关闭有延时」——之前把 `emit('close')` 排在 320ms 收起回程之后，
- * 点下去到面板消失之间就多出一段空窗，期间遮罩还在、点击还被吃。
- * 遮罩点击 / 关闭按钮 / Esc 三条路走同一个函数，也不再需要防重入标记：
- * 卸载是父级一次同步改 state，重复调用无副作用。
+ * 关闭：**立刻**通知父级卸载面板，不排任何计时器（排在 320ms 收起回程之后时，遮罩还在、
+ * 点击还被吃）。遮罩点击 / 关闭按钮 / Esc 三条路走同一个函数，卸载是父级一次同步改 state，
+ * 重复调用无副作用。
  */
 function close(): void {
   if (!props.open) return;

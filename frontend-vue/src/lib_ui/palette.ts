@@ -1,12 +1,7 @@
 /**
- * 调色板：主题色联动。
- *
- * 只改「强调色」一族令牌（主色、辅助色、材质散射色、主按钮与高亮文字），
- * 不碰布局几何（C5 / 不改布局）。深浅两套各自给出一组色值，
- * 写在 `<html>` 的行内 style 上（`--primary` 等），覆盖 tokens.css 的默认值，
- * 因此深浅切换后调色板依然生效。
- *
- * 存储键 `aja.palette`，与 `aja.theme` 同样走 try 包裹的 localStorage。
+ * 调色板：主题色联动。只改「强调色」一族令牌（主色、辅助色、主按钮与高亮文字），
+ * 不碰布局几何。色值写在 `<html>` 行内 style 上覆盖 tokens.css 默认值，所以深浅切换后
+ * 依然生效。存储键 `aja.palette`。
  */
 
 export const PALETTE_KEY = 'aja.palette';

@@ -1,10 +1,7 @@
 <script setup lang="ts">
 /**
- * 岗位列表卡：页签 / 排序 / 批量条 / 卡片网格 / 保活锚点表。
- *
- * 所有判定（页签过滤、排序方向、计数、批量显隐）都来自
- * `features/jobs/list-model.ts`；长按状态机来自 `features/jobs/longpress.ts`。
- * 组件本身不 import 任何 `features` 之外的领域模块。
+ * 岗位列表卡：页签 / 排序 / 批量条 / 卡片网格 / 保活锚点表。判定（页签过滤、排序方向、
+ * 计数、批量显隐）全在 `features/jobs/list-model.ts`，长按状态机在 `lib_ui/longpress.ts`。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { Job, JobTabCounts } from '../api/types';
@@ -86,7 +83,7 @@ const emit = defineEmits<{
   (e: 'checkAll', checked: boolean): void;
   (e: 'batch', op: BatchOp): void;
   (e: 'greet', jobId: string): void;
-  (e: 'open', jobId: string): void;
+  (e: 'open', job: Job): void;
   /** 长按到点（≥500ms）：进入多选。判定在 `lib_ui/longpress.ts`，父级只收结果。 */
   (e: 'longpress', jobId: string): void;
   /** 多选态下点了列表空白处：退出多选。 */
@@ -107,17 +104,10 @@ const batchVisible = computed(() => showBatchActions(selectedCount.value));
 /** 当前页签允许的批量动作（未投递两颗、不投递/已投递各一颗）。 */
 const ops = computed(() => batchOps(props.tab));
 
-/* 卡片 key 的代次后缀：页签切换 / 追加下一页时 +1，让这批卡片重播进场。
- *
- * 为什么换 key 而不是挂过渡 class：`.job-card` 的 animation 位已经被 `rail-in`
- * 占着（契约样式里钉死的入场），再挂一条带 transform 的动画会把它顶掉。
- * 换 key 让 Vue 重建节点，卡片上的 `rail-in` **按原样**重播一次——
- * 过渡复用既有动画，卡片样式一行不改。
- *
- * 代次由内容自己判断，不靠外部调用：
- *   列表往后长（追加下一页）→ +1，新条目与整批一起重播
- *   页面重置后又拉回同一页（切换页签 / 换排序 / 换「查看全部」）→ +1
- *   其余情况（原地改状态、列表变短）→ 不动，卡片节点不重建、滚动位置不丢 */
+/* 卡片 key 的代次后缀：+1 时这批卡片重播进场。换 key 而不是挂过渡 class，是因为
+ * `.job-card` 的 animation 位已被 `rail-in` 占着，再挂带 transform 的动画会把它顶掉。
+ * 代次由内容自己判断：追加下一页、或重置后又拉回同一页（切页签 / 换排序 / 换「查看全部」）
+ * 时 +1；原地改状态、列表变短时不动，节点不重建、滚动位置不丢。 */
 const gen = ref(0);
 let prevSig = '';
 watch(
@@ -147,9 +137,8 @@ function opTestId(op: BatchOp): string {
   return `job-batch-${op}-btn`;
 }
 
-/* 列表状态播报（原型 L2193 逐字「列表状态 {mode} · 共 {total} 条 · 已选 {n} 条」）。
- * mode 用四态词 loading / error / empty / default，与右栏 rail-state 同一套口径；
- * sr-only，不参与视觉。原先这里写的是「正在加载岗位 / 已显示 N 条」，与真值不符。 */
+/* 列表状态播报「列表状态 {mode} · 共 {total} 条 · 已选 {n} 条」。mode 用四态词
+ * loading / error / empty / default，与右栏 rail-state 同一套口径；sr-only，不参与视觉。 */
 const announceText = computed(() => {
   const mode = props.loading
     ? 'loading'
@@ -200,8 +189,7 @@ function onSort(field: SortField): void {
           <span class="pill-count" :data-testid="`job-tab-${t.slug}-count`">{{ tabCount(counts, t.key) }}</span>
         </button>
         <span class="card-sub" data-testid="job-total">共 {{ total }} 条</span>
-        <!-- 原型 L2193 逐字：「列表状态 {mode} · 共 {total} 条 · 已选 {n} 条」。
-             mode 用四态词（loading/error/empty/default），与右栏 rail-state 同源口径。 -->
+        <!-- 列表状态播报，mode 用四态词（loading/error/empty/default）与右栏 rail-state 同源。 -->
         <span class="sr-only" data-testid="job-state-announce" aria-live="polite">{{ announceText }}</span>
         <span class="spacer"></span>
         <button class="btn btn-sm btn-ghost" type="button" data-testid="job-refresh-btn" @click="emit('refresh')">
@@ -274,7 +262,7 @@ function onSort(field: SortField): void {
         <span class="state-title" data-testid="job-state-error-title">岗位列表加载失败</span>
         <span class="state-sub">这次没有取到数据，可以重试一次。</span>
         <span class="state-error-detail" :title="error">{{ error }}</span>
-        <!-- 原型 :2171 的错误态带一个重试按钮，接线到页面现有的刷新逻辑。 -->
+        <!-- 错误态的重试按钮接线到页面现有的刷新逻辑。 -->
         <span class="state-actions">
           <button
             class="btn btn-sm btn-primary"

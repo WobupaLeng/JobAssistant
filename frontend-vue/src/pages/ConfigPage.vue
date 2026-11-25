@@ -1,11 +1,8 @@
 <script setup lang="ts">
 /**
- * M3 配置页（ARCH-003 阶段 3）。固定窗 .config-modal，三张卡：大模型 / 提示词 / 技能。
- * 可独立 mount（无必需 props）；App.vue 接线由总控汇合时做。
- *
- * 冻结原型（UI-SPEC-chat-detach-v3 §11 v6）已删高级卡与 token 卡，
- * token 用量读数归顶栏 .tb-stats（AppShell / TopbarTail，本 lane 只读），此处不重复渲染。
- * 保存只提交 diff（features/config/model.buildPatch），掩码不回写、空串写 '' 不写 null。
+ * 配置页，固定窗三张卡：大模型 / 提示词 / 技能。可独立 mount，无必需 props。token 用量读数
+ * 归顶栏 `.tb-stats`，此处不重复渲染。保存只提交 diff（`config/model.buildPatch`），掩码不回写、
+ * 空串写 `''` 不写 `null`。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { getAppConfig, setAppConfig } from '../api/commands/config';
@@ -30,7 +27,7 @@ import ConfigSection from '../components/config/ConfigSection.vue';
 
 defineProps<{ activeNav?: string }>();
 const emit = defineEmits<{
-  /** 浮层窗只有「回到概览」一个去向：聊天不是页（SPEC-001 AC9）。 */
+  /** 浮层窗只有「回到概览」一个去向：聊天不是页。 */
   (e: 'navigate', nav: 'dashboard'): void;
 }>();
 
@@ -115,7 +112,7 @@ function close(): void {
 
 onMounted(load);
 
-/* Esc 关闭（SPEC §6.1 / A10）：一次 keydown 只关最上面那一层，决策记录在配置之上。 */
+/* Esc 关闭：一次 keydown 只关最上面那一层，决策记录在配置之上。 */
 function onKeydown(ev: KeyboardEvent): void {
   if (ev.key !== 'Escape') return;
   if (hasHigherOverlay('config')) return;
@@ -126,7 +123,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
 </script>
 
 <template>
-  <!-- 窗体锚点 config-panel 已唯一，页容器不再重复挂 page-config（SPEC-001 AC9）。 -->
+  <!-- 窗体锚点 config-panel 已唯一，页容器不再重复挂 page-config。 -->
   <section class="page page-config">
     <div
       class="config-modal is-open pan-modal"

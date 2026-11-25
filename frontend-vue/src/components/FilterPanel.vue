@@ -1,16 +1,8 @@
 <script setup lang="ts">
 /**
- * 完整筛选面板（原型 `#filter-panel.f-full` 的 Vue 版）。
- *
- * 契约要点：
- * - **C12**：每次改动立刻写本地草稿（兜底），400ms 防抖后只把 diff 发给
- *   `set_scrape_defaults`。diff 由父级（`DashboardPage`）算，本组件只发
- *   `update:draft`——因为"上次保存的 known"在父级手里。
- * - **C15**：所有选项表来自 `lib_ui/options.ts`，组件内不写字面量表。
- * - 城市用现成的 `CityPicker`（全量 373 城市 + 拼音搜索）。
- * - **搜索关键词与排除关键词是两块**：搜索词进 `scrape_start.keywords`
- *   （页面持有，不进 `set_scrape_defaults` 的 14 键），排除词进草稿的
- *   `exclude` → `excludeKeywords`。两者共用一个输入框就会把排除词当搜索词发。
+ * 完整筛选面板。每次改动立刻写本地草稿，400ms 防抖后只把 diff 发给 `set_scrape_defaults`
+ * （diff 与「上次保存的 known」都在父级手里）。**搜索关键词与排除关键词是两块**：搜索词进
+ * `scrape_start.keywords`，排除词进草稿的 `exclude`，共用输入框会把排除词当搜索词发出去。
  */
 import { computed, ref } from 'vue';
 import CityPicker from './CityPicker.vue';
@@ -187,7 +179,7 @@ function salaryCodeLabel(code: string): string {
       <button class="btn btn-sm btn-ghost" type="button" data-testid="filter-reset-btn" @click="emit('reset')">
         重置
       </button>
-      <!-- 「收起」按钮与右上角 × 重复，用户裁决移除：× 是唯一出口。 -->
+      <!-- 右上角 × 是唯一出口，不要再加「收起」按钮。 -->
       <button
         class="f-x"
         type="button"

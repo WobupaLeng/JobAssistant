@@ -1,12 +1,6 @@
 /**
- * 平台卡（顶栏三个平台的勾选 / 状态 / 登录）的纯视图模型。
- *
- * 真源：冻结原型 `prototypes/ui-v1/index.html` 的 `platform-*` 骨架
- * （`platform-boss-card` / `platform-boss-check` / `platform-boss-status` /
- * `platform-boss-login-btn`，另两个平台 `is-off` + 「未接入」）
- * 与 C15 的常量表 `lib_ui/options.ts::PLATFORMS`（只有一份）。
- *
- * 不在本文件里的东西：真正拉登录窗口的命令（那是编排层的事）。
+ * 平台卡（顶栏三个平台的勾选 / 状态 / 登录）的纯视图模型。平台常量只在
+ * `lib_ui/options.ts::PLATFORMS` 一份；真正拉登录窗口的命令不在这里。
  */
 import { PLATFORMS, type PlatformOpt } from './options';
 
@@ -46,15 +40,9 @@ export function platformPrefix(id: string): string {
 }
 
 /**
- * 单张卡的视图。
- *
- * `checked`：只有选中的平台打勾；未接入的平台恒不勾（原型里它们的 checkbox 是 disabled）。
- * 登录按钮只在「已接入且被选中」时出现——没选中的平台点了登录也没意义。
- *
- * **已登录时登录按钮变成不可点的「已登录」**（用户 m02848）：登录态是权威查询结果，
- * 已登录还留着可点的「登录」会让用户以为要重复扫码。这里把 `loggedIn` 作为入参，
- * 由调用方从 `LoginStatus.state` 取（口径 `login-model.isLoggedIn`），本函数只做视图。
- * 「退出登录 / 保存登录」是另一个按钮，仍由 `login-model` 派生，不受此影响。
+ * 单张卡的视图。`checked` 只有选中的平台打勾，未接入的平台恒不勾；登录按钮只在
+ * 「已接入且被选中」时出现。**已登录时按钮变成不可点的「已登录」**，否则用户以为要重复
+ * 扫码；`loggedIn` 由调用方从 `LoginStatus.state` 取（口径 `login-model.isLoggedIn`）。
  */
 export function platformCardView(
   p: PlatformOpt,
@@ -105,10 +93,8 @@ export function pickPlatform(selectedId: string, id: string): string {
 }
 
 /**
- * 登录状态点：`aria-label` 与状态类。
- *
- * 状态来自后端 `login_status`（`state` / `running` / `saved`）。没查过时是
- * `unknown`——不猜"已登录"，免得给用户假的安心。
+ * 登录状态点：`aria-label` 与状态类。状态来自后端 `login_status`；没查过时是 `unknown`，
+ * 不猜「已登录」。
  */
 export type LoginDot = 'ok' | 'bad' | 'unknown';
 
@@ -119,10 +105,8 @@ export interface LoginStatusLike {
 }
 
 /**
- * 颜色只由登录状态决定，与 `running` 无关（运行中也照样判绿/红）。
- * - 已登录（state 为 ok/ready/logged_in，或 saved===true）→ ok
- * - 明确未登录（state 为 no_login/logged_out 等已知非登录值）→ bad
- * - state 缺失/空/unknown 且无 saved 信息（没查过）→ unknown，不猜
+ * 颜色只由登录状态决定，与 `running` 无关：已登录（state 为 ok/ready/logged_in 或
+ * saved===true）→ ok；明确未登录（no_login/logged_out 等）→ bad；没查过 → unknown。
  */
 export function loginDot(status: LoginStatusLike | null | undefined): LoginDot {
   if (!status) return 'unknown';

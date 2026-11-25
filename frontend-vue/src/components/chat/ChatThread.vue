@@ -1,12 +1,8 @@
 <script setup lang="ts">
 /**
- * 聊天区（对话头 + 消息流 + 简历条 + 打招呼草稿）。
- *
- * 聊天线程的行为口径见 `lib_ui/chat-model`；**DOM 口径按冻结原型 v3**：
- * 标题/计数在 `.chat-detach-head`（由页面渲染），本组件只出「对话头 + 流 + 输入框之上」。
- *
- * 打招呼草稿：`greet_text` 是后端生成的一整句，用户可以直接发（`greet_one`），
- * 也可以「放到输入框再改」。生成/丢弃都只动本地状态。
+ * 聊天区（对话头 + 消息流 + 简历条 + 打招呼草稿）。行为口径见 `lib_ui/chat-model`；
+ * 标题 / 计数在 `.chat-detach-head`（由页面渲染），本组件只出对话头、流与输入框之上。
+ * 打招呼草稿是后端生成的一整句，可直接发（`greet_one`）或放进输入框再改。
  */
 import { computed, onBeforeUpdate, ref } from 'vue';
 
@@ -59,12 +55,9 @@ const emit = defineEmits<{
 // 否则 `splitThread(undefined)` 抛错被 Vue 记为渲染期未捕获错误。
 const split = computed(() => splitThread(props.messages ?? []));
 
-/* 消息流重建时只播一次入场动画（用户报「点 Boss 看对话卡住」的 P0 项）。
- *
- * 原先 `.chat-detach-chat .bubble` 恒带 `animation: bubble-in`：每次远程结果整体替换、
- * 或乐观气泡插入导致 key 错位，被重建的气泡都会**全部重播**下拉 + 缩放，正是可感知的卡顿。
- * 现在只在「这批节点是新建的」那一帧给 `.chat-detach-chat` 挂 `is-entering`，
- * 下一帧摘掉；class 直接改 DOM，不进响应式状态（每帧变更会触发重算）。 */
+/* 消息流重建时只播一次入场动画：气泡恒带 `animation` 的话，远程结果整体替换或 key 错位
+ * 会让重建的气泡全部重播，造成可感知的卡顿。只在节点新建那一帧挂 `is-entering`，下一帧
+ * 摘掉；class 直接改 DOM，不进响应式状态（每帧变更会触发重算）。 */
 const rootEl = ref<HTMLElement | null>(null);
 let enteredOnce = false;
 
@@ -105,7 +98,7 @@ function greetChip(greet: GreetReply): string {
   <div ref="rootEl" class="chat-detach-chat">
     <div v-if="props.friend === null" class="rail-body-slot" data-testid="chat-detach-slot">
       <div class="rail-state" data-testid="chat-detach-empty">
-        <!-- 原型 L2422：40×40 圆形玻璃盒 + 同一枚气泡 SVG（不是 emoji）。 -->
+        <!-- 40×40 圆形玻璃盒 + 一枚气泡 SVG（不是 emoji）。 -->
         <span class="state-glyph is-round" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M2.6 4.2h10.8v6.4H7.4L4.2 13v-2.4H2.6z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span>
         <span class="state-title" data-testid="chat-detach-empty-title">{{ CHAT_DETACH_EMPTY_TITLE }}</span>
         <span class="state-sub">{{ CHAT_DETACH_EMPTY_SUB }}</span>
@@ -147,10 +140,8 @@ function greetChip(greet: GreetReply): string {
               <div class="bubble"><span class="bubble-typing">{{ TYPING_TEXT }}</span></div>
             </div>
           </template>
-          <!-- 消息流末尾的说明条（用户 m01764「我发送消息的下面 灰色字居中写」）：
-               住在滚动区里、紧接最后一条气泡之后，跟着内容走而不是钉在输入框上方。
-               放在 v-else 模板**之外**：一条消息都没有时也得能显示（否则
-               「已是最新消息」在空会话里会整条消失）。样式随语气走，见 .detach-hint。 -->
+          <!-- 消息流末尾的说明条：住在滚动区里、紧接最后一条气泡之后。放在 v-else 模板**之外**，
+               否则空会话里「已是最新消息」会整条消失。样式随语气走，见 .detach-hint。 -->
           <slot name="footer" />
         </div>
         <span class="sr-only" data-testid="chat-detach-state-announce" aria-live="polite">{{

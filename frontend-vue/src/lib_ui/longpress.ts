@@ -1,18 +1,8 @@
 /**
- * 长按多选的状态机（SPEC §16.3 裁决 S）。
- *
- * 规则只有六条，但全在时间与指针位移的边界上，放组件里没法测：
- *
- * 1. 在卡片上 `pointerdown` 起一个 500ms 定时器，**不**立即进入多选；
- * 2. 500ms 内 `pointerup` / `pointerleave` / `pointercancel` 取消；
- * 3. 移动超过 8px 取消——用户是在滚动列表，不是要选；
- * 4. 定时器到点才进入多选，并把**按下的那张卡**勾上；
- * 5. 多选态下单击卡片 = 勾选/取消勾选；单击空白处 = 退出多选；
- * 6. 勾选清零自动退出多选（否则会留下一个"空的多选态"，用户没法退）。
- *
- * 为什么不用 `mousedown`：触摸滚动时 mouse 事件序列不可靠（先 touchstart
- * 再合成 mousedown），长按会被滚动打断；Pointer Events 有统一的
- * `pointercancel`。
+ * 长按多选的状态机。规则全在时间与位移边界上，放组件里没法测。`pointerdown` 起 500ms 定时器；
+ * 期间 `pointerup` / `pointercancel` 或移动超过 8px（用户在滚动）即取消；到点才进入多选并勾上
+ * 按下的那张卡。同一次按下若以 `pointercancel` 收场（触摸滚动、`touch-action` 接管手势），
+ * 随后的 `click` 是这次长按的余波，必须吞掉，不能当成「单击打开详情」。
  */
 
 /** 长按判定窗口（毫秒）。SPEC 定死 500。 */
@@ -47,10 +37,7 @@ export function movedBeyond(start: PointerSample, now: PointerSample, tolerance 
 }
 
 /**
- * 事件目标是否该被长按逻辑忽略。
- *
- * 传 tagName（大写或小写都行）与命中标记，而不是传 DOM 节点：
- * 这样单测里不需要造 DOM（vitest 默认 node 环境）。
+ * 事件目标是否该被长按逻辑忽略。传 tagName 与命中标记而不是 DOM 节点，单测不用造 DOM。
  */
 export function ignorePointerTarget(tagName: string, matchedInteractive = false): boolean {
   if (matchedInteractive) return true;
@@ -100,10 +87,8 @@ export function setChecked(jobIds: readonly string[]): SelectionState {
 }
 
 /**
- * 定时器句柄的极小封装。
- *
- * 单独包一层是为了单测能注入假定时器而不碰全局 `setTimeout` 的类型差异
- * （浏览器返回 number，Node 返回 Timeout）。
+ * 定时器句柄的极小封装：单测注入假定时器，避开 `setTimeout` 返回类型的差异
+ * （浏览器 number / Node Timeout）。
  */
 export interface TimerHandle {
   cancel(): void;

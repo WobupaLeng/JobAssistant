@@ -1,11 +1,7 @@
 /**
- * 弹层展开 / 收起的 Vue 侧封装：把「挂展开类、关的时候立刻收」收成一句。
- *
- * 纯逻辑（类名、回流、阈值）都在 `pan.ts`，这里只负责 ref 绑定与组件卸载时的清理，
- * 保持 components 层可以直接用、又不必各自重复一遍时序细节。
- *
- * **收起不排队**：用户明确要求「关闭有延时」不能再出现，所以关闭一律「点击即刻执行」，
- * 不挂 `.is-closing`、不排计时器、不等 `transitionend`。展开仍有补间（由 `pan-open` 提供）。
+ * 弹层展开 / 收起的 Vue 侧封装。纯逻辑在 `pan.ts`，这里只管 ref 绑定与卸载清理。
+ * **收起不排队**：关闭点击即刻执行，不挂 `.is-closing`、不排计时器、不等 `transitionend`；
+ * 展开仍有补间（由 `pan-open` 提供）。
  */
 import { getCurrentInstance, onBeforeUnmount, ref } from 'vue';
 import type { Ref } from 'vue';

@@ -54,6 +54,9 @@
   </head>
   <body>
     <div id="app"></div>
+    <!-- 全窗浮层的挂载根：抽屉 / 模态框 teleport 到这里，避开页面的 overflow: hidden 裁切。
+         它留在 Vue 挂载点之外，所以挂载期间不会被清空。 -->
+    <div id="app-overlay-root"></div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

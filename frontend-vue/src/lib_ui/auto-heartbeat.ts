@@ -1,22 +1,7 @@
 /**
- * 自动投递的**登录态心跳**。
- *
- * 本文件就是自动投递状态**唯一**的周期来源：前端不再有任何 1 秒轮询。状态请求
- * 只发生在四个时刻——60~90 秒随机到期、每次投递完成、发完消息、用户主动刷新。
- * 每次请求（成功或失败）结束后都重新随机一次间隔；连续失败最多重试
- * `maxFails` 次（默认 3）即停表，等下一次用户操作再开。
- *
- * 为什么心跳要 60~90 秒：状态查询要经 Rust 问 sidecar，而 sidecar 的浏览器命令是
- * **单车道**的，高频长轮询会和真正的抓取 / 发消息互相排队。随机抖动还避开了
- * 固定节拍这种一眼可辨的指纹。
- *
- * ## 投递节奏不受心跳影响
- * 后端 `auto_greet_status` 回执里带着 `next_at_ms`（后端自己算好的下一条时刻）。
- * 拿到快照后不靠再发请求，而是在本地用 `setTimeout` **精确等到那一毫秒**再发
- * （见 `armSendAt`）。所以：
- * - 触发**发一条**的网络请求只有 `auto_greet_next` 本身，没有状态轮询；
- * - 不浪费任何岗位：只有本地正好在 wait 窗口内才把发送交给定时器，否则下一拍照常；
- * - 心跳只负责「知道下一次该在什么时候」，不负责「帮它准点」。
+ * 自动投递的**登录态心跳**，也是自动投递状态唯一的周期来源。状态请求只发生在四个时刻：
+ * 60~90 秒随机到期、每次投递完成、发完消息、用户主动刷新；连续失败 `maxFails` 次即停表。间隔
+ * 取随机值是因为 sidecar 的浏览器命令是**单车道**的。投递节奏由回执的 `next_at_ms` 精确决胜。
  */
 import { autoGreetNext, autoGreetStatus } from '../api/commands/auto';
 import { loginStatus } from '../api/commands/scrape';
@@ -31,13 +16,8 @@ export const HEARTBEAT_MAX_MS = 90_000;
 /** 连续失败多少次就停表。 */
 export const HEARTBEAT_MAX_FAILS = 3;
 /**
- * 本地准点发送的窗口上限（毫秒）。
- *
- * 只有「离 `next_at_ms` 不到这么久」才把发送交给本地定时器；超过就不 arm，
- * 让下一次心跳去读新快照。这个上限是**防浪费岗位**的：如果本地定时器挂着、
- * 用户又手动暂停了投递，触发时会先验一次状态，后端说不在跑就放弃——但那会
- * 白耗掉一次岗位机会。60 秒的窗口小于最小心跳间隔，所以正常节奏下每次快照
- * 最多 arm 一次，不会反复。
+ * 本地准点发送的窗口上限（毫秒）。离 `next_at_ms` 超过这么久就不 arm，交给下一次心跳。
+ * 这个上限是**防浪费岗位**的：本地定时器挂着时用户手动暂停，触发后会白耗一次岗位机会。
  */
 export const SEND_ARM_MAX_MS = 60_000;
 
@@ -45,11 +25,8 @@ export const LOGIN_EXPIRED_NOTE = '登录已失效：请重新扫码登录后再
 export const NOT_LOGGED_IN_NOTE = '浏览器未连接：请先登录';
 export const BOSS_UNREACHABLE_NOTE = '浏览器未连接：请先登录';
 /**
- * 库里存着登录标记、但浏览器（sidecar）没起来。
- *
- * 与 `BOSS_UNREACHABLE_NOTE` 的区别只在**用户该做什么**：本地标记还在时，
- * 说「请先登录」会让人去点自己头像旁边那句「已登录」（用户 m01784 正是如此）。
- * 这时该做的是把浏览器拉起来，所以文案换成这一句。
+ * 库里存着登录标记、但浏览器（sidecar）没起来。与 `BOSS_UNREACHABLE_NOTE` 的区别只在
+ * 用户该做什么：此时说「请先登录」会误导（头像旁就写着「已登录」），该做的是拉起浏览器。
  */
 export const BROWSER_DETACHED_NOTE = '浏览器未启动：点一下让浏览器重新连接';
 
@@ -124,10 +101,8 @@ export function startHeartbeat(hooks: HeartbeatHooks, maxFails = HEARTBEAT_MAX_F
   }
 
   /**
-   * 拿到快照后本地排一次准点发送。
-   *
-   * 投递节奏由后端 `next_at_ms` 决定：到期那一刻直接调 `auto_greet_next`，
-   * **不发状态请求**。窗口外（还没到期或不在 60 秒内）不 arm，交给下一拍。
+   * 拿到快照后本地排一次准点发送：到期那一刻**直接**调 `auto_greet_next`，不发状态请求。
+   * 窗口外（还没到期或超过 `SEND_ARM_MAX_MS`）不 arm，交给下一拍。
    */
   function armSend(st: AutoStatusReply): void {
     const next = Number(st.next_at_ms ?? 0);
@@ -173,7 +148,7 @@ export function startHeartbeat(hooks: HeartbeatHooks, maxFails = HEARTBEAT_MAX_F
    */
   async function start(): Promise<void> {
     // 已在跑时别自己再验一次登录：`beat()` 一拍里已经验过了，
-    // 这里再来一次就是同一毫秒里的第二次 `login_status`（用户 m02245 的「双次」）。
+    // 这里再来一次就是同一毫秒里的第二次 `login_status`。
     if (alive) {
       schedule(0);
       return;
@@ -181,7 +156,7 @@ export function startHeartbeat(hooks: HeartbeatHooks, maxFails = HEARTBEAT_MAX_F
     const { state, saved } = await loginState();
     if (!isLoggedIn(state)) {
       // 「浏览器没起来」和「连上了但没登录」是两件事：本地有标记时说「请先登录」
-      // 会让人去点已经写着「已登录」的按钮（用户 m01784），所以分开给话。
+      // 会让人去点已经写着「已登录」的按钮，所以分开给话。
       if (state === 'unknown') {
         hooks.onNote(saved ? BROWSER_DETACHED_NOTE : BOSS_UNREACHABLE_NOTE);
       } else {

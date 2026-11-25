@@ -1,28 +1,11 @@
 /*
- * 概览页（M1）专用样式。
- *
- * 为什么单独一份、而不是改既有的 11 份分域样式：
- * `styles/` 那 11 份是冻结的正文（C4 的引入顺序也是契约）。原型
- * `prototypes/ui-v1/index.html` 的卡片已经换成「五行卡 + 打招呼方块」，
- * 用的类名（.pill / .job-card-top / .job-info / .job-greet / .score-box）
- * 与 .job-tab / .jc-* 是两套东西，混在一份里必然互相覆盖。
- * 所以：**原型特有的类名全部落在这里**，那一份正文一行不动，
- * 本文件在 `styles/index.css` 里排在 11 条 @import 之后（后加载、优先级更高）。
- *
- * 字号说明（用户裁决 K/L，v7/v8）：字号一律 `var(--fs-*)`，那 5 档令牌定义在
- * `styles/tokens.css`，并以 1920 为基准乘 `--ui-scale`（由 `lib_ui/canvas.ts`
- * 在 resize 时写进 `<html>` 的行内 style）。所以本文件**不出现任何裸 px 字号**，
- * 大屏上文字与几何一起放大。
- *
- * 红线（AGENTS.md §3 第 5 条）：本文件不得出现 `//!` 或 `///`；
- * 注释正文里也不得出现反引号包住的星号斜杠——块注释被提前闭合会让
- * 后面几份样式表整片失效，而构建照样打印成功。
- */
+   概览页专用样式（追加在 11 份契约样式之后，后加载、优先级更高）。
+   本页特有的类名全部落在这里，契约正文一行不动。
+   字号一律 var(--fs-*)，不出现裸 px 字号；颜色零字面量，只用块注释。 */
 
 /* 兼容别名：本文件与 `vue-pages.css` 早期版本用 --vd-fs-* / --vp-fs-* 做过
- * 「就地换算」，语义上就是 --fs-* 的同一档。保留别名只是为了让既有规则与
- * tests/chat-contract.test.ts 里对 --vd-fs 星号族的断言继续成立，数值只有一份，
- * 都指向 tokens.css 的令牌；新代码请直接用 --fs-*。 */
+   「就地换算」，语义上就是 --fs-* 的同一档。保留别名只是为了让既有规则与
+   tests/chat-contract.test.ts 里对 --vd-fs 星号族的断言继续成立，数值只有一份， */
 :root {
   --vd-fs-xs: var(--fs-xs);
   --vd-fs-sm: var(--fs-sm);
@@ -43,7 +26,7 @@
   gap: 10px;
   flex-wrap: wrap;
   flex: 0 0 auto;
-  /* 排序药丸 22 → 26（用户 m04113 加大字号）后，上下 10 / 6 会把行压到 42px，
+  /* 排序药丸 22 → 26（加大字号）后，上下 10 / 6 会把行压到 42px，
    * 与岗位卡行高推导里的 40px 对不上；这里收成 8 / 4，药丸 26 正好落回 40。 */
   padding: 8px 14px 4px;
 }
@@ -87,9 +70,8 @@
 }
 
 /* 选中页签与卡片选中 / 联动同一套主题色：主色柔底 + 柔边。
- * 边框必须用 --primary-border 而不是 --primary-soft：后者与背景同色会把轮廓
- * 吞掉，选中态看起来比未选中的两个细一圈、像「高度不一致」（用户 m03844）。
- * 三个页签的 height / padding / border-width 完全一致，视觉厚度也一致。 */
+   边框必须用 --primary-border 而不是 --primary-soft：后者与背景同色会把轮廓
+   吞掉，选中态看起来比未选中的两个细一圈、像「高度不一致」。 */
 .pill.is-active {
   background: var(--primary-soft);
   border-color: var(--primary-border);
@@ -122,7 +104,7 @@
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-3);
-  /* 用户 m04113「加大图中的字体」：原本是最小的 --fs-2xs，整行排序字号发虚；
+  /* 排序行原本用最小的 --fs-2xs，字号发虚；
    * 抬到 --fs-md 与顶栏工具组（配置 / 敏感库 / 主题）同级，行高同步 22 → 26。 */
   font-size: var(--fs-md);
   line-height: 1;
@@ -192,29 +174,12 @@
 }
 
 /* 卡片网格：3 列 → 2 列 → 1 列（唯一断点是 1599px） */
-/* 网格吃满岗位列表卡剩下的高度，**行高由可用高度三等分**（用户 m03518：
- * 「卡片高度保持在当前内容框中刚好占满三行」）：窗口变高变矮时卡片跟着伸缩，
- * 不再固定 132px —— 固定的结果是高窗底部留白、矮窗第三行被裁。
- *
- * 三等分靠 repeat(3, minmax(--job-card-h, 1fr)) 加 align-content: stretch：
- * 窗口变矮时由 `--job-card-h` 这个下限兜住（内容不会被挤扁，网格转为自己滚），
- * 变高时多出来的空间由 1fr 平分给三行。
- *
- * 网格自身是 flex 子项（`flex: 1 1 auto` + `min-height: 0`），父级链条
- * 从 .page-dashboard 一路到 .job-body.is-fill 全链路都是 min-height: 0，
- * 可用高度才传得下来。 */
+/* 网格吃满列表卡剩下的高度，行高由可用高度三等分：repeat(3, minmax(--job-card-h, 1fr))
+   + align-content: stretch，矮窗由下限兜住并转为网格自己滚。 */
 .job-grid {
   position: relative;
-  /* 三行卡片行高 = 142px（用户 m03968 裁决：锁定，不随窗口伸缩）。
-   *
-   * 取值来源（1440×900 窗口，各段为 CDP 实测值，不是估算）：
-   *   900 窗口 − 14 外壳底边距 − 46 顶栏 = 840 给页面；
-   *   − 42 抓取条 − 20 两处页面 gap − 220 日志卡 = 558 是列表卡可用高；
-   *   − 40 页签行 − 40 批量条（32 高 + 8 外边距）= 478 是网格盒高；
-   *   − 24 网格上下内边距、28 两处行间隙 = 426 给三行，均分 142。
-   * 用户在 140 / 142 之间取了 140（整数、且四等分后每格 30.5px）。
-   *
-   * 窗口比 900 矮时第三行会被滚出可视区，这是锁定行高的   * 必然结果，靠窗口最大化拿到完整三行。 */
+  /* 三行卡片行高锁定，不随窗口伸缩：1440×900 下 900 − 14 外壳 − 46 顶栏 − 42 抓取条
+   − 20 页面 gap − 220 日志卡 − 40 页签行 − 40 批量条 − 24 网格内边距 − 28 行间隙 */
   --job-card-h: 142px;
   /* 卡片间隙与网格内边距同档（14px，对齐 .app-body 的左右留白）。 */
   --job-grid-gap: 14px;
@@ -267,7 +232,7 @@
   }
 }
 
-/* 聊天抽屉展开时列数 = 收起时 − 1。顺序必须在断点之后（SPEC §16.9 裁决 X）。 */
+/* 聊天抽屉展开时列数 = 收起时 − 1。顺序必须在断点之后（）。 */
 .app-shell.is-chat-open .job-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -278,14 +243,8 @@
   }
 }
 
-/* A54（states.md:809，用户裁决「补齐实现·规格不动」）：
- * 展开态在 ≤1599 只剩 1 列，卡片要撑住可读宽度——低于 320 × scale 时靠
- * min-width 撑开、由 .job-grid 横向滚动兜底，**不许**用 overflow-x: hidden 掩盖。
- * 三条推断（未扣 .app-body 约 12px 列间隙）：
- *   1200 展开 1 列 ≈ 562px（主列 1200 − 600 对话框 − 右栏已让位）
- *   1440 展开 1 列 ≈ 682px
- *   1600 展开 2 列 ≈ 376px（1600 − 800 对话框 = 800，两列各 376 减间距）
- * 均 ≥ 320，故正常情况下 min-width 不触发，只在超窄窗兜底。 */
+/* 展开态在 ≤1599 只剩 1 列，卡片低于 320 × scale 时靠 min-width 撑开、由 .job-grid
+ * 横向滚动兜底，**不许**用 overflow-x: hidden 掩盖。常规窗口宽度下不会触发。 */
 @media (max-width: 1599px) {
   .app-shell.is-chat-open .job-card {
     min-width: calc(320px * var(--ui-scale));
@@ -333,11 +292,10 @@
 /* 聊天联动：当前展开聊天的 Boss 所在公司的岗位，描边高亮（不改背景，避免与多选冲突）。 */
 /* 无限滚动哨兵：占一小段高度供 IntersectionObserver 观察，并显示「加载中」。 */
 .job-load-sentinel {
-  /* 从网格行份额里脱身（用户 m03553「还是没有占满」）：它是网格的最后一个子项，
-   * 普通流下会被放进一个隐式行，与三张可见卡片争同一份可用高度 ——
-   * 结果是第 4 个行槽抢走 1fr 的份额，三行卡片反而缩小、底部露出半截。
-   * 改成绝对定位贴住网格底边：不建行、不参与 1fr 分配，滚到底时仍能看到
-   * 加载提示。定位上下文由网格本体的 position 提供。 */
+  /* 从网格行份额里脱身：它是网格的最后一个子项，
+   普通流下会被放进一个隐式行，与三张可见卡片争同一份可用高度 ——
+   结果是第 4 个行槽抢走 1fr 的份额，三行卡片反而缩小、底部露出半截。
+   改成绝对定位贴住网格底边：不建行、不参与 1fr 分配，滚到底时仍能看到 */
   position: absolute;
   left: 14px;
   right: 24px;
@@ -350,15 +308,8 @@
   pointer-events: none;
 }
 
-/* 已投递 / 不投递的卡片：外框光带换成语义色（用户 m03968）。
- *
- * layout.css 里默认对角弧与指针光斑全部消费 --spec-peak / --spec-top / --spec-side /
- * --spec-bottom 这一组，所以在卡片作用域内重新定义这 4 个变量，两套光带会同时变色，
- * 不需要复制两份渐变。卡片本身没有边框，颜色只出现在光带上。
- * 取色一律走语义令牌（--good / --bad）派生，不写字面色值：
- *   peak = 满亮语义色（光斑圆心 / 对角弧两端）
- *   top  = 语义色压到 62%，对应白色光带的「主弧」段
- *   side / bottom = 继续压暗，对应弧中段与远端 */
+/* 已投递 / 不投递的卡片：在卡片作用域内重定义 --spec-* 四枚光带令牌，两套光带同时变色。
+ * 取色由 --good / --bad 派生：peak 满亮，top 压到 62%，side / bottom 继续压暗。 */
 .job-card.tone-delivered {
   --spec-peak: var(--good);
   --spec-top: color-mix(in srgb, var(--good) 62%, transparent);
@@ -387,7 +338,7 @@
   min-width: 0;
 }
 
-/* 勾选框默认不占位；只有 .job-grid.is-selecting 时才出现（裁决 S）。 */
+/* 勾选框默认不占位；只有 .job-grid.is-selecting 时才出现。 */
 .job-check-slot {
   display: none;
   align-items: center;
@@ -439,14 +390,12 @@
 }
 
 /* 卡片主体：左侧四行文字 + 右侧一列（薪资 / 分数 / 打招呼）。
- * 两列的子项各自成行、行高相等，所以薪资与职位标题同在第一行，
- * 分数对齐「经验学历」行、方块对齐「地址」行。右列 `flex: 0 0 auto` 不被左列挤压，
- * 左列 min-width: 0 只吃自己的省略号。 */
+   两列的子项各自成行、行高相等，所以薪资与职位标题同在第一行，
+   分数对齐「经验学历」行、方块对齐「地址」行。右列 flex: 0 0 auto 不被左列挤压， */
 .job-info {
   display: flex;
   /* 必须 stretch：两列内部的行都写成 flex: 1 1 0（basis 0），
-   * 交叉轴若用 flex-start 就按内容撑高，而内容高又全是 0 —— 两列会一起塌成 0px。
-   * stretch 让它们直接吃满 .job-info 的 122px，四等分才有分配的空间。 */
+   交叉轴若用 flex-start 就按内容撑高，而内容高又全是 0 —— 两列会一起塌成 0px。 */
   align-items: stretch;
   gap: 0 10px;
   min-width: 0;
@@ -458,10 +407,9 @@
 .job-info-main {
   display: flex;
   flex-direction: column;
-  /* 四行把卡片内容盒 4 等分（用户 m03968「142px 4等分」）：
-   * 卡片无边框，内容盒 = 142 − 16 padding = 126px，每行 = 126 / 4 = 31.5px，
-   * 首行贴顶、末行贴底，不留 gap 也不用 space-between：行本身就有 31.5px 高，
-   * 间距由等高行盒自然形成。 */
+  /* 四行把卡片内容盒 4 等分：
+   卡片无边框，内容盒 = 142 − 16 padding = 126px，每行 = 126 / 4 = 31.5px，
+   首行贴顶、末行贴底，不留 gap 也不用 space-between：行本身就有 31.5px 高， */
   justify-content: flex-start;
   gap: 0;
   flex: 1 1 auto;
@@ -480,9 +428,8 @@
 }
 
 /* 左列四行与右列四格都必须等高，两列才能逐行对齐。
- * 用 flex: 1 1 0 而不是 height: 25%：百分比高度在 flex 列里不参与 flex-basis
- * 分配（实测会退回各自内容高 21 / 21 / 21 / 19.5），四格就分不匀。
- * 写成 1 1 0 时 basis 为 0，剩余 126px 由 flex 平均分给 4 格，即 31.5px。 */
+   用 flex: 1 1 0 而不是 height: 25%：百分比高度在 flex 列里不参与 flex-basis
+   分配（实测会退回各自内容高 21 / 21 / 21 / 19.5），四格就分不匀。 */
 .job-info-main > * {
   flex: 1 1 0;
   min-height: 0;
@@ -583,11 +530,9 @@
   .score-box .score-num { animation: none; }
 }
 
-/* 打招呼方块：主色底白字（裁决 W2）。
- * 缩小为紧凑按钮：高度 30px（独占右列末一行略高的位置），字号 --fs-sm，宽度按三字横排取 --fs-sm × 3.6。 */
+/* 打招呼方块：主色底白字，紧凑按钮，宽度按三字横排取 --fs-sm × 3.6。 */
 .job-greet {
-  /* 占右列第 4 格（用户 m03876 四等分）：与左列第 4 行同高。
-   * 不能写 flex: 0 0 auto，否则按钮退回内容高、与左列最后一行错位。 */
+  /* 占右列第 4 格，与左列第 4 行同高：写成 flex: 0 0 auto 会退回内容高并与左列错位。 */
   flex: 1 1 0;
   min-height: 0;
   display: inline-flex;
@@ -660,7 +605,7 @@
   min-height: 220px;
 }
 
-/* 原型 L901-909：44×44 玻璃盒 + 内嵌 SVG，不是文本字符。 */
+/* （44×44 玻璃盒 + 内嵌 SVG，不是文本字符。 */
 .state-glyph {
   width: 44px;
   height: 44px;
@@ -754,15 +699,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.scrape-total {
-  font-size: var(--fs-xs);
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
-}
-
-
-
-/* ---------- 筛选面板（原型 .f-* 一套） ---------- */
+/* ---------- 筛选面板（ .f-* 一套） ---------- */
 .scrape-filter-bar {
   flex: 0 0 auto;
   padding: 0;
@@ -868,13 +805,8 @@
   font-size: var(--fs-xs);
 }
 
-/* 下拉框自绘箭头（用户要求去掉浏览器默认的三角）。
- *
- * 结构：`.f-select-wrap` 是 relative 外壳，`select` 铺满它，`svg` 绝对定位在右端。
- * appearance 必须 none，否则原生三角会和自绘箭头**同时**出现——用户截图里那个
- * 巨大 V 字就是这么来的：自绘 svg 没有尺寸与定位约束，按默认 300×150 撑开了。
- * 所以这里两样都不能少：appearance 置 none + 给 svg 明确宽高（注释里不能出现
- * 「反引号包住的星号斜杠」，否则会提前闭合块注释，geometry 单测会拦）。 */
+/* 下拉框自绘箭头：`.f-select-wrap` 作 relative 外壳，select 铺满，svg 绝对定位在右端。
+ * appearance 必须 none，否则原生三角与自绘箭头会同时出现；svg 必须给明确宽高。 */
 .f-select-wrap {
   position: relative;
   display: block;
@@ -906,13 +838,8 @@
   color: var(--primary);
 }
 
-/* 原生下拉菜单的配色。
- *
- * `<option>` 列表由 WebView2 自己绘制，**不继承页面样式**：不显式给背景，深色主题下
- * 它永远是白底黑字的系统默认面板（用户截图里那块亮白条）。`color-scheme` 是让浏览器
- * 把整块弹出面板（含滚动条、高亮行）按深色绘制的开关，option 的 background / color
- * 只是在支持时再压一层，两者缺一都会回落到白底。
- * 颜色只经令牌（红线 8）。 */
+/* 原生下拉菜单：`<option>` 由 WebView2 自己绘制，不继承页面样式。
+   color-scheme 让整块弹出面板按深色绘制，option 的 background / color 再压一层， */
 .f-select {
   color-scheme: dark light;
 }
@@ -935,16 +862,14 @@
   font-size: var(--fs-sm);
   line-height: 1.5;
   padding: 6px 8px;
-  /* 默认正好三行（用户裁决）：行高 1.5 × 字号 × 3 + 上下内边距 + 1px 边框。
-   * 模板上的 `rows="3"` 只管原生行数，`.input` 一旦给了固定高度就会盖掉它，
-   * 所以这里用 min-height 兜住三行，并保留 resize 让用户自己拉高。 */
+  /* 三行高度：行高 1.5 × 字号 × 3 + 内边距 + 边框；模板的 rows="3" 会被固定高度盖掉，
+   * 所以用 min-height 兜住，并保留 resize 让用户自己拉高。 */
   min-height: calc(var(--fs-sm) * 1.5 * 3 + 12px + 2px);
   box-sizing: border-box;
   resize: vertical;
 }
 
-/* 面板右上角关闭按钮（`filter-close-btn`）：用户裁决「移除收起」，只留一个 ×。
- * 按钮本身 22×22，识别区靠 ::after 撑到 32×32，避免小图标难点。 */
+/* 面板右上角关闭按钮：只留一个 ×。按钮本身 22×22，识别区靠 ::after 撑到 32×32。 */
 .f-x {
   position: relative;
   display: grid;
@@ -1076,14 +1001,13 @@
 /* ---------- 顶栏单行：落位盒 + 尾段（SPEC-001 决策 7 / §11.3 / A33） ---------- */
 
 /* AppShell 在 header.topbar 里留的空盒：概览把平台卡与尾段 teleport 进来。
- * `display: contents` 让这个盒子不产生新的 flex 容器——teleport 进来的元素成为
- * 顶栏的直接 flex 子项，品牌 | 平台卡 | 尾段的间距与原型 L1363-1410 同一套。 */
+   display: contents 让这个盒子不产生新的 flex 容器——teleport 进来的元素成为 */
 .tb-embed {
   display: contents;
 }
 
 /* 顶栏单行 46px（SPEC-001 AC10 / states.md §7 实测口径）；根容器锁 1200px
- * （原型 L206/L228：<1200 不降级，保持 1200 基线）。 */
+ * （<1200 不降级，保持 1200 基线）。 */
 .topbar {
   height: 46px;
   padding: 0 14px;
@@ -1093,24 +1017,21 @@
   min-width: 1200px;
 }
 
-/* <1200 不降级、横向出口（基线 §2.3「最小宽度是契约」、原型 L197 意图、
- * SPEC-001 Rev6 已知偏差③）：契约宿主 tokens.css 的 body overflow:hidden
- * 会把 1200 外壳裁掉，窄窗既看不到滚动条也看不到右缘。这里放开横向滚动，
- * 纵向仍锁死（各列自己滚）。tokens.css 不动，此为 Vue 侧覆盖；
- * index.html 的防首帧闪白内联规则只匹配挂载前，不受影响。 */
+/* <1200 不降级、横向出口（基线 §2.3「最小宽度是契约」、原型 意图、
+   SPEC-001 Rev6 已知偏差③）：契约宿主 tokens.css 的 body overflow:hidden
+   会把 1200 外壳裁掉，窄窗既看不到滚动条也看不到右缘。这里放开横向滚动，
+   纵向仍锁死（各列自己滚）。tokens.css 不动，此为 Vue 侧覆盖； */
 body {
-  /* 别再放开横向滚动（用户 m03014）：窗口 minWidth 1200，`body` 拿到 1200 宽
-   * 之后自己再滚，等于给整窗加了一条横向滚动条，右侧内容被推到视口外还看不全。
-   * 横向裁切交给外壳的 overflow:hidden，各列按 min-width 自己在列内处置。 */
+  /* 别再放开横向滚动：窗口 minWidth 1200，`body` 拿到 1200 宽
+   之后自己再滚，等于给整窗加了一条横向滚动条，右侧内容被推到视口外还看不全。 */
   overflow-x: hidden;
   overflow-y: hidden;
 }
 
 /* 窗口控件 _ □ ×：无边框窗口的最小化/最大化/关闭。颜色只用既有令牌（红线 8）。 */
 /* 窗口控件 _ □ ×：无边框窗口的最小化 / 最大化 / 关闭。
- * 靠右的责任不在这一组：余量由 `.tb-tail` 的 margin-left: auto 吃掉，
- * 组内再由 `.tb-theme` 的 auto 把主题顶到最右（见下方 .tb-tail 段）。
- * 这里若再吃 auto，两条 auto 会平分余量，主题就会离「最小化」越来越远。 */
+   靠右的责任不在这一组：余量由 `.tb-tail` 的 margin-left: auto 吃掉，
+   组内再由 .tb-theme 的 auto 把主题顶到最右（见下方 .tb-tail 段）。 */
 .win-ctrl {
   display: flex;
   align-items: center;
@@ -1162,22 +1083,8 @@ body {
   display: none;
 }
 
-/* 顶栏尾段：两段式（用户 m04039「这几个与主题分开，然后靠近登录按钮，
- * 主题位置保持不变」）：
- *
- *   .tb-tools  打分分段 · token 读数 · 配置 · 敏感库 —— 紧贴左侧的登录按钮
- *   .tb-theme  主题 —— 独占右端，贴着窗口控件里的「最小化」
- *
- * 布局手法（试过三版，别再改）：把 `.tb-tail` 本身撑成**唯一**吃余量的盒子
- * （`flex: 1 1 auto` + `min-width: 0`），组内再拆两头——
- * `.tb-tools` 靠 `margin-right: auto` 钉在左端，`.tb-theme` 靠 `margin-left: auto`
- * 钉在右端。
- *
- * 三条踩过的坑：
- * 1) auto 挂在 `.tb-tail` 上、组内不再拆 → 整条尾段被推到右端，工具组与登录按钮隔开 325px；
- * 2) 只给 `.tb-tools` 留 auto → 尾段整体塌在左边，右缘空出 328px；
- * 3) `.tb-tools` 与 `.tb-theme` 各吃一条方向相反的 auto → 两条互相抵消，尾段被压扁。
- * 必须让尾段自己先占满中段，组内的 auto 才有余量可以推。 */
+/* 顶栏尾段两段式：`.tb-tools`（打分分段 · token 读数 · 配置 · 敏感库）贴登录按钮，
+   .tb-theme 独占右端。.tb-tail 必须是唯一吃余量的盒子（flex: 1 1 auto + min-width: 0）， */
 .tb-tail {
   display: flex;
   align-items: center;
@@ -1213,7 +1120,7 @@ body {
 }
 
 .theme-btn-label {
-  /* 与「配置 / 敏感库」和打分分段同级（用户 m02983） */
+  /* 与「配置 / 敏感库」和打分分段同级。 */
   font-size: var(--fs-md);
 }
 
@@ -1263,7 +1170,7 @@ body {
   background: var(--primary-soft);
 }
 
-/* 明暗两档并排（用户 m03059）：与下面的主题色圆点、字号按钮同一行内节奏。 */
+/* 明暗两档并排，与下面的主题色圆点、字号按钮同一行内节奏。 */
 .theme-modes {
   display: inline-flex;
   gap: 4px;
@@ -1300,7 +1207,7 @@ body {
 }
 
 .seg {
-  /* 字号提到 fs-md（用户 m02800/m02848：先改 fs-sm 仍说「字体没有放大」，
+  /* 字号提到 fs-md（改 fs-sm 仍显小），
      再抬一档到 15px，与页面正文同级）：高度同步抬到 26px 才装得下，
      与右侧「配置 / 敏感库」等 btn-sm 同高，顶栏仍是 46px 单行。 */
   display: inline-flex;
@@ -1367,7 +1274,7 @@ body {
   line-height: 1;
 }
 
-/* 裁决 O（SPEC §14.3）：禁用态与选中态组合时必须透明兜底，绿色高亮绝不能出现。 */
+/* （）：禁用态与选中态组合时必须透明兜底，绿色高亮绝不能出现。 */
 .seg.is-active:disabled,
 .seg.is-active[aria-disabled='true'],
 .seg[aria-checked='true']:disabled,
@@ -1376,19 +1283,19 @@ body {
   color: var(--text-3);
 }
 
-/* token 统计组（原型 L485-490 .tb-stats 语义）：inline-flex + gap 8，
+/* token 统计组（ .tb-stats 语义）：inline-flex + gap 8，
  * 累计读数一项、分隔线一项、模型打分/打招呼分项各一项；<1360 整组让位给 chip。 */
 .tb-tokens {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  /* 用户 m02983：这处读数原先只有 fs-2xs（11px），跟旁边放大的分段差两档。 */
+  /* 这处读数原先只有 fs-2xs（11px），跟旁边放大的分段差两档。 */
   font-size: var(--fs-md);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
 
-/* 原型 L487：分隔线 1×14 hairline。 */
+/* （分隔线 1×14 hairline。 */
 .tb-tokens .tb-sep {
   width: 1px;
   height: 14px;
@@ -1396,7 +1303,7 @@ body {
   flex: 0 0 auto;
 }
 
-/* 原型 L485-486：分项读数与累计同族，数字提亮一档 text-1/650。
+/* （分项读数与累计同族，数字提亮一档 text-1/650。
  * 字号/颜色继承 .tb-tokens（本仓库 fs-2xs 口径），不另立档位。 */
 .tb-tokens .rail-stat {
   white-space: nowrap;
@@ -1407,14 +1314,12 @@ body {
   font-weight: 650;
 }
 
-/* 原型 L1335-1337 的「1360–1599 隐藏分项」已放宽到 1440 以下（用户 m02692：
- * 「打招呼的 token 数量没有显示」）。窗口默认 1440×900、最小 1200，
- * 原先的断点让默认尺寸正好落在隐藏区间里 —— 分项等于永远看不见。
- * 现在只在窄窗（<1200 的兜底，实际受 minWidth 限制）折叠成 chip。 */
+/* 原型的「1360–1599 隐藏分项」已放宽到 1440 以下（
+   「打招呼的 token 数量没有显示」）。窗口默认 1440×900、最小 1200，
+   原先的断点让默认尺寸正好落在隐藏区间里 —— 分项等于永远看不见。 */
 
-/* token 折叠 chip（原型 L493/L501-502/L1406）：<1360 折叠成一枚 chip，≥1360 展开。
- * 类名避开 .tb-stats——那个名字在本仓库被日志卡的 C9 进度块占用。
- * chip 里的数字原型带 color:var(--text-1)（L1406 行内），这里用选择器等价承接。 */
+/* token 折叠 chip（-502/L1406）：<1360 折叠成一枚 chip，≥1360 展开。
+   类名避开 .tb-stats——那个名字在本仓库被日志卡的 C9 进度块占用。 */
 .tb-token-chip b {
   color: var(--text-1);
   font-variant-numeric: tabular-nums;
@@ -1435,8 +1340,7 @@ body {
 }
 
 /* ---------- 最近事件卡 ----------
- * 原型 L943：`flex: 0 0 auto; height: 220px; min-height: 160px; position: relative`
- * ——日志卡是定高块，行数增减不改变外框高度，滚动只发生在卡体内。 */
+   （flex: 0 0 auto; height: 220px; min-height: 160px; position: relative */
 .log-card {
   flex: 0 0 auto;
   height: 220px;
@@ -1446,8 +1350,7 @@ body {
 }
 
 /* 卡体是卡内唯一的弹性列：C9 进度块贴顶、日志行区吃剩余高度并自己滚。
- * 原型 L1720-1729 的日志卡没有 .card-body 这一层（进度块是本仓库 C9 的既有结构），
- * 所以这里显式把卡体做成 flex column + min-height:0，否则定高之后滚动会跑到外层页面上。 */
+   原型 的日志卡没有 .card-body 这一层（进度块是本仓库 C9 的既有结构）， */
 .log-card > .card-body {
   display: flex;
   flex-direction: column;
@@ -1481,9 +1384,8 @@ body {
   padding-bottom: 8px;
 }
 
-/* 原型 L1024：日志行区是卡体内的 flex 子项，靠 min-height:0 在自己内部滚，
- * 不另外设 max-height——日志卡已经定高 220px（原型 L943），再叠一层 180px 就是二次限高，
- * 卡体上下会空出一截而列表先滚起来。 */
+/* （日志行区是卡体内的 flex 子项，靠 min-height:0 在自己内部滚，
+   不另外设 max-height——日志卡已经定高 220px（），再叠一层 180px 就是二次限高， */
 .log-rows {
   list-style: none;
   margin: 0;
@@ -1573,9 +1475,8 @@ body {
 }
 
 /* ---------- M5 补遗：详情抽屉扩展件 ----------
- * 抽屉本体（.drawer / .drawer-head / .kv / .jd-text ...）在契约样式表 drawer.css，
- * 这里只补原型 job-detail-* 外壳需要、drawer.css 里没有的几块。
- * 颜色只走 tokens；字号用本文件顶部的 --vd-fs-* 换算。 */
+   抽屉本体（.drawer / .drawer-head / .kv / .jd-text ...）在契约样式表 drawer.css，
+   这里只补原型 job-detail-* 外壳需要、drawer.css 里没有的几块。 */
 .drawer-foot {
   flex: 0 0 auto;
   display: flex;
@@ -1617,9 +1518,8 @@ body {
 }
 
 /* ---------- M5 补遗：顶栏三平台卡 ----------
- * 形状照原型 .platform-card；但按用户 m02355「去掉椭圆背景和边框」改成无壳文字组：
- * 胶囊底、描边、横向内边距全部去掉，只剩「名称 · 状态点 · 登录按钮」三段。
- * 未接入的 .is-off 仍半透明且不可点。 */
+   形状照原型 .platform-card，但去掉椭圆背景和边框，改成无壳文字组：
+   胶囊底、描边、横向内边距全部去掉，只剩「名称 · 状态点 · 登录按钮」三段。 */
 .platform-card {
   display: inline-flex;
   align-items: center;
@@ -1700,7 +1600,6 @@ body {
 }
 
 /* 两处 @media (max-width: 900px) 降级块已删（交接表 H 行 / states.md §7）：
- * 原型 L1339-1341 是用户硬约束「页面最小宽度 1200px；小于 1200 保持 1200 布局并出现
- * 横向滚动条——不做任何落底/单列降级。原先那三条（platform-card 压到 26px、
- * app-error-rest 隐藏、f-tri 与 f-grid2 退单列）都与之相反；app-shell 已有的
- * min-width 1200px 承接这条口径。 */
+   原型 是用户硬约束「页面最小宽度 1200px；小于 1200 保持 1200 布局并出现
+   横向滚动条——不做任何落底/单列降级。原先那三条（platform-card 压到 26px、
+   app-error-rest 隐藏、f-tri 与 f-grid2 退单列）都与之相反；app-shell 已有的 */

@@ -1,14 +1,7 @@
 /**
- * 全景几何的 Vue 接线：窗口 resize → `syncCanvas()`。
- *
- * 原型在 `resize` 里**先**写 `--ui-scale`，**再**写 `--detach-w`
- * （`prototypes/ui-v1/index.html:3221-3226`）；`syncCanvas()` 内部已经保证这个顺序，
- * 这里只负责「什么时候调」。另外两处细节：
- *
- * - **多次 resize 合并到一帧**：拖动窗口时 `resize` 每像素都发，直接写行内样式会让
- *   `--ui-scale` 每帧变一次、整页重排。用 `requestAnimationFrame` 合并成一次。
- * - **首帧也要跑**：`syncUiScale()` 在原型里是启动时同步调用的（L3299），
- *   所以 `onMounted` 立即执行一次，不等 resize。
+ * 全景几何的 Vue 接线：窗口 resize → `syncCanvas()`（`--ui-scale` 与 `--detach-w` 的写入
+ * 顺序由它内部保证）。两处细节：拖动窗口时 resize 每像素都发，用
+ * `requestAnimationFrame` 合并到一帧，免得整页重排；首帧在 `onMounted` 立刻跑一次。
  */
 import { onBeforeUnmount, onMounted } from 'vue';
 

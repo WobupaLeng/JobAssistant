@@ -1,16 +1,8 @@
 <script setup lang="ts">
 /**
- * 城市选择器：省 → 市 两级联动 + 输入框搜索（单值 9 位编码）。
- *
- * 为什么要它：早期是 `features/scrape/filter.rs:1100-1115` 的 `<select>`，
- * 只有 8 个热门城市写死；BOSS 官方表有 34 省 / 373 市，`<select>` 铺不下。
- *
- * 契约（不可丢）：
- * 1. `data-testid="scrape-filter-city"` 必须留在**触发按钮**上——早期这个
- *    testid 挂在 `<select>` 上，Vue 版换成按钮后 id 字面量不变，否则下游 E2E 与
- *    `filter.rs` 的锚点全部失联；
- * 2. 城市是**单值 string**，本组件只 emit 一个 9 位编码，不碰多选；
- * 3. 交互状态机在 `city-picker.ts`（纯逻辑、可单测），本文件只做 DOM 与焦点。
+ * 城市选择器：省 → 市 两级联动 + 输入框搜索（单值 9 位编码）。`data-testid="scrape-filter-city"`
+ * 必须留在**触发按钮**上，下游 E2E 与 `filter.rs` 都认这个字面量。交互状态机在
+ * `city-picker.ts`，本文件只做 DOM 与焦点。
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
@@ -80,10 +72,8 @@ function toggle(): void {
 }
 
 /**
- * 量触发按钮的位置，把面板钉在它下面。
- *
- * 面板必须 Teleport 到 body：筛选抽屉 `.f-body` 是滚动容器（`overflow-y: auto`），
- * 抽屉外层还带 backdrop-filter（会新建包含块），留在原地时面板被裁成抽屉里的一条。
+ * 量触发按钮的位置，把面板钉在它下面。面板必须 Teleport 到 body：`.f-body` 是滚动容器、
+ * 外层还带 backdrop-filter（新建包含块），留在原地会被裁成一条。
  */
 function placePanel(): void {
   const anchor = triggerEl.value;

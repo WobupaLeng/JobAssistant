@@ -1,20 +1,5 @@
-/* 分域样式：敏感库右侧滑出抽屉。
- *
- * 中枢修正令（覆盖旧版图 1 的居中浮层）：宽度 `min(1040px, 72vw)`，
- * 从右侧滑入，`translateX(100%) → 0` 过渡 220ms；遮罩点击关闭、Esc 关闭。
- * 其余结构（标题行、工具行七个按钮、三列卡片网格、卡片四段、移出按钮）照旧。
- *
- * 颜色一律走 tokens.css 的变量（遮罩色用 --bad-border 这一档半透明暗色）。
- *
- * 结构：
- *   .sensitive-backdrop  全屏遮罩（点击关闭）
- *   .sensitive-panel     居中固定窗（收起 = 缩小 0.98 且透明，打开 = 居中归位）
- *   .sensitive-head      标题行
- *   .sensitive-tools     工具行（搜索 / 筛选 / 全选 / 移出所选）
- *   .sensitive-body      唯一滚动容器
- *   .sensitive-grid      三列（窄屏递减）卡片网格
- *   .sensitive-card      单张卡片
- */
+/* 分域样式：敏感库右侧滑出抽屉。宽度 `min(1040px, 72vw)`，从右侧滑入；遮罩点击或 Esc 关闭。
+   结构：.sensitive-backdrop 遮罩 / .sensitive-panel 固定窗 / -head 标题行 / */
 
 .sensitive-backdrop {
   position: fixed;
@@ -27,17 +12,8 @@
   transition: opacity 220ms var(--ease-glass);
 }
 
-/* 主体：居中固定窗（用户裁决 v10 / 原型 .sen 一系）。
- *
- * 尺寸随 --ui-scale 等比放大，但外层再套 min() 与视口差值，保证永远不顶破窗口：
- *   width  min(calc(1120px * var(--ui-scale)), calc(100vw - 40px))
- *   height min(calc(720px * var(--ui-scale)), calc(100vh - 56px))
- * 700 行正文的滚动交给 .sensitive-body（flex:1 1 auto + min-height:0 + overflow-y:auto），
- * 所以这里必须 max-height:none —— 否则 min() 算出的高度会被视口高度二次夹住。
- *
- * z-index 61 > 遮罩 60 > 窗口内其余浮层（最高 51）：遮罩要能盖住整个窗口才算模态，
- * 所以两者都抬到 60 以上。万一动画尾帧重叠，后打开的（敏感库）压在上面更符合直觉。
- * 动画走 opacity + 轻微缩放（合成层友好，不逐帧重排）。 */
+/* 主体：居中固定窗。尺寸随 --ui-scale 放大，外层套 min() 与视口差值防止顶破窗口；
+   这里必须 max-height: none，否则 min() 算出的高度会被视口高度二次夹住。 */
 .sensitive-panel {
   position: fixed;
   z-index: 61;
@@ -51,12 +27,11 @@
   min-height: 0;
   border-radius: var(--radius-lg);
   /* 自身材质归本文件独占（用户口径：不需要透明）。用 --panel-solid 而不是
-   * --popup-surface：后者与弹窗语义耦合，改弹窗底色会把面板一起带透。
-   * 「不透明玻璃」只能从这里保证。 */
+   --popup-surface：后者与弹窗语义耦合，改弹窗底色会把面板一起带透。 */
   background: var(--panel-solid);
   border: 1px solid var(--hairline-strong);
   box-shadow: var(--shadow-pop);
-  /* 底是实色，磨砂只会把面板边缘外的一圈内容反相折射进来（实测表现为
+  /* 底是实色，磨砂只会把面板边缘外的一圈内容反相透进来（实测表现为
    * 「展开时右下角多出一块深色」），所以这一层关掉。 */
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
@@ -70,10 +45,9 @@
 }
 
 /* 打开态：居中归位。收起态由基础规则承担（缩放 0.98 + 透明），
- * 所以关闭时也会走同一条 220ms 回程，不需要额外的出场关键帧。
- * transform 取 translate+scale 同一写法：只写 translate 会把基础规则的 scale(.98)
- * 抹掉，收起态与打开态几何完全相同，只剩透明度在变（「轻微缩放」从未发生）。
- * 也不能用 scale() 简写——它会把 translate(-50%,-50%) 一起覆盖成 0 位移。 */
+   所以关闭时也会走同一条 220ms 回程，不需要额外的出场关键帧。
+   transform 取 translate+scale 同一写法：只写 translate 会把基础规则的 scale(.98)
+   抹掉，收起态与打开态几何完全相同，只剩透明度在变（「轻微缩放」从未发生）。 */
 .sensitive-panel.is-open {
   transform: translate(-50%, -50%) scale(1);
   opacity: 1;
@@ -87,8 +61,7 @@
 }
 
 /* 宿主同时挂 glass-l2 时，vue-glass.css（后加载）的 .glass-l2{position:relative}
- * 同特异性覆盖掉 position:fixed，面板会被压到 body 底部、视口外（打不开）。
- * 这里用更高特异性把定位钉回 fixed，不改 glass-l2 的全局语义。 */
+   同特异性覆盖掉 position:fixed，面板会被压到 body 底部、视口外（打不开）。 */
 /* 头部：左标题区可收缩，右侧「关闭」固定。 */
 .sensitive-head {
   flex: 0 0 auto;
@@ -131,6 +104,11 @@
   padding: 10px 18px 0;
 }
 
+.sensitive-error {
+  flex: 0 0 auto;
+  padding: 8px 18px 0;
+}
+
 .sensitive-tools-actions {
   padding-top: 8px;
   padding-bottom: 10px;
@@ -143,7 +121,7 @@
   height: 28px;
 }
 
-/* 筛选胶囊的选中态：与 `.tab.is-active` 同一套视觉语言（主色底 + 主色描边）。 */
+/* 筛选胶囊的选中态：与 */
 .sensitive-filter {
   height: 24px;
   padding: 0 11px;
@@ -156,16 +134,13 @@
   color: var(--text-1);
 }
 
-.sensitive-hint {
-  font-size: var(--fs-2xs);
-}
-
-.sensitive-error {
+/* 工具行：搜索框吃掉剩余宽度，按钮与筛选胶囊不换行。 */
+.sensitive-tools {
   flex: 0 0 auto;
   padding: 8px 18px 0;
 }
 
-/* 正文：唯一滚动容器。`min-height: 0` 是 flex 子项能真正溢出的前提。 */
+/* 正文：唯一滚动容器。 */
 .sensitive-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -180,8 +155,7 @@
 }
 
 /* 网格：够宽三列，窄于 900px 退两列，再窄退一列。
- * 用 auto-fill + minmax 而不是写死 repeat(3)：抽屉宽度是 min(1040px,72vw)，
- * 小窗口下三列会把公司名压成竖排。 */
+   用 auto-fill + minmax 而不是写死 repeat(3)：抽屉宽度是 min(1040px,72vw)， */
 .sensitive-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -318,8 +292,7 @@
 }
 
 /* 系统要求减少动效：面板**只淡不缩放**。
- * 不能写 transition: none——那会让开合变成硬切；而缩放本身就是需要压掉的那部分。
- * 基础规则的 scale(.98) 由 motion.css 末尾的纯淡规则接管（它排在后面、同特异性胜出）。 */
+   不能写 transition: none——那会让开合变成硬切；而缩放本身就是需要压掉的那部分。 */
 @media (prefers-reduced-motion: reduce) {
   .sensitive-panel {
     transform: translate(-50%, -50%);
