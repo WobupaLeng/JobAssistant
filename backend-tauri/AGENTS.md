@@ -121,8 +121,10 @@ app/src-tauri/
 
 1. **48 条**：`commands_*.rs` 里 46 条 `pub fn` + `lib.rs` 里 2 条私有 `fn`；`generate_handler!` 注册同样 48 条，**零孤儿**。新增命令必须同时登记，否则前端 `invoke` 得到「命令不存在」，同时要在 `frontend-vue/` 的 api 层加封装与类型。
 2. **内联两条的理由**：`get_scoring_spec()` 返回壳层私有 struct `ScoringSpec`，口径常量只在 `lib.rs` 引入，放最靠近常量的位置免得命令层再抄一份；`app_info(paths)` 依赖 `env!("CARGO_PKG_VERSION")` 与 `setup` 填的 `AppPaths`，属 Shell 自述而非业务。
-3. **参数必须双向兼容**：前端发驼峰、Rust 字段蛇形，serde 对未知字段**不报错**。照 `ScrapeArgs` / `ScoreArgs` / `RescoreArgs` 加 `alias`，否则值被静默丢弃。
+3. **参数必须双向兼容**：前端发驼峰、Rust 字段蛇形，serde 对未知字段**不报错**。照 `ScrapeArgs` / `ScoreArgs` / `RescoreArgs` 加 `alias`，否则值被静默丢弃。⚠️ **平铺参数（参数列表里一个个写的）不支持 `#[serde(alias)]`**：写上去 `cargo check` 直接报 `error: cannot find attribute 'serde' in this scope`。这类命令只能让前端发蛇形键名（`chat_send` 的 `job_id` / `chat_send_resume` 的 `resume_id` / `chat_open` 的 `job_id` 就是这样）。
 4. **配置写入分两条命令**：门槛与上限走 `set_limit`，其余键走 `set_app_config`。`min_score` **不在** `WRITABLE_KEYS` 里，塞进 `set_app_config` 会被静默跳过。
+5. **等远端（或等 sidecar 回执）的命令一律 `async`**。同步 `#[tauri::command]` 由 Tauri **在主线程上执行**（`Webview::on_message` → `Window::manager` 都是 `run_on_main_thread`），主线程上的 `recv_timeout` 会把 WebView2 的消息泵一起按停——窗口拖不动、按钮点不动，表现就是「程序无响应」，最长可达 `CHAT_TIMEOUT` 的 90 秒。判据只有一条：**函数体里有没有阻塞等待**。纯本地读库（`*_local`）与纯内存计算（`scrape_progress` 的锁内快照）保持同步即可。
+   - ⚠️ 改成 `async` 后函数体仍在工作线程上同步执行，**同一时刻只跑一个任务**。会阻塞等回执的命令不要写成 `async fn` 里再去 `blocking_lock()` 之类的全局锁，排队会比原来更糟。
 
 ---
 
@@ -141,6 +143,8 @@ app/src-tauri/
 ## 5. 测试约定
 
 - **主门禁**：`cd app/src-tauri && cargo test`。静态 `#[test]` 计数应与实跑 `passed` 吻合，不吻合先查统计口径。
+  - 只查类型、不跑用例用 `cargo check --tests`：`cargo check` 不展开 `#[cfg(test)]` 模块，测试代码里的编译错误它一条都看不见。
+  - ⚠️ **新建独占 `CARGO_TARGET_DIR` 后，`cargo check` 与 `cargo test` 必须用同一个目录**。两个目录并行跑会抢同一套 build-dir/proc-macro 编译，冒出来的 `error: cannot determine resolution for the macro ::core::concat` / `could not compile windows-sys (lib)` 是竞态，不是代码问题（实测踩过）。遇到这类报错先看是不是两个 cargo 进程同时活着，再换一个**全新的单线程**目录重跑。
 - **锚点**（改这些必须看对应测试）：
   - `domain/scoring.rs` 五维权重与初筛线；`domain/rules.rs` 十条排除规则的**顺序**；`domain/parse.rs` 薪资 PUA 解码；`domain/migration.rs` 幂等迁移；
   - `domain/rescore.rs` **排序键必须是 `job_id` 升序**——按 `match_score` 排序会被自己的写回推翻分页边界，同一岗位算两次、别的被跳过，**且没有任何报错**；

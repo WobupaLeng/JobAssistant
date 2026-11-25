@@ -564,11 +564,6 @@ fn apply_ack(
     AckOutcome::Pending
 }
 
-/// 成员标识：本应用只有一个 WebView，登录态按平台播，所以成员就是平台。
-fn acked_platform(snap: &LoginSnapshot) -> String {
-    snap.platform.clone()
-}
-
 /// 广播 + 确认的共享状态：watcher 线程按 5 秒重发，`login_ack` 命令在这里记账。
 ///
 /// 字段全部由一个 `Mutex` 保护：读改写都是短临界区，不会和抓取/发消息争锁。
@@ -583,8 +578,12 @@ struct LoginBroadcast {
 impl LoginBroadcast {
     /// 开始新一轮：状态变化时调用，`sent` 记 1（首次已发）。
     fn begin(&mut self, snap: LoginSnapshot) {
+        // 首次已经发出去，但**还没人确认**：`acked` 必须清空。
+        // 曾在这里预置 `acked_platform(&snap)`，于是 `handle_ack` 拿到确认时
+        // `waiting == member_count() - 1 == 0`，立刻 `finish()` —— 每一轮都被当成
+        // 「全员已消费」，5 秒补发从未发生，ack 形同虚设（用户 2026-11-25：
+        // 「boss 列表 ack 失效了」）。「发出去」与「被消费」是两件事，不能在这里合并。
         self.acked.clear();
-        self.acked.insert(acked_platform(&snap));
         self.pending = Some(PendingBroadcast {
             snap,
             sent: 1,
@@ -596,6 +595,17 @@ impl LoginBroadcast {
     fn due(&self) -> bool {
         match self.pending.as_ref() {
             Some(p) => p.sent < LOGIN_BROADCAST_MAX && now_ms() >= p.due_ms,
+            None => false,
+        }
+    }
+
+    /// 这一次 emit 放不放行（**首次广播与补发共用**，watcher 每拍只问它一次）。
+    ///
+    /// 与 `due()` 同源，差别只在首次：`begin()` 刚把 `due_ms` 拨到 5 秒后，
+    /// 若用 `due()` 判断首次会被挡掉。`sent == 1` 正是「首次还没发」的标记。
+    fn due_now(&self) -> bool {
+        match self.pending.as_ref() {
+            Some(p) => p.sent <= 1 || self.due(),
             None => false,
         }
     }
@@ -739,26 +749,20 @@ fn spawn_login_state_watcher(app: &tauri::AppHandle) {
                     guard.as_ref().and_then(|s| login_snapshot(&s.progress()))
                 };
                 if let Some(next) = login_emit_decision(last.as_ref(), current) {
-                    let payload = LoginStatePayload {
-                        logged_in: next.state == "logged_in",
-                        platform: next.platform.clone(),
-                        state: next.state.clone(),
-                    };
-                    match handle.emit("login-state", &payload) {
-                        Ok(()) => {
-                            last = Some(next.clone());
-                            // 状态真的变了：立刻发第一次，并登记这一轮重发（5 秒一次、最多 3 次）。
-                            broadcast().lock().unwrap_or_else(|e| e.into_inner()).begin(next);
-                        }
-                        // emit 失败不推进 last：下一拍重试，状态变化不会丢
-                        Err(e) => eprintln!("[login-watch] emit login-state 失败：{e}"),
-                    }
-                    continue;
+                    // 状态真的变了：登记新一轮，**随后统一走下面「这一拍该不该发」那段**。
+                    // 原先这里自己 emit 一次再 `begin()`：首次广播绕过了 `due()` 的上限
+                    // 判定，`begin()` 又把发起方预置成「已确认」，两条一起把 ack 变成空壳
+                    // （用户 2026-11-25「boss 列表 ack 失效了」）。
+                    // 先记账再推进 `last`：emit 失败时 `last` 不动，下一拍仍会进这个分支重来。
+                    broadcast().lock().unwrap_or_else(|e| e.into_inner()).begin(next.clone());
+                    last = Some(next);
                 }
-                // 状态没变：到点且没到上限就补发一次（全员确认后 `due()` 恒为 false）。
+                // 这一拍该不该发：首次广播与「没人确认」的补发共用同一段。
+                // 发满 LOGIN_BROADCAST_MAX 次后 `due_now()` 恒为 false；全员确认后 `pending`
+                // 被清空，同样不再发。
                 let (due, snap) = {
                     let guard = broadcast().lock().unwrap_or_else(|e| e.into_inner());
-                    (guard.due(), guard.pending.as_ref().map(|p| p.snap.clone()))
+                    (guard.due_now(), guard.pending.as_ref().map(|p| p.snap.clone()))
                 };
                 let Some(snap) = snap.filter(|_| due) else { continue };
                 let payload = LoginStatePayload {
@@ -770,7 +774,7 @@ fn spawn_login_state_watcher(app: &tauri::AppHandle) {
                     Ok(()) => broadcast().lock().unwrap_or_else(|e| e.into_inner()).mark_sent(),
                     Err(e) => {
                         // 发失败不计数：5 秒后再来一次，别把次数白扔掉。
-                        eprintln!("[login-watch] 重发 login-state 失败：{e}");
+                        eprintln!("[login-watch] 发 login-state 失败：{e}");
                     }
                 }
             }
@@ -925,6 +929,7 @@ pub fn run() {
             commands_logs::clear_logs,
             commands_chat::chat_friends,
             commands_chat::chat_messages,
+            commands_chat::chat_open,
             commands_chat::chat_friends_local,
             commands_chat::chat_messages_local,
             commands_chat::chat_send,
@@ -1033,30 +1038,35 @@ mod login_watch_tests {
         assert_eq!(login_emit_decision(None, None), None, "从未有过会话就不播");
     }
 
-    /// 一轮广播：首次发 1 次，之后 5 秒一次，发满 3 次就停（用户 m02416）。
+    /// 一轮广播：首次发 1 次，没人确认就 5 秒一次补发，发满 3 次就停（用户 m02416）。
     #[test]
     fn broadcast_sends_at_most_three_times() {
         let mut b = LoginBroadcast::default();
         b.begin(snap("boss", "logged_in"));
+        // 首次要立刻放行（`due_ms` 已拨到 5 秒后，只有 `due_now` 认这个 sent == 1）。
+        assert!(b.due_now(), "登记后首次广播必须立刻发");
+        b.mark_sent(); // 1 次
         // 刚发完首次：500ms 的 watcher 拍子还没到 5 秒，不该补发
-        assert!(!b.due(), "刚发完首次不该立刻补发");
-        // 把 due 拨到过去，模拟 5 秒已过
+        assert!(!b.due_now(), "刚发完首次不该立刻补发");
+        // `begin` 已经把首次记进 sent（=1），上面 mark_sent 之后是 2 次
+        assert_eq!(b.pending.as_ref().unwrap().sent, 2, "首次 + 一次补发 = 2 次");
+        // 3 次：还没到上限，到点就发
         b.pending.as_mut().unwrap().due_ms = 0;
-        assert!(b.due());
-        b.mark_sent(); // 2 次
-        b.pending.as_mut().unwrap().due_ms = 0;
-        assert!(b.due());
+        assert!(b.due_now());
         b.mark_sent(); // 3 次
+        // 上限：`sent == LOGIN_BROADCAST_MAX` 之后无论到没到点都不再发
         b.pending.as_mut().unwrap().due_ms = 0;
-        assert!(!b.due(), "发满 3 次后不再补发");
+        assert!(!b.due_now(), "发满 3 次后不再补发");
     }
 
-    /// 全员确认后立刻收工：不等发满 3 次。
+    /// 有人确认就立刻收工：不等发满 3 次（用户 2026-11-25「ack 失效」的回归）。
     #[test]
     fn ack_from_all_members_stops_broadcast() {
         let mut b = LoginBroadcast::default();
         b.begin(snap("boss", "logged_in"));
-        // 首次即已记账（发出方就是唯一成员），但还要等成员确认才算消费完
+        // 关键前置：`begin()` 之后**没有任何人**确认过。曾经这里被预置成已确认，
+        // 于是下面第一笔确认直接把这一轮结算掉，5 秒补发永不发生。
+        assert!(b.acked.is_empty(), "登记新一轮不等于发起方已确认");
         assert_eq!(
             apply_ack(&mut b.pending, &mut b.acked, "boss", "logged_in"),
             AckOutcome::Pending
@@ -1064,7 +1074,24 @@ mod login_watch_tests {
         assert_eq!(b.acked.len(), member_count(), "全员确认后该轮应结算");
         b.finish();
         assert!(b.pending.is_none(), "结算后不再重发");
+        assert!(!b.due_now(), "结算后这一拍也不该再发");
         assert!(b.acked.is_empty());
+    }
+
+    /// 没人确认时补发确实会发生：这正是 ack 存在的意义。
+    #[test]
+    fn unacked_round_is_rebroadcast() {
+        let mut b = LoginBroadcast::default();
+        b.begin(snap("boss", "logged_in"));
+        assert!(b.due_now());
+        b.mark_sent();
+        // 5 秒到了还没人确认 ⇒ 必须再发。
+        b.pending.as_mut().unwrap().due_ms = 0;
+        assert!(b.due_now(), "没收到 ack 就该补发");
+        b.mark_sent(); // 3 次：已到上限
+        assert_eq!(b.pending.as_ref().unwrap().sent, LOGIN_BROADCAST_MAX);
+        b.pending.as_mut().unwrap().due_ms = 0;
+        assert!(!b.due_now(), "没人确认也只补到上限为止，不会变成常驻轮询");
     }
 
     /// 旧轮次的迟到确认不能把新一轮提前掐掉。

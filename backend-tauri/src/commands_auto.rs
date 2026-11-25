@@ -213,18 +213,18 @@ fn logged_in_now(scrape: &ScrapeState) -> bool {
     }
 }
 
-/// 找岗位对应的聊天入口：`ChatOpen{query}` → 回执里的 uid。
+/// 找岗位对应的聊天入口：`ChatOpen{job_id}` → 回执里的 uid。
+///
+/// 走的是「打开岗位详情页 → 点『立即沟通』→ 读跳转后的会话 id」，
+/// 因此对**还没打过招呼**的岗位同样成立（旧版按公司名在已有会话里找，必然失败）。
+/// 岗位没有 `job_id` 才算无法定位——公司名/标题只是文案，不参与定位。
 fn open_chat(handle: &crate::core::sidecar::process::SidecarHandle, job: &Job) -> Result<String, String> {
-    let query = job
-        .company
-        .clone()
-        .filter(|c| !c.trim().is_empty())
-        .unwrap_or_else(|| job.title.clone().unwrap_or_default());
-    if query.trim().is_empty() {
-        return Err("岗位缺少公司名与标题，无法定位聊天会话".to_string());
+    let job_id = job.job_id.trim().to_string();
+    if job_id.is_empty() {
+        return Err("岗位缺少 job_id，无法在 Boss 上建立会话".to_string());
     }
     let reply = crate::commands_chat::request_chat(handle, &Command::ChatOpen {
-        query: query.clone(),
+        job_id: job_id.clone(),
     })?;
     for key in ["uid", "encrypt_uid", "encryptUid"] {
         if let Some(uid) = reply.get(key).and_then(|v| v.as_str()) {
@@ -233,12 +233,16 @@ fn open_chat(handle: &crate::core::sidecar::process::SidecarHandle, job: &Job) -
             }
         }
     }
-    Err(format!("没有在 Boss 消息列表里找到「{query}」的会话"))
+    Err(format!("没能为岗位「{}」建立会话", job_id))
 }
 
 /// 执行一次自动投递。
+///
+/// **`async` 不是为了并发，是为了不占主线程**：这一轮里有三处要等远端
+/// （生成话术的大模型 HTTP、`ChatOpen` 建会话、`ChatSend` 发消息），
+/// 同步命令会被 Tauri 放在主线程上执行，等的时候窗口拖不动。
 #[tauri::command]
-pub fn auto_greet_next(
+pub async fn auto_greet_next(
     state: tauri::State<'_, AutoGreetState>,
     scrape: tauri::State<'_, ScrapeState>,
     store: tauri::State<'_, StoreState>,

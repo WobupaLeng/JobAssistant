@@ -518,8 +518,11 @@ pub fn parse_login_state(platform: &str, reply: &serde_json::Value) -> LoginStat
 /// **不新增 sidecar 命令**：`Command::SessionOpen{page:None}` 的回执里已经带了
 /// 登录态，协议文件（`core/sidecar/protocol.rs`）因此不需要改。失败时降级为
 /// `unknown` 而不是报错——登录态查不到不该让整个页面红屏。
+///
+/// `async`：要等一条 sidecar 回执。同步命令由 Tauri 放在主线程上跑，
+/// 一次「几秒钟」的登录查询就足以让窗口在查询期间拖不动。
 #[tauri::command]
-pub fn login_status(
+pub async fn login_status(
     state: tauri::State<'_, ScrapeState>,
     store: tauri::State<'_, StoreState>,
     platform: Option<String>,

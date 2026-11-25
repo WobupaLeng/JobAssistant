@@ -178,6 +178,7 @@ pub trait JobStore {
         let _ = (old_score, new_score);
         self.log_decision(platform, company_job, decision, reason)
     }
+
 }
 
 /// 敏感库（`sensitive_jobs`）的读端口。

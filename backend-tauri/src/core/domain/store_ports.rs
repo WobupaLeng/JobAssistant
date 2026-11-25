@@ -55,6 +55,13 @@ pub trait JobAdminStore {
 
     /// 已排除的 `job_id` 集合。
     fn rejected_ids(&self) -> Result<Vec<String>, Self::Error>;
+
+    /// 按公司名找出一个岗位 id（`job_queue.job_id`）。
+    ///
+    /// 用来给 Boss 会话列表补岗位 id：Boss 返回的会话行只有公司名，没有岗位 id，
+    /// 而会话 uid 失效时只能靠岗位 id 重新点「立即沟通」（见 `commands_chat::fill_job_ids`）。
+    /// 按公司名匹配是唯一的线索。
+    fn find_job_id_by_company(&self, company: &str) -> Result<Option<String>, Self::Error>;
 }
 
 /// `store.py:338 stats()` 的返回结构。

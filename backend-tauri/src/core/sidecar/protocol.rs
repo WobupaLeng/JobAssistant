@@ -123,9 +123,12 @@ pub enum Command {
     /// 发送一份简历。
     #[serde(rename = "chat.send_resume")]
     ChatSendResume { uid: String, resume_id: String },
-    /// 定位会话并进入：按公司名/HR 名找到会话，返回命中的 uid。
+    /// 在 Boss 上建立会话：打开岗位详情页点「立即沟通」，返回服务端分配的会话 uid。
+    ///
+    /// 旧语义是「按公司名/HR 名在已有会话里找」，对**没打过招呼**的岗位永远找不到，
+    /// 所以整个换成按 `job_id` 建会话（见 scraper/HANDOFF §2.4.4）。
     #[serde(rename = "chat.open")]
-    ChatOpen { query: String },
+    ChatOpen { job_id: String },
     /// 撤回最近一条自己发的消息。
     #[serde(rename = "chat.recall")]
     ChatRecall { uid: String },
@@ -170,6 +173,13 @@ pub struct Friend {
     /// `chat.friends` 接口路径会给；DOM 兜底路径取不到，留 `None`。
     #[serde(default)]
     pub last_ts: Option<i64>,
+    /// 这条会话对应的岗位 id（`job_queue.job_id`，形如 `boss:xxx`）。
+    ///
+    /// Boss 的会话列表**不带**岗位 id。它由 Rust 命令层从库里补上（见
+    /// `commands_chat::chat_friends`），sidecar 永远给 `None`。
+    /// 用途：这条会话的 uid 失效时，靠它重新点「立即沟通」把会话接回来。
+    #[serde(default)]
+    pub job_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

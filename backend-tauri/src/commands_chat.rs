@@ -16,6 +16,18 @@
 //! `Mutex<Option<SidecarSession>>`，界面上的 `scrape_progress` 轮询会被饿死，
 //! 表现为「抓取中」的数字突然不动。所以：加锁 → 克隆句柄 → **立刻释放锁**
 //! → 在锁外等回执。
+//!
+//! ## 为什么这个文件里等回执的命令全是 `async`
+//!
+//! 同步 `#[tauri::command]` 由 Tauri **在主线程上执行**（`Webview::on_message`
+//! → `Window::manager` 都是 `run_on_main_thread`）。主线程上的
+//! `rx.recv_timeout(timeout)` 会把 WebView2 的消息泵一起按停，最长 `CHAT_TIMEOUT`
+//! 也就是 90 秒——窗口拖不动、按钮点不动、日志不滚，用户看到的就是「程序无响应」。
+//! 改成 `async` 之后 Tauri 把它派到异步运行时的工作线程上，主线程只负责收发，
+//! 等回执期间界面照常可点可拖。
+//!
+//! 剩下的限制是 sidecar 自己的单车道（`_chat_q`）：第二条聊天命令会排队等第一条，
+//! 但**排队发生在后台线程，不耽误界面**。纯本地读库的命令（`*_local`）保持同步。
 
 use std::time::Duration;
 
@@ -26,6 +38,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::commands_scrape::ScrapeState;
 use crate::commands_db::{store_err, with_store, CmdResult};
+use crate::core::domain::store_ports::JobAdminStore;
 
 /// 聊天回执的等待上限。
 ///
@@ -62,6 +75,12 @@ pub struct SendReply {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OkReply {
     pub ok: bool,
+}
+
+/// 「建立会话」的回执：服务端为这个岗位分配的会话 uid。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OpenReply {
+    pub uid: String,
 }
 
 // ---------- 内部：取句柄并发命令 ----------
@@ -121,20 +140,64 @@ fn items_of<T: for<'de> Deserialize<'de>>(data: &serde_json::Value) -> CmdResult
 ///
 /// 每次调用都会重新拉一次接口，所以第一次可能比之后几次慢（要 reload 聊天页）。
 #[tauri::command]
-pub fn chat_friends(
+pub async fn chat_friends(
     state: tauri::State<'_, ScrapeState>,
     store: tauri::State<'_, crate::commands_db::StoreState>,
 ) -> CmdResult<FriendsReply> {
     let handle = handle_of(&state)?;
     let data = request_chat(&handle, &Command::ChatFriends)?;
-    let items: Vec<Friend> = items_of(&data)?;
+    let mut items: Vec<Friend> = items_of(&data)?;
     // 远程成功后才落库；落库失败不影响本次结果（缓存是增强，不是前置条件）
     let rows: Vec<ChatFriendRow> = items.iter().map(friend_to_row).collect();
     if let Err(e) = with_store(&store, |s| s.upsert_chat_friends(BOSS, &rows).map_err(store_err)) {
         eprintln!("[chat] 会话列表写库失败：{e}");
         crate::commands_logs::push("warn", format!("会话列表写库失败：{e}"));
     }
+    fill_job_ids(&store, &mut items);
     Ok(FriendsReply { items })
+}
+
+/// 给会话列表补上岗位 id。
+///
+/// Boss 返回的会话行只有公司名，没有岗位 id；而这条会话的 uid 一旦失效，前端唯一
+/// 能走通的路是「按岗位重新点立即沟通」，所以必须在会话行上带上它。
+///
+/// 按公司名翻库（`JobStore::find_job_id_by_company`）。查不到就留空——前端据此
+/// 放弃重建并照实报错，不编造岗位。
+///
+/// 查库失败与查不到一样处理：补岗位 id 是增强，不该让整个会话列表因为一次
+/// 读库失败而报错。
+fn fill_job_ids(store: &tauri::State<'_, crate::commands_db::StoreState>, items: &mut [Friend]) {
+    let mut cache: std::collections::HashMap<String, Option<String>> =
+        std::collections::HashMap::new();
+    let mut db_down = false;
+    for f in items.iter_mut() {
+        if db_down {
+            break;
+        }
+        let Some(company) = f.company.as_deref().map(str::trim) else {
+            continue;
+        };
+        if company.is_empty() {
+            continue;
+        }
+        if let Some(hit) = cache.get(company) {
+            f.job_id = hit.clone();
+            continue;
+        }
+        match with_store(store, |s| s.find_job_id_by_company(company).map_err(store_err)) {
+            Ok(hit) => {
+                cache.insert(company.to_string(), hit.clone());
+                f.job_id = hit;
+            }
+            Err(e) => {
+                // 读库坏了：记一次日志就停手，别对 100 行各报一遍。
+                eprintln!("[chat] 补岗位 id 读库失败：{e}");
+                crate::commands_logs::push("warn", format!("补岗位 id 读库失败：{e}"));
+                db_down = true;
+            }
+        }
+    }
 }
 
 /// 读本地缓存的会话列表（不触发浏览器，供界面先展示）。
@@ -143,9 +206,9 @@ pub fn chat_friends_local(
     store: tauri::State<'_, crate::commands_db::StoreState>,
 ) -> CmdResult<FriendsReply> {
     let rows = with_store(&store, |s| s.list_chat_friends(BOSS).map_err(store_err))?;
-    Ok(FriendsReply {
-        items: rows.iter().map(row_to_friend).collect(),
-    })
+    let mut items: Vec<Friend> = rows.iter().map(row_to_friend).collect();
+    fill_job_ids(&store, &mut items);
+    Ok(FriendsReply { items })
 }
 
 /// 读本地缓存的某会话消息（不触发浏览器）。
@@ -194,6 +257,8 @@ fn row_to_friend(r: &ChatFriendRow) -> Friend {
         unread: Some(r.unread),
         avatar: r.avatar.clone(),
         last_ts: r.last_ts,
+        // 由 `fill_job_ids` 从库里补；缓存表里没有这一列。
+        job_id: None,
     }
 }
 
@@ -207,9 +272,37 @@ fn row_to_message(r: &ChatMessageRow) -> ChatMessage {
     }
 }
 
+/// 为某个岗位在 Boss 上建立会话，返回这条会话的真实 uid。
+///
+/// 用于「还没打过招呼」的岗位：前端在此前根本拿不到 uid（会话列表里没有这一条），
+/// 旧做法是给一个前端自编的占位 uid，点开必然报「找不到这条会话」。
+/// 现在真去岗位页点「立即沟通」，由 Boss 服务端建会话并分配 uid。
+///
+/// 前端拿到 uid 后应把它当作该会话的正式标识：后续 `chat_messages` / `chat_send`
+/// 都用它，并且可以把占位行替换掉。
+#[tauri::command]
+pub async fn chat_open(state: tauri::State<'_, ScrapeState>, job_id: String) -> CmdResult<OpenReply> {
+    let job_id = job_id.trim().to_string();
+    if job_id.is_empty() {
+        return Err("缺少 jobId：无法建立会话".to_string());
+    }
+    let handle = handle_of(&state)?;
+    let data = request_chat(&handle, &Command::ChatOpen { job_id })?;
+    let uid = data
+        .get("uid")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if uid.is_empty() {
+        return Err("没能拿到新会话的 uid".to_string());
+    }
+    Ok(OpenReply { uid })
+}
+
 /// 与某个 HR 的历史消息。
 #[tauri::command]
-pub fn chat_messages(
+pub async fn chat_messages(
     state: tauri::State<'_, ScrapeState>,
     store: tauri::State<'_, crate::commands_db::StoreState>,
     uid: String,
@@ -252,7 +345,7 @@ fn message_to_row(m: &ChatMessage) -> Option<ChatMessageRow> {
 /// 标记为已投递**（旧版 `chatSend(uid, text, jobId)` 的行为）。标记失败不算
 /// 发送失败——消息已经在 Boss 那边了，回滚没有意义，只在回执里说明。
 #[tauri::command]
-pub fn chat_send(
+pub async fn chat_send(
     state: tauri::State<'_, ScrapeState>,
     store: tauri::State<'_, crate::commands_db::StoreState>,
     uid: String,
@@ -298,7 +391,7 @@ pub fn chat_send(
 
 /// 当前账号可发送的简历列表。
 #[tauri::command]
-pub fn chat_resumes(
+pub async fn chat_resumes(
     state: tauri::State<'_, ScrapeState>,
 ) -> CmdResult<ResumesReply> {
     let handle = handle_of(&state)?;
@@ -310,7 +403,7 @@ pub fn chat_resumes(
 
 /// 发送一份简历。与 `chat_send` 一样属于**真实外发动作**。
 #[tauri::command]
-pub fn chat_send_resume(
+pub async fn chat_send_resume(
     state: tauri::State<'_, ScrapeState>,
     uid: String,
     resume_id: String,
@@ -329,7 +422,7 @@ pub fn chat_send_resume(
 
 /// 撤回最近一条自己发的消息。
 #[tauri::command]
-pub fn chat_recall(
+pub async fn chat_recall(
     state: tauri::State<'_, ScrapeState>,
     uid: String,
 ) -> CmdResult<OkReply> {
@@ -350,7 +443,7 @@ pub fn chat_recall(
 /// 新版放弃 CDP 后没有必要再碰 cookie 文件：浏览器本来就开着且已登录，
 /// sidecar 直接用上下文发一次请求即可。
 #[tauri::command]
-pub fn list_expectations(state: tauri::State<'_, ScrapeState>) -> CmdResult<Vec<Expectation>> {
+pub async fn list_expectations(state: tauri::State<'_, ScrapeState>) -> CmdResult<Vec<Expectation>> {
     let handle = handle_of(&state)?;
     let data = request_chat(&handle, &Command::ExpectationList)?;
     items_of(&data)

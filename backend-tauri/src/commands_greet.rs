@@ -212,8 +212,12 @@ pub(crate) fn profile_from_store(
 /// - 首次：「重建」带 `findByCompany` → 后端按公司名翻出库内岗位的完整 JD；
 /// - 重新生成：与上一次入参一致，模型温度会给出不同措辞；
 /// - 生成回复：多带 `reply`（HR 刚说的话）。
+///
+/// **`async` 不是为了并发，是为了不占主线程**：同步命令由 Tauri 在主线程执行，
+/// 而这里要等一次大模型 HTTP（`write_greeting_with`）。留在主线程上，
+/// 生成期间窗口拖不动、别的按钮点不动——用户明确要求「等待远端数据时界面照常可用」。
 #[tauri::command]
-pub fn greet_draft(
+pub async fn greet_draft(
     store_state: tauri::State<'_, StoreState>,
     llm_state: tauri::State<'_, LlmState>,
     args: GreetArgs,
@@ -314,8 +318,11 @@ pub fn greet_draft(
 }
 
 /// 把一句话术发给指定 HR。这是**真实外发动作**，前端必须先让用户确认。
+///
+/// `async` 的理由同 `greet_draft`：`ChatSend` 要等 sidecar 回执，
+/// 留在主线程上会让窗口在发送期间拖不动。
 #[tauri::command]
-pub fn greet_one(
+pub async fn greet_one(
     scrape: tauri::State<'_, ScrapeState>,
     uid: String,
     text: String,
