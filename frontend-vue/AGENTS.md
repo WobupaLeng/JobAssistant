@@ -67,11 +67,10 @@ pages → features → components → lib_ui
 8. **vue 系 CSS 零颜色字面量，零例外（Chief 裁决 2026-11-23）**：`vue-dashboard / vue-chat / vue-pages` 三份禁止 hex/rgb/rgba 颜色字面量（`tests/geometry.test.ts` 守卫）。原型真值自带颜色字面量（高光、遮罩 alpha 等）时，**一律在 `tokens.css` 新增语义令牌**，vue 系只消费 `var()`；多一枚令牌是可接受代价，不允许「这一处特殊」的例外。新令牌照 C7 深浅两套独立定义；原型无浅色覆盖值时两套共用并在注释写明缘由（先例：`--spec-avatar-top`，原型 L1158 `rgba(255,255,255,.5)`，比 `--spec-top` 亮一档不可复用）。
    **宿主边界（不是例外）**：11 份契约 CSS 是原型逐字宿主，颜色字面量收口另轮（见 HANDOFF）；原型规则的同族已住契约 CSS 时，整条规则可随族宿主（先例：`.chat-rail::before` 与 `.card::before` 同在 `layout.css`，数值照原型 L1055–1057 逐字），vue 系原地留指向说明。**不得借「挪进契约 CSS」为 vue 系规则规避本红线**。
 
-**契约增量（2026-11-23，SPEC-003，Chief 派未决项 5 · Liquid Glass L2/L3）**：
-- **C4 宿主澄清**：14 条序的实际宿主是 `styles/index.css` 的 @import 链（`index.html` 无 CSS link）；本文件目录描述「index.html 引入 11 份 CSS / styles 14 份」为历史措辞，以 @import 链为准。`index.html` 的 3 条内联 `<style>` 与首帧主题脚本不动。
-- **C4 14→15 批准**：`styles/vue-glass.css` 作第 15 份追加 @import 链末尾（`vue-pages` 之后），既有 14 条相对顺序不动。本批单写者（前端编码）在 L2-1 批内追加——「总控预挂、lane 不改入口」是多 lane 并行防冲突旧约定，单写者例外经 SPEC-003 裁定 1 成立。`geometry-collect.test.ts`「14 条」守卫同提交更新为 15。
-- **红线 8 范围扩展**：`vue-glass.css` 为 vue 系第四份，零颜色字面量零例外同样适用；`geometry.test.ts` 的 `VUE_CSS` 守卫 3→4 同提交扩列。L3 canvas 颜色运行时 `getComputedStyle` 读 token 计算值，TS 无颜色字面量。
-- 冻结真源：`docs/ui/UI-SPEC-liquid-glass-l2-l3.md`（d39bae4 逐字恢复）＋ `docs/specs/SPEC-003-legacy-liquid-glass-l2-l3.md`（映射与范围）。
+**契约增量（2026-11-23，SPEC-003）已随 Liquid Glass L2/L3 移除而作废**：
+- `styles/vue-glass.css` 已删除，C4 回到 **14 条**（11 条契约序 + 3 条 Vue 追加），`geometry-collect.test.ts` 的守卫同步为 14。历史记录「14→15 批准」不再有效，**不要再按 15 条写守卫**。
+- 红线 8 的 `VUE_CSS` 回到 **3 份**（`vue-dashboard / vue-chat / vue-pages`），`geometry.test.ts` 已同步。
+- 规格文本 `docs/ui/UI-SPEC-liquid-glass-l2-l3.md` 与 `docs/specs/SPEC-003-legacy-liquid-glass-l2-l3.md` 保留为历史存档，**不是可施工依据**。
 
 ---
 
@@ -92,7 +91,7 @@ pages → features → components → lib_ui
 **C4 `index.html` 的 CSS 顺序**：14 条 = 11 条契约序 + 3 条 Vue 追加（`vue-dashboard → vue-chat → vue-pages`，只许追加在末尾），契约序精确为
 `tokens → layout → controls → jobs → drawer → motion → scrape → pages → sensitive → auto → filter`。
 另有 3 条内联 `<style>`：`html{background:transparent}`、`body{margin:0}`、`body:not(:has(#app > *)){overflow:hidden}`——**防首帧闪白**，不要挪进外部文件（挂载点是 `#app`，不是 Leptos 的 `#root`）。
-> **增量（2026-11-23，SPEC-003）**：实际宿主＝`styles/index.css` @import 链；14→15 已批准（`vue-glass.css` 追加 `vue-pages` 之后），详见 §3 契约增量块。
+> **宿主**：实际的宿主是 `styles/index.css` 的 @import 链（`index.html` 无 CSS link）。SPEC-003 曾批准的「14→15（`vue-glass.css`）」已随 Liquid Glass 移除作废，**当前就是 14 条**。
 
 **C5 整页背景透明**：`tokens.css:204` 的 `body` 必须 `background: transparent`，否则毛玻璃失效（全项目 13 处）。
 
@@ -182,9 +181,11 @@ pages → features → components → lib_ui
 | 层 | 手段 | 现状 |
 |---|---|---|
 | 第一层 CSS 玻璃 | `backdrop-filter: blur()` + 令牌 | ✅ 已完成（20 处 `backdrop-filter`，7 处 `-webkit-`） |
-| 第二层 湍流折射 | SVG `feTurbulence` + `feDisplacementMap`，**克隆层 + 普通 `filter: url(#id)`** | 🔨 未做 |
-| 第三层 卡片间真折射 | WebGL canvas 盖列表 / 气泡 | 🔨 未做 |
+| 第二层 湍流折射 | SVG `feTurbulence` + `feDisplacementMap`，**克隆层 + 普通 `filter: url(#id)`** | ❌ 已移除，不要再加回来 |
+| 第三层 卡片间真折射 | WebGL canvas 盖列表 / 气泡 | ❌ 已移除，不要再加回来 |
 
 **核心断言**：`backdrop-filter: url(#svg)` 在 Safari / Firefox 上是坏的，Chromium 也会**静默忽略**其中的 `url()`。第二层**必须**把背景克隆进镜头容器，再对**克隆容器**用普通 `filter: url()`。第三层 canvas 必须 `pointer-events: none`。
 
-**占位**：`tokens.css:51-52`（深）与 `:155-156`（浅）定义了 `--refract-edge`（14px / 5px）与 `--refract-turbulence`（0.008 / 0.006），**引用数为 0**；`feTurbulence` / `feDisplacementMap` / WebGL / canvas 的真实代码命中 **= 0**。
+**第二、三层已整层移除**（2026-11-25，用户裁决）：L2 克隆层要把整屏 DOM 复制一份并跟随滚动/内容变化重克隆，L3 透镜要每帧读几何跑 WebGL，代价与观感不成正比。克隆层与透镜层对 `transform` / `overflow` / 定位的约束是「玻璃面板被压到视口外」「透镜自激循环烧 CPU」那两笔账的源头，一并出掉了。`glass.test.ts` 随之删除——**前端测试文件数是降的，不是漏跑**。
+
+**要继续只留第一层**：`backdrop-filter: blur()` + 令牌就够了（20 处 `backdrop-filter`，7 处 `-webkit-`）。`tokens.css` 的 `--refract-edge`（14px / 5px）与 `--refract-turbulence`（0.008 / 0.006）保留但**引用数为 0**，是历史遗留，删前先确认无人引用。**不得**新增 `feTurbulence` / `feDisplacementMap` / WebGL / canvas 实现（零新依赖红线同等适用：禁 three / pixi / wgpu / html2canvas）。

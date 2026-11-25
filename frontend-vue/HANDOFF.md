@@ -91,6 +91,10 @@
 - **L3 施工探针 PASS**（真 WebView2 WebGL 2.0，复用冒烟产物 + CDP，不 build Tauri）：从 `use-glass-l3.ts` 逐字提取 4 段 shipped GLSL 编译/链接全过、FBO complete、透镜绘 50256/60000 像素、有折射(edge14) vs 无折射(edge0) 像素差 815/max31 >0 证 Snell UV 偏移生效、glError 0。探针 `%TEMP%\jt-glass-l23\probe-l3.mjs`（红线 7 禁入 src），冒烟实例用后已关。
 - **门禁**：typecheck 0；vitest 35 文件 606 全绿；build CSS 77.99 kB `{` 766（L2 758+8，canvas 规则全可达）、JS 252.89 kB；**A9 实测**：pre-Glass 基线 237.61 kB（worktree@dcd5e66~1 独立 build）→ L2+L3 总增量 15.28 kB ≤ 40KB ✓；C4 @import 仍 15（无新样式表）、vue 系 CSS 4 份零字面量、`glass-l3-canvas` 全站恰 1 处守卫绿。**真窗口视觉验收（规格 5.2/5.3 A2–A8）与槽位 C 冒烟按 Chief 裁定搁置至统一验收**。
 
+> **⚠️ 以上 L2/L3 段落已作废（2026-11-25，用户裁决整层移除，提交 `b5a9062`）。** 保留作历史：删掉的正是 L2 克隆层（`GlassClone.vue` / `use-glass-clone.ts` / `glass.ts` / `vue-glass.css`）与 L3 透镜（`GlassCanvas.vue` / `use-glass-l3.ts` / `glass.test.ts`），以及 `index.html` 里的 svg defs、`AppShell` 的挂载点。**只留第一层 `backdrop-filter` 玻璃。**
+>
+> 移除后的契约变化（已同步进 `AGENTS.md`）：C4 回到 **14 条**、红线 8 的 `VUE_CSS` 回到 **3 份**、前端测试文件数由 39 降为 38（少的是 `glass.test.ts`，**不是漏跑**）。§2.1「敏感库面板被压到视口外」那条坑与「已修」表里的 L3 自激循环、L2 克隆层节流，都因代码删除而**不再适用**——不是结论错了，是病灶没了。
+
 **单休小批完成**（SPEC-004 §三，独立提交不混 Glass；后端三档 `009c643` 已先合，两端字面量集对齐）：`lib_ui/options.ts` `WEEKEND_OPTIONS` 3→4 档（新增 `single`「单休」＝单休+大小周+双休只排除无休；`no_bigweek` 矛盾 hint 校正为「找大小周+双休；排除单休/无休（未标注按双休含）」；`double` hint 与可见名维持）；`api/types.ts` `ScrapeDefaultsArgs.workWeekend` `unknown`→`'any'|'double'|'no_bigweek'|'single'` union（回读 `scrape_defaults` 仍 `Record<string,unknown>` 不动）；`FilterPanel.vue`/`scrape-filter-model.ts` 选项表驱动零改动。门禁：typecheck 0；vitest 35 文件 608 全绿（字面量集断言＋`single` 经 decode/applyBackend 两条路校验用例）；build JS 253.00 kB（+0.11，`value:"single"` 与新 hint 可达、旧矛盾 hint 0 残留）、CSS 不变。
 
 ---
@@ -268,7 +272,7 @@
 3. **槽位 C 产物冒烟**（根 AGENTS §5.3 / ARCH-003 §6 R5，用户已授权 release lane）：先删 CSP `'wasm-unsafe-eval'`（ARCH-003:248 阶段 4 遗漏，WASM 已不存在），再 `cd backend-tauri && npx tauri build --no-bundle`（独占 `CARGO_TARGET_DIR=%TEMP%\jt-release`），产物拷到**工作区外**启动，确认 Vue 真渲染（CSP 白屏唯一实测点）。
 4. **登出入口接线**：✅ 已完成（`login-state` emit + 前端订阅 + 保存/退出按钮，见 §1）。
 5. **M1 同屏编排合并**：✅ 已完成（ADR-004 / SPEC-001，见 §1 的锚点增删清单）。**M2 像素对齐** ✅（`9a60d3f`）、**M3 视觉收尾** ✅（见 §1）。下一手：**QA** 按清单重锚 + 零 Mock 验收；分项 token 展示接线 ✅（M3 后续批，见 §1）；后端补累计写入排 M4 之后（Chief 顺序）。
-6. **Liquid Glass L2/L3**（根 §7.2 #3）：✅ L2/L3 均已完成（SPEC-003 裁定 1–7，见 §1；L3 施工探针 PASS、A9 总增量 15.28 kB ≤ 40KB）。**单休小批已完成**（SPEC-004 §三：`options.ts` 加 `single` 档＋校 `no_bigweek` 矛盾 hint、`types.ts` `workWeekend` union 四值、字面量集断言＋`single` 经 decode/applyBackend 选项表驱动校验用例；`FilterPanel.vue`/`scrape-filter-model.ts` 选项表驱动零改动；后端三档 `009c643` 已先合，两端字面量集对齐，无静默无效窗口）。真窗口视觉验收（A2–A8）与槽位 C 冒烟搁置至统一验收。
+6. ~~**Liquid Glass L2/L3**~~ **已整层移除**（2026-11-25，用户裁决，提交 `b5a9062`）。原先「已完成但真窗口视觉验收搁置」的账一笔勾销——没有代码就没有待验收项。只留第一层 `backdrop-filter` 玻璃，见 `AGENTS.md` §8。**单休小批已完成**（SPEC-004 §三：`options.ts` 加 `single` 档＋校 `no_bigweek` 矛盾 hint、`types.ts` `workWeekend` union 四值、字面量集断言＋`single` 经 decode/applyBackend 选项表驱动校验用例；`FilterPanel.vue`/`scrape-filter-model.ts` 选项表驱动零改动；后端三档 `009c643` 已先合，两端字面量集对齐，无静默无效窗口）。
 7. 后端未决项（根 §7.2 #1/#4/#5）与 QA 低#1-3 alias 缺口，单独路由 legacy/backend lane。
 
 ### 3.2 需要拍板的开放项
@@ -276,7 +280,7 @@
 | # | 问题 | 影响的文件 |
 |---|---|---|
 | 1 | **`filter.rs` 1,445 行怎么拆** | 建议 `features/scrape/components/*.vue` + `composables/useScrapeFilter.ts` |
-| 2 | ~~是否同时接 Liquid Glass L2/L3~~ ✅ 已完成（SPEC-003 冻结，L2/L3 收口；零新依赖，手写 canvas/WebGL，A9 总增量 15.28 kB，见 §1） | — |
+| 2 | ~~是否同时接 Liquid Glass L2/L3~~ ✅ 已了结：实现过又**整层移除**（见 §1 作废说明）。此项不再需要拍板 | — |
 | 3 | **是否设覆盖率门槛** | 基线是 96 个纯函数断言，不是 40 |
 | 4 | **`set_job_flag` / `list_logs` 这类多分支封装是否拆成独立函数** | 建议拆，但命令名字面量不能变 |
 | 5 | **`job-row-*` / `score-*` 隐藏表是否保留** | 唯一理由的 `gui_e2e.py` 已不存在。若改用 `job-card-{id}` / `job-score-{id}` 可删 |
