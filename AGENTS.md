@@ -19,7 +19,7 @@
 |---|---|
 | `backend-tauri/` | ✅ 可用。命令全部定义且全部注册；CSP 已显式声明 `script-src`（缺失即白屏，见 §3.1）；sidecar 子进程 spawn 即纳入 Job Object（`KILL_ON_JOB_CLOSE`），shutdown/强杀整树回收 |
 | `scraper/` | ✅ 抓取 / 登录 / 聊天 / 求职期望已通，从 Tauri 子进程拉起真实 Chrome 已修复并实测；浏览器命令走常驻单车道执行器（见模块 AGENTS §5） |
-| `frontend-vue/` | ✅ Vue 3 重写完成：四页接线 + M5 补遗、Leptos `.rs` 计数 0、QA 复审收口（A54 几何/11 testid 对齐原型/A36）、vitest 全绿；CSP 收紧（删 `wasm-unsafe-eval`）+ `tauri build --no-bundle` 产物工作区外冒烟通过（Vue 渲染 + IPC 回读正常，非白屏）；**Liquid Glass L2 折射克隆层 / L3 WebGL 透镜已整层移除**（成本与观感不成正比，只保留第一层 CSS 玻璃）；周末三档前端批已落地（SPEC-004）；登录态改**广播 + 消费确认 ack**（删 5s 轮询）、会话列表落 `chat_friends.last_ts`（只写更新行）；聊天链路：解析按真实字段收口、uid 失效按岗位重建、等回执命令全 async（不再占主线程）。待办：「刷新卡顿」三档数据流待产品拍板，见 `frontend-vue/HANDOFF.md` §2.5 |
+| `frontend-vue/` | ✅ Vue 3 重写完成：四页接线 + M5 补遗、Leptos `.rs` 计数 0、QA 复审收口（A54 几何/11 testid 对齐原型/A36）；CSP 收紧（删 `wasm-unsafe-eval`）+ `tauri build --no-bundle` 产物工作区外冒烟通过（Vue 渲染 + IPC 回读正常，非白屏）；**材质层全部撤除**——Liquid Glass L2 折射克隆层 / L3 WebGL 透镜早前整层移除，本轮再把 CSS 玻璃材质一并删除（`--glass-*` → 不透明 `--surface-*` 阶梯、`backdrop-filter` 清零、遮罩独立成 `--scrim`，禁再引入，见模块 AGENTS 红线 9）；周末三档前端批已落地（SPEC-004）；登录态改**广播 + 消费确认 ack**（删 5s 轮询）、会话列表落 `chat_friends.last_ts`（只写更新行）；聊天链路：解析按真实字段收口、uid 失效按岗位重建、等回执命令全 async（不再占主线程）。待办：「刷新卡顿」三档数据流待产品拍板，见 `frontend-vue/HANDOFF.md` §2.5 |
 | `docs/ui/` + `prototypes/ui-v1/` | ✅ 界面设计 `UI_READY`：聊天抽屉 v3–v10 裁决已冻结（[UI-SPEC-chat-detach-v3](docs/ui/UI-SPEC-chat-detach-v3.md)），单文件原型带三套无浏览器自检脚本 |
 
 - **状态只升不降**，推进时原地替换整表。
@@ -161,6 +161,8 @@ python -m compileall -q scraper
 3. **`set_limit` 夹值语义未定**：`max_jd > 500` 时返回错误而非静默夹住，表现为「保存失败但上限已生效」。
 4. **`tests/sidecar_smoke.rs` 常年 `#[ignore]`**（需真实 Chrome + 登录态），是唯一未被门禁覆盖的集成路径。
 5. **「从未聊过的岗位」建会话**：已实现（`chat_open` / `ChatOpen{job_id}` / `chat.ChatClient.ensure()`，前端占位行点开时先建会话再换真 uid）。新 uid 取自点「立即沟通」后跳转 URL 的 `id` 参数，**不要**改成前后拉两次列表求差集。`ChatOpen` 语义已从「按公司名找会话」换成「按 jobId 建会话」，改动动过 `protocol.rs` 与 `scraper/sidecar.py` 两个高冲突单点。细节见 [`scraper/HANDOFF.md`](scraper/HANDOFF.md) §2.4.4。
+6. **分发未签名**：NSIS 安装包（`AI Job Assistant_0.2.0_x64-setup.exe`，内嵌 PyInstaller sidecar + WebView2 bootstrapper 依赖）无代码签名 → 首次运行必触发 SmartScreen「未知发布者」。正式分发前需买证书签名，并补首启引导（选择 Chrome/Edge、说明需要本机浏览器）。
+7. **API Key 仍明文存 `app_config`**：`schema.rs` 的 `key,value` 表无 DPAPI 包装，导出数据库即泄露。分发前应改为 DPAPI 加密存储（纯后端，不动命令契约）。
 
 禁止主动编译行为，要编译之前要问过客户，得到允许后才能编译
 所有关于兜底的策略开始写之前，要得到用户的允许

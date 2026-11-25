@@ -18,6 +18,9 @@ dist/
 target/
 backend-tauri/target/
 backend-tauri/gen/schemas/
+# 打包态 sidecar（PyInstaller 产出，约 130 MB，由 scripts/pack_sidecar.py 生成）
+backend-tauri/sidecar-dist/
+backend-tauri/.pack-sidecar/
 # Tauri CLI 依赖（构建走 npx tauri，不能删但也不入库）
 frontend-vue/node_modules/
 
