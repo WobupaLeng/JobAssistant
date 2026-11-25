@@ -13,8 +13,10 @@ import {
   CHAT_EMPTY_TITLE,
   CHAT_SEARCH_PLACEHOLDER,
   friendLine,
+  friendMsgTone,
   friendName,
   unreadText,
+  unreadTotal,
 } from '../../lib_ui/chat-model';
 import { needsSession } from '../../lib_ui/session';
 
@@ -33,6 +35,11 @@ const props = withDefaults(
     greetingUid?: string;
     /** 可移除的行（手动打招呼新增的占位 HR）；判定在页面层，组件只渲染按钮。 */
     removableUids?: readonly string[];
+    /**
+     * 标题旁徽标的未读总数（用户：数字挂在「Boss 列表」旁，且与远端未读同步）。
+     * 不传则退回组件内对 friends 的求和；页面传入时以页面口径为准。
+     */
+    unread?: number;
   }>(),
   { loading: false, error: '', greetingUid: '', removableUids: () => [] },
 );
@@ -86,6 +93,9 @@ const emptyText = computed(() =>
   props.search.trim() === '' ? CHAT_EMPTY_TITLE : '没有匹配的会话',
 );
 
+/** 标题旁的计数是**未读消息条数**，不是会话数（用户 m01427）。0 时不渲染。 */
+const unreadSum = computed(() => unreadTotal(props.friends));
+
 function onSearch(ev: Event): void {
   const el = ev.target as HTMLInputElement;
   emit('search', el.value);
@@ -98,7 +108,11 @@ defineExpose({ listEl });
 <div class="rail-panel" :data-prefix="props.prefix">
     <div class="rail-head">
       <span class="rail-title">{{ props.title }}</span>
-      <span class="chip" :data-testid="ids.count">{{ props.friends.length }}</span>
+      <!-- 未读消息条数（用户 m01427），不是会话数；一条未读都没有时不显示这个徽标。 -->
+      <span v-if="unreadSum > 0" class="chip" :data-testid="ids.count">{{ unreadText(unreadSum) }}</span>
+      <!-- 显式传入的未读数优先（用户：数字要挂在「Boss 列表」旁、与远端未读同步）；
+           组件内部不再自行统计，避免与页面口径出现两个数。 -->
+      <span v-else-if="(props.unread ?? 0) > 0" class="chip" :data-testid="ids.count">{{ unreadText(props.unread ?? 0) }}</span>
       <slot name="rail-head" />
       <span class="spacer" />
       <span class="rail-head-actions">
@@ -209,7 +223,30 @@ defineExpose({ listEl });
           <span class="avatar" aria-hidden="true">{{ friendName(f).slice(0, 1) }}</span>
           <span class="friend-main">
             <span class="friend-name" :data-testid="`friend-name-${f.uid}`">{{ friendName(f) }}</span>
-            <span class="friend-msg" :data-testid="`friend-msg-${f.uid}`">{{ friendLine(f) }}</span>
+            <!-- 副行按「未读 / 已读 / 已送达」上色（用户 m01427）。状态词只管我发的最后一条，
+                 对方发的最后一条不加词——与 Boss 页面一致。 -->
+            <span
+              class="friend-msg"
+              :class="`is-${friendMsgTone(f)}`"
+              :data-testid="`friend-msg-${f.uid}`"
+            >
+              <span
+                v-if="friendMsgTone(f) === 'unread'"
+                class="friend-msg-tag"
+                :data-testid="`friend-msg-tag-${f.uid}`"
+              >[未读]</span>
+              <span
+                v-else-if="friendMsgTone(f) === 'read'"
+                class="friend-msg-tag"
+                :data-testid="`friend-msg-tag-${f.uid}`"
+              >[已读]</span>
+              <span
+                v-else-if="friendMsgTone(f) === 'sent'"
+                class="friend-msg-tag"
+                :data-testid="`friend-msg-tag-${f.uid}`"
+              >[送达]</span>
+              {{ friendLine(f) }}
+            </span>
           </span>
           <span class="friend-side">
             <span class="friend-time" :data-testid="`friend-time-${f.uid}`">{{ f.last_time || '—' }}</span>
@@ -221,26 +258,36 @@ defineExpose({ listEl });
             >{{ unreadText(f.unread) }}</span>
           </span>
           <span class="friend-acts">
+            <!-- 两个操作竖排文字药丸会把行撑到 50px+（用户：卡片高度不一），
+                 改画 16px 图标、同一行并排；文字标签在悬停 / 键盘聚焦时浮在按钮左侧。 -->
             <span
               role="button"
               tabindex="0"
               class="friend-act"
               :data-testid="`friend-greet-${f.uid}`"
+              :aria-label="props.greetingUid === f.uid ? '生成中…' : '打招呼'"
               :aria-disabled="props.greetingUid === f.uid ? 'true' : 'false'"
               @click.stop="emit('greet', f.uid)"
               @keydown.enter.stop.prevent="emit('greet', f.uid)"
               @keydown.space.stop.prevent="emit('greet', f.uid)"
-            >{{ props.greetingUid === f.uid ? '生成中…' : '打招呼' }}</span>
+            >
+              <svg class="friend-act-svg" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.6 3.4h10.8v7H7.4L4.2 13.4v-3H2.6z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/></svg>
+              <span class="friend-act-label" aria-hidden="true">{{ props.greetingUid === f.uid ? '生成中…' : '打招呼' }}</span>
+            </span>
             <span
               v-if="props.removableUids.includes(f.uid)"
               role="button"
               tabindex="0"
               class="friend-act friend-act-remove"
               :data-testid="`friend-remove-${f.uid}`"
+              aria-label="移除"
               @click.stop="emit('remove', f.uid)"
               @keydown.enter.stop.prevent="emit('remove', f.uid)"
               @keydown.space.stop.prevent="emit('remove', f.uid)"
-            >移除</span>
+            >
+              <svg class="friend-act-svg" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              <span class="friend-act-label" aria-hidden="true">移除</span>
+            </span>
           </span>
         </button>
       </div>

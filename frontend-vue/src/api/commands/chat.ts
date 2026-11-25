@@ -11,6 +11,7 @@ import type {
   FriendsReply,
   MessagesReply,
   OkReply,
+  OpenReply,
   ResumesReply,
   SendReply,
 } from '../types';
@@ -30,6 +31,22 @@ export function chatMessagesLocal(uid: string): Promise<MessagesReply> {
   return invokeFlat<MessagesReply>('chat_messages_local', { uid });
 }
 
+/**
+ * 为某个岗位在 Boss 上**建立会话**，返回这条会话的真实 uid。
+ *
+ * 只给「还没打过招呼」的岗位用：这种岗位在会话列表里根本不存在，前端拿不到 uid，
+ * 硬点一个自编的占位 uid 只会报「找不到这条会话」。后端会打开岗位页点「立即沟通」，
+ * 由 Boss 自己建会话。
+ *
+ * 注意：它会**真的在 Boss 上建立一条会话**（和用户手动点「立即沟通」等价），
+ * 所以只能由用户点击触发，不得在挂载/轮询里自动调用。
+ */
+export function chatOpen(jobId: string): Promise<OpenReply> {
+  // 平铺参数键名 = Rust 参数名（`job_id`）。Tauri 平铺参数**不支持** `#[serde(alias)]`，
+  // 发驼峰只会得到「missing required key job_id」。
+  return invokeFlat<OpenReply>('chat_open', { job_id: jobId });
+}
+
 /** 与某个 HR 的消息记录。平铺 `{ uid }`。 */
 export function chatMessages(uid: string): Promise<MessagesReply> {
   return invokeFlat<MessagesReply>('chat_messages', { uid });
@@ -38,7 +55,7 @@ export function chatMessages(uid: string): Promise<MessagesReply> {
 /**
  * 发一条消息给 HR。
  *
- * 平铺：`{ uid, text, jobId? }`。**`jobId` 非空时后端会顺带把该岗位标记为已投递**
+ * 平铺：`{ uid, text, job_id? }`。**`job_id` 非空时后端会顺带把该岗位标记为已投递**
  * （「聊过就算投过」的唯一入口，前端不要再补一次 `mark_delivered`）。
  *
  * 回执的 `text` 是**真正发出去的正文**（后端可能截断），列表要显示它而不是本地输入。
@@ -48,7 +65,9 @@ export function chatSend(uid: string, text: string, jobId?: string | null): Prom
   return invokeFlat<SendReply>('chat_send', {
     uid,
     text,
-    jobId: trimmed.length > 0 ? trimmed : undefined,
+    // 键名必须是蛇形：Tauri 平铺参数按 Rust 参数名取值，发 `jobId` 会被当成未知键
+    // 静默丢弃——那会让「聊过就算投过」永远不生效。
+    job_id: trimmed.length > 0 ? trimmed : undefined,
   });
 }
 
@@ -57,9 +76,9 @@ export function chatResumes(): Promise<ResumesReply> {
   return invokeNone<ResumesReply>('chat_resumes');
 }
 
-/** 发一份简历。平铺 `{ uid, resumeId }`。 */
+/** 发一份简历。平铺 `{ uid, resume_id }`（键名同 Rust 参数名）。 */
 export function chatSendResume(uid: string, resumeId: string): Promise<OkReply> {
-  return invokeFlat<OkReply>('chat_send_resume', { uid, resumeId });
+  return invokeFlat<OkReply>('chat_send_resume', { uid, resume_id: resumeId });
 }
 
 /** 撤回会话（关闭与某个 HR 的聊天窗口）。平铺 `{ uid }`。 */

@@ -8,7 +8,7 @@
  * 打招呼草稿：`greet_text` 是后端生成的一整句，用户可以直接发（`greet_one`），
  * 也可以「放到输入框再改」。生成/丢弃都只动本地状态。
  */
-import { computed } from 'vue';
+import { computed, onBeforeUpdate, ref } from 'vue';
 
 import type { ChatMessage, Friend, GreetReply } from '../../api/types';
 import {
@@ -17,7 +17,8 @@ import {
   CHAT_STATE_ANNOUNCE_TEXT,
   RECALL_TEXT,
   TYPING_TEXT,
-  msgTestId,
+  msgKey,
+  msgTestIdOrLocal,
   senderSlug,
   splitThread,
   type SenderSlug,
@@ -58,6 +59,24 @@ const emit = defineEmits<{
 // 否则 `splitThread(undefined)` 抛错被 Vue 记为渲染期未捕获错误。
 const split = computed(() => splitThread(props.messages ?? []));
 
+/* 消息流重建时只播一次入场动画（用户报「点 Boss 看对话卡住」的 P0 项）。
+ *
+ * 原先 `.chat-detach-chat .bubble` 恒带 `animation: bubble-in`：每次远程结果整体替换、
+ * 或乐观气泡插入导致 key 错位，被重建的气泡都会**全部重播**下拉 + 缩放，正是可感知的卡顿。
+ * 现在只在「这批节点是新建的」那一帧给 `.chat-detach-chat` 挂 `is-entering`，
+ * 下一帧摘掉；class 直接改 DOM，不进响应式状态（每帧变更会触发重算）。 */
+const rootEl = ref<HTMLElement | null>(null);
+let enteredOnce = false;
+
+onBeforeUpdate(() => {
+  if (enteredOnce) return;
+  enteredOnce = true;
+  const el = rootEl.value;
+  if (el === null) return;
+  el.classList.add('is-entering');
+  requestAnimationFrame(() => el.classList.remove('is-entering'));
+});
+
 /* `peerName` / `subText` 随 `chat-head` 整行一起移除：这条头行已不再渲染，
    留在脚本里的计算属性只会变成没人读的死代码。Boss 列表用
    `chat-model.friendName` / `friendLine` 取名与副行。 */
@@ -83,7 +102,7 @@ function greetChip(greet: GreetReply): string {
 </script>
 
 <template>
-  <div class="chat-detach-chat">
+  <div ref="rootEl" class="chat-detach-chat">
     <div v-if="props.friend === null" class="rail-body-slot" data-testid="chat-detach-slot">
       <div class="rail-state" data-testid="chat-detach-empty">
         <!-- 原型 L2422：40×40 圆形玻璃盒 + 同一枚气泡 SVG（不是 emoji）。 -->
@@ -114,9 +133,9 @@ function greetChip(greet: GreetReply): string {
           <template v-else>
             <div
               v-for="(m, i) in split.bubbles"
-              :key="msgTestId(m) ?? `local-${i}`"
+              :key="msgKey(m, i)"
               :class="bubbleClass(m.sender)"
-              :data-testid="msgTestId(m) ?? `chat-msg-local-${i}`"
+              :data-testid="msgTestIdOrLocal(m, i)"
             >
               <div class="bubble">
                 <span v-if="m.recalled" class="bubble-recall">{{ RECALL_TEXT }}</span>
@@ -128,6 +147,11 @@ function greetChip(greet: GreetReply): string {
               <div class="bubble"><span class="bubble-typing">{{ TYPING_TEXT }}</span></div>
             </div>
           </template>
+          <!-- 消息流末尾的说明条（用户 m01764「我发送消息的下面 灰色字居中写」）：
+               住在滚动区里、紧接最后一条气泡之后，跟着内容走而不是钉在输入框上方。
+               放在 v-else 模板**之外**：一条消息都没有时也得能显示（否则
+               「已是最新消息」在空会话里会整条消失）。样式随语气走，见 .detach-hint。 -->
+          <slot name="footer" />
         </div>
         <span class="sr-only" data-testid="chat-detach-state-announce" aria-live="polite">{{
           CHAT_STATE_ANNOUNCE_TEXT

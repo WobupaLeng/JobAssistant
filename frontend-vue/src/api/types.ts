@@ -163,6 +163,23 @@ export interface Friend {
    * DOM 兜底路径取不到时间，这时是 `null`（后端不落库、前端按「无时间」排最后）。
    */
   last_ts?: number | null;
+  /**
+   * 最后一条消息是不是我发的。缺省按 `false`（对方发的）处理——
+   * Boss 的 `lastMessageInfo.fromId` 缺省时后端也给 `false`。
+   */
+  last_from_me?: boolean;
+  /**
+   * 我发的最后一条的送达态：`1` 已送达、`2` 已读。
+   * 对方发的消息恒为 `0`，前端不渲染任何状态词（用户 m01427）。
+   */
+  last_status?: number;
+  /**
+   * 这条会话对应的岗位 id（库里 `job_queue.job_id`，形如 `boss:xxx`）。
+   *
+   * 由后端从库里补上：Boss 返回的会话列表**不带**岗位 id，只有我们自己是哪条岗位来的
+   * 才知道。uid 失效（或列表这一刻没拉到）时靠它重新点「立即沟通」把会话接回来。
+   */
+  job_id?: string | null;
 }
 
 export interface ChatMessage {
@@ -171,6 +188,13 @@ export interface ChatMessage {
   time: string;
   msg_id: string;
   recalled: boolean;
+  /**
+   * 前端本地临时 id：只给**乐观气泡**（刚发出、后端还没给 msg_id）用。
+   *
+   * 没有它时列表 key / testid 只能退回数组下标，远程结果一到、下标错位就整表重 diff。
+   * 它由前端 `seedLocalMsgIds` 补，后端不认也不回传，故标「内部」。
+   */
+  local_id?: string;
 }
 
 export interface ResumeItem {
@@ -420,6 +444,12 @@ export interface SendReply {
 /** 无载荷命令的通用回执（`chat_send_resume` / `chat_recall` / 敏感库删除等）。 */
 export interface OkReply {
   ok: boolean;
+}
+
+/** `chat_open()` 的返回：Boss 为这个岗位新建的会话 uid。 */
+export interface OpenReply {
+  /** 服务端分配的会话标识，等价于 `chat_friends` 列表里每条的 `uid`。 */
+  uid: string;
 }
 
 /** `sensitive_remove()` 的返回。`deleted` = 实际删除条数。 */

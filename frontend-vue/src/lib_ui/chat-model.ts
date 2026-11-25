@@ -31,6 +31,15 @@ export const RAIL_NARROW_BELOW = 1280;
 
 /** 打招呼占位会话的 uid 前缀（无匹配好友时插一条临时会话）。 */
 export const PENDING_UID_PREFIX = 'g';
+/**
+ * 占位会话 uid 的**完整标记**：`pendingFriend()` 生成的是 `g` + 岗位标识，
+ * 而 Boss 真实会话的 uid 本身常常就以 `g` 开头（加密 uid）。
+ *
+ * 只用前缀 `'g'` 判定，会把库里的真实会话整批判成占位：`isSendableFriend` 全部返回
+ * false（发不出消息），`loadPendingFriends` 也把它们当草稿读回来（用户报「没有读本地
+ * 数据」，本地列表多出一堆来历不明的行）。所以这里的判据必须比前缀更严。
+ */
+export const PENDING_UID_MARK = 'pending:';
 /** 未读数封顶显示。 */
 export const UNREAD_CAP = 99;
 /**
@@ -124,6 +133,40 @@ export function friendLine(friend: Friend): string {
   return '（暂无消息）';
 }
 
+/** 列表副行的语音：`unread` 未读（对方发的且未读）、`read` 已读、`sent` 已送达、`plain` 无状态词。 */
+export type FriendMsgTone = 'unread' | 'read' | 'sent' | 'plain';
+
+/**
+ * 副行该用哪种颜色（用户 m01427：已送达 / 已读 / 未读 显示不同颜色）。
+ *
+ * 判据只有两条，都来自 Boss 原始数据，不猜：
+ * - `unread > 0` → 对方有新消息没读 → 未读色（最重）；
+ * - 否则看 `last_from_me` 为真时的 `last_status`：`2` 已读、`1` 已送达。
+ *
+ * 对方发的最后一条**不加**状态词：Boss 原文也只给我的消息标 [已读]/[送达]，
+ * 对方的最后一条本就默认已读，标出来只是噪声。
+ */
+export function friendMsgTone(friend: Friend): FriendMsgTone {
+  if ((friend.unread ?? 0) > 0) return 'unread';
+  if (friend.last_from_me !== true) return 'plain';
+  const status = friend.last_status ?? 0;
+  if (status === 2) return 'read';
+  if (status === 1) return 'sent';
+  return 'plain';
+}
+
+/**
+ * 标题旁的计数：**未读消息条数**之和，不是会话数（用户 m01427）。
+ *
+ * 会话数在这里没有意义 —— 用户问的是「还有多少条没看」。全为 0 时返回 0，
+ * 由调用方决定不渲染（空态不显示 0）。
+ */
+export function unreadTotal(friends: readonly Friend[]): number {
+  let sum = 0;
+  for (const f of friends) sum += Math.max(0, f.unread ?? 0);
+  return sum;
+}
+
 /** 列表名字兜底：没名字就显示 uid。 */
 export function friendName(friend: Friend): string {
   const name = (friend.name ?? '').trim();
@@ -149,6 +192,9 @@ export const CHAT_CLOSE_LABEL = '收起';
 /** 输入框占位与发送按钮逐字（§5）。 */
 export const CHAT_COMPOSE_PLACEHOLDER = '输入消息…';
 export const CHAT_SEND_LABEL = '发送';
+/** 输入框上方「AI 生成」按钮逐字（用户 m01148：发送按钮的上方加上 AI 生成）。 */
+export const CHAT_AI_LABEL = 'AI 生成';
+export const CHAT_AI_BUSY_LABEL = '生成中…';
 /** 右栏标题逐字（§5）。 */
 export const CHAT_RAIL_TITLE = 'BOSS 消息';
 export const CHAT_DETACH_TITLE = 'Boss 消息';
@@ -195,10 +241,57 @@ export function splitThread(messages: readonly ChatMessage[]): ThreadSplit {
   return { bubbles, typing };
 }
 
+/** 本会话内自增的乐观消息序号：只用于生成稳定 key，丢一轮也不会出错（仅是 key）。 */
+let localMsgSeq = 0;
+
+/**
+ * 给**没有 `msg_id` 的乐观气泡**补一个会话内稳定的 `local_id`，其余原样返回。
+ *
+ * 为什么要：`ChatThread` 的 key 曾是 `msgTestId(m) ?? `local-${i}``，下标是随时会变的，
+ * 远程结果 / 前面插入一条都会让整表重 diff（用户报「点 Boss 看对话卡住」）。
+ * 这里按「无 msg_id ⇒ 身份 = 发送方 + 时刻 + 正文」在**上一次的同一列表**里回填旧 id：
+ * 同一批数组重新 map 出来的新对象也能认出来，后续追加不会改动已有条目的 id。
+ */
+export function seedLocalMsgIds(
+  messages: readonly ChatMessage[],
+  previous: readonly ChatMessage[] = [],
+): ChatMessage[] {
+  const reuse = new Map<string, string>();
+  for (const m of previous) {
+    if (String(m.msg_id ?? '').trim() === '' && m.local_id) reuse.set(localKeyOf(m), m.local_id);
+  }
+  return messages.map((m) => {
+    if (String(m.msg_id ?? '').trim() !== '') return m;
+    if (m.local_id) return m;
+    const key = localKeyOf(m);
+    const hit = reuse.get(key);
+    if (hit !== undefined) return { ...m, local_id: hit };
+    localMsgSeq += 1;
+    const fresh = `lm-${localMsgSeq}`;
+    reuse.set(key, fresh);
+    return { ...m, local_id: fresh };
+  });
+}
+
+/** 乐观气泡的身份：发送方 + 时刻 + 正文（同内容同时刻的极少见，撞了也只是同一 key）。 */
+function localKeyOf(m: ChatMessage): string {
+  return `${m.sender}\u0000${m.time}\u0000${m.content}`;
+}
+
+/** 列表 key：远程消息用 msg_id，乐观气泡用 local_id（都没有时退回下标，仅兜底）。 */
+export function msgKey(msg: ChatMessage, index: number): string {
+  return msgTestId(msg) ?? (msg.local_id ? `local-${msg.local_id}` : `local-${index}`);
+}
+
 /** 气泡 testid：只有后端给了 msg_id 才有锚点（本地乐观气泡没有）。 */
 export function msgTestId(msg: ChatMessage): string | null {
   const id = String(msg.msg_id ?? '').trim();
   return id === '' ? null : `chat-msg-${id}`;
+}
+
+/** 气泡 testid 的兜底：远程消息走 `msgTestId`，乐观气泡按 local_id 派生（无 id 时退回下标）。 */
+export function msgTestIdOrLocal(msg: ChatMessage, index: number): string {
+  return msgTestId(msg) ?? (msg.local_id ? `chat-msg-local-${msg.local_id}` : `chat-msg-local-${index}`);
 }
 
 /** 撤回样式覆盖正文（`.bubble-recall`）。 */
@@ -272,7 +365,7 @@ export function matchFriendByCompany(friends: readonly Friend[], company: string
  */
 export function pendingFriend(uid: string, company: string, title = ''): Friend {
   return {
-    uid: `${PENDING_UID_PREFIX}${uid}`,
+    uid: `${PENDING_UID_MARK}${uid}`,
     name: String(company ?? '').trim(),
     company,
     title,
@@ -283,9 +376,33 @@ export function pendingFriend(uid: string, company: string, title = ''): Friend 
   };
 }
 
-/** 占位会话判定：uid 以 `g` 开头且不在后端列表里。 */
+/**
+ * 占位会话判定。
+ *
+ * 判据是**完整标记** `pending:` 前缀 + 「从没聊过」的空行形态。曾经只判 `uid` 以
+ * `'g'` 开头，而 Boss 真实 uid 也常以 `g` 开头，于是真实会话被误判成占位
+ * （发不出消息、本地缓存被当草稿读回来）。历史版本落进 localStorage 的旧占位行
+ * 仍以 `g` 开头，所以两种形态都认，但都要满足「没有最后一条消息」这个形态判据。
+ */
 export function isPendingFriend(friend: Friend): boolean {
-  return friend.uid.startsWith(PENDING_UID_PREFIX) && friend.last_time === '' && friend.unread === 0;
+  if (friend.last_time !== '' || friend.unread !== 0) return false;
+  if (friend.uid.startsWith(PENDING_UID_MARK)) return true;
+  // 旧形态（`g` + 岗位标识）：光看前缀会把真实会话吃掉，所以补一条形态判据——
+  // 占位行的名字就是公司名，而真实会话的名字是 HR 的称呼。
+  return friend.uid.startsWith(PENDING_UID_PREFIX) && friend.name === friend.company;
+}
+
+/**
+ * 从占位会话的 uid 里取出岗位标识（就是 `job_queue.job_id`）。
+ *
+ * 占位 uid 有两种历史形态：`pending:<jobId>` 与旧的 `g<jobId>`。真实会话的 uid
+ * 不是这个形状，所以非占位行一律返回空串——调用方据此判断「能不能去建会话」。
+ */
+export function pendingJobId(friend: Friend): string {
+  if (!isPendingFriend(friend)) return '';
+  if (friend.uid.startsWith(PENDING_UID_MARK)) return friend.uid.slice(PENDING_UID_MARK.length);
+  if (friend.uid.startsWith(PENDING_UID_PREFIX)) return friend.uid.slice(PENDING_UID_PREFIX.length);
+  return '';
 }
 
 /** 该会话能不能用 `chat_send` 发消息（占位会话的 uid 以 `g` 开头）。 */
@@ -334,6 +451,104 @@ export function sortFriends(friends: readonly Friend[]): Friend[] {
  * 占位会话持久化：刷新页面不得丢掉「生成打招呼」刚加入的 HR。
  * 只存占位字段（无密钥、无 cookie），读写失败一律静默降级为空。
  * ------------------------------------------------------------------ */
+
+/**
+ * 会话列表合并（刷新不再整体替换）。
+ *
+ * 顺序口径与 `sortFriends` 一致：占位在最前，其余按 `last_ts` 倒序，同值按 uid 稳定收尾。
+ * **未变更的行返回入参里的同一个对象引用**：keyed `v-for` 只重渲染真正变了的行，
+ * 整表重建才是「点刷新卡住」的根因。远程已出现的会话不再保留占位副本（同一 uid 只留一条）。
+ */
+export function mergeFriends(current: readonly Friend[], remote: readonly Friend[]): Friend[] {
+  const byUid = new Map<string, Friend>();
+  for (const f of current) byUid.set(f.uid, f);
+  const remoteUids = new Set(remote.map((f) => f.uid));
+  const pending = current.filter((f) => isPendingFriend(f) && !remoteUids.has(f.uid));
+  const rows = remote.map((next) => {
+    const prev = byUid.get(next.uid);
+    if (prev !== undefined && sameFriend(prev, next)) return prev;
+    return next;
+  });
+  return sortFriends([...pending, ...rows]);
+}
+
+function sameFriend(a: Friend, b: Friend): boolean {
+  return (
+    a.uid === b.uid &&
+    a.name === b.name &&
+    a.company === b.company &&
+    a.title === b.title &&
+    a.last_msg === b.last_msg &&
+    a.last_time === b.last_time &&
+    a.unread === b.unread &&
+    a.avatar === b.avatar &&
+    (a.last_ts ?? 0) === (b.last_ts ?? 0)
+  );
+}
+
+/**
+ * 消息列表合并（远程结果不再整体替换）。
+ *
+ * - 远程条目按 `msg_id` 与现有行对齐：内容一致就**保留原对象**（气泡不重建、不重播动画）；
+ * - 现有列表里、远程结果中没有的行（乐观气泡 / 本地缓存）留在原位，不被抹掉；
+ * - 顺序以远程为准（它是权威时间序），多出来的本地行按原相对位置插回。
+ *
+ * 结果是「远程序列 + 本地增量」，界面不会因为抓取慢而闪一下。
+ */
+export function mergeMessages(current: readonly ChatMessage[], remote: readonly ChatMessage[]): ChatMessage[] {
+  const byId = new Map<string, ChatMessage>();
+  for (const m of current) {
+    const id = String(m.msg_id ?? '').trim();
+    if (id !== '') byId.set(id, m);
+  }
+  const remoteIds = new Set(remote.map((m) => String(m.msg_id ?? '').trim()).filter((id) => id !== ''));
+  const merged = remote.map((next) => {
+    const id = String(next.msg_id ?? '').trim();
+    const prev = id === '' ? undefined : byId.get(id);
+    return prev !== undefined && sameMessage(prev, next) ? prev : next;
+  });
+  // 本地独有行（乐观气泡 / 缓存里的历史行）：按原顺序补在末尾 —— 它们都是最新的会话尾巴。
+  const extra = current.filter((m) => {
+    const id = String(m.msg_id ?? '').trim();
+    return id === '' || !remoteIds.has(id);
+  });
+  return [...merged, ...extra];
+}
+
+/**
+ * 「这条会话该不该跳过远端拉取」的账本。
+ *
+ * 判据是**等值**，不是时间大小：`Friend.last_ts` 是毫秒时间戳，而消息的 `time`
+ * 已经被 `chat.py::fmt_time` 格式化成「今天 14:20」这类展示串，拿它反解比较会丢掉
+ * 精度、判定几乎永不成立。所以只记「上次真正拉取成功时那一刻的 `last_ts`」，
+ * 点开时值没变就认为服务端没有新消息。
+ *
+ * **三条铁律**（错了就会漏消息）：
+ * 1. `last_ts` 为 `null` / 缺省（DOM 兜底路径取不到可信时间）→ 一律照常拉取；
+ * 2. 只有**成功**拉取才记账：报错、超时、空结果都不记，否则失败会被当成「已最新」；
+ * 3. 列表刷新带来**更大的** `last_ts` 时账本自动失效（值不等即照常拉取）。
+ */
+export function makeMessagesMemo(): {
+  shouldSkip: (uid: string, lastTs: number | null | undefined) => boolean;
+  noteFetched: (uid: string, lastTs: number | null | undefined) => void;
+} {
+  const seen = new Map<string, number>();
+  const valid = (ts: number | null | undefined): ts is number => ts !== null && ts !== undefined && ts > 0;
+  return {
+    shouldSkip(uid, lastTs) {
+      return valid(lastTs) && seen.get(uid) === lastTs;
+    },
+    noteFetched(uid, lastTs) {
+      if (valid(lastTs)) seen.set(uid, lastTs);
+    },
+  };
+}
+
+function sameMessage(a: ChatMessage, b: ChatMessage): boolean {
+  return (
+    a.sender === b.sender && a.content === b.content && a.time === b.time && a.recalled === b.recalled
+  );
+}
 
 export const PENDING_STORAGE_KEY = 'chat.pendingFriends';
 
@@ -385,10 +600,41 @@ export const SESSION_BOOTING_NOTE = '正在启动浏览器…';
 export const FRIENDS_EMPTY_NOTE = '会话列表是空的。确认已登录 Boss；未登录可到「概览」页点「扫码登录」。';
 export const FRIENDS_FAIL_PREFIX = '读取会话失败：';
 export const MESSAGES_FAIL_PREFIX = '读取消息失败：';
+/** 跳过远端拉取时的提示：明确告诉用户「没新消息」，而不是静默不变。
+ *  用户 m01764：按钮文案就叫「刷新」，提示里的「刷新列表」跟着改成「刷新」。 */
+export const MESSAGES_FRESH_NOTE = '已是最新消息，点「刷新」可重新拉取。';
 export const SEND_FAIL_PREFIX = '发送失败：';
 export const RESUME_SENT_NOTE = '简历已发出';
 export const RECALL_DONE_NOTE = '已撤回上一条消息';
 export const GREET_SENT_NOTE = '打招呼已发送';
+export const AI_DRAFT_FAIL_PREFIX = 'AI 生成失败：';
+/** 正在 Boss 上为这个岗位建会话（点了「立即沟通」，要等页面跳转）。 */
+export const OPENING_SESSION_NOTE = '正在打开 Boss 会话…';
+export const OPEN_SESSION_FAIL_PREFIX = '建立会话失败：';
+
+/**
+ * 给大模型看的「Boss 对话上下文」：把聊天记录压成一段纯文本。
+ *
+ * 为什么要前端拼：聊天页拿不到 JD 也拿不到会话本身，`greet_draft` 只收一段
+ * `reply` 文本，后端不做上下文拼装（它连聊天记录都看不到）。这里只做**取最近几条
+ * 的原样转述**，不改写、不摘要——改写属于业务规则，归后端提示词。
+ *
+ * 只取 `take` 条、跳过撤回行：撤回的内容不该被模型当成 HR 说过的话。
+ */
+export function aiReplyContext(
+  messages: readonly ChatMessage[],
+  take = 8,
+): string {
+  const lines: string[] = [];
+  for (const m of messages) {
+    if (m.recalled) continue;
+    const text = String(m.content ?? '').trim();
+    if (text === '') continue;
+    const who = m.sender === 'me' ? '我' : m.sender === 'hr' ? 'HR' : '系统';
+    lines.push(`${who}：${text}`);
+  }
+  return lines.slice(-take).join('\n');
+}
 
 /** 读会话失败时是否值得先拉一次浏览器会话再重试（`needs_session`）。 */
 export function shouldRetryWithSession(errText: string): boolean {

@@ -3,7 +3,7 @@
 > **本文件只写「现状 / 坑 / 下一步」**，不写历史记录与用例明细。
 > 目录结构、分层约定、17 条迁移契约见 [`AGENTS.md`](AGENTS.md)，跨模块约束见根 [`AGENTS.md`](../AGENTS.md)。
 
-**最后更新**：2026-11-23
+**最后更新**：2026-11-25
 
 ---
 
@@ -138,7 +138,7 @@
 - **顶栏右组未溢出**：1440 视口下 `.tb-tail.right=1389`，`.topbar` 内容宽 1388，恰好放下。不要因此改顶栏宽度。
 - **未核实项**：日志栏与 `section.page-dashboard` 是否缺 `.dashboard` 类导致 `.app-body` 行布局错位（未运行态确认）；`controls.css` 的 `.btn-danger` 浅色主题覆盖（8 处调用，定义存在，覆盖未核）；`ScrapeBar` 的 `scrape-stop-btn` 初始 disabled、`chat-detach-close-btn` 文案（C5/C9，未核）；`.dashboard` padding-top 对齐（A2，未核）。
 
-### 2.5 Boss 消息卡顿（未做完，待接手的优化项）
+### 2.5 Boss 消息卡顿（一档 + 二档 4 + 三档 6 已落地；仅剩三档第 7 条待产品拍板）
 
 > 现象：**点某个 Boss 会话约 1 秒后卡一下**；**点 Boss 列表旁刷新按钮**同样卡。F5 整页刷新**不卡**。
 > 已完成部分见下方「已修」，**未完成部分见方案三档**，按档位接手即可。
@@ -198,6 +198,56 @@
 | 气泡动画 | 切换会话仍见一次淡入；数据刷新**不重播** |
 | 门禁 | `vue-tsc --noEmit` exit 0；`vitest run` 全绿（基线 39 files / 657 tests） |
 | 回归 | 抽屉开合、Esc 分层、长按多选、右栏提示不受影响 |
+
+**2026-11-25 二轮已落地 · 一档 + 二档 4 + 三档 6（未提交）**
+
+- 一档第 1 条：`.bubble` 不再常驻 `animation`，改挂 `.chat-detach-chat.is-entering .bubble`；`ChatThread.vue` 用 `onBeforeUpdate` 在**首次重建的那一帧**直接给根节点加/摘 class（不进响应式状态，符合本条「不要绑响应式」的约束）。
+- 一档第 2 条：`@keyframes bubble-in` 去掉 `scale(0.985)`（每气泡一个强制合成层的元凶）。
+- 一档第 3 条：`.chat-detach-chat .bubble-row, .friend { contain: layout paint; }`；`.friend` 的 `overflow: hidden` / `flex: 0 0 auto` **未动**。
+- 二档第 4 条：`ChatMessage` 增可选 `local_id`（前端内部字段，后端不认识也不回传）；`chat-model.seedLocalMsgIds(messages, previous)` 给乐观气泡补会话内稳定 id 并按「发送方+时刻+正文」在上一版列表里回填；key 改 `msgKey(m,i)`、testid 改 `msgTestIdOrLocal(m,i)`，`chat-msg-<id>` 锚点不变。
+- 三档第 6 条：`loadMessages` 不再等一轮 IPC——本地缓存立即渲染；远程结果走 `chat-model.mergeMessages`：按 `msg_id` 对齐、**内容没变就复用原对象引用**（气泡不重建）、远程没有的乐观气泡留在尾部；抓取失败时**不再清屏**（有本地内容只补提示）。
+- 链路 B：`loadFriends` 不再 `[...locals, ...reply.items]`，改 `chat-model.mergeFriends`：顺序口径同 `sortFriends`（占位置顶），未变的行返回入参同一对象引用，远程已有的 uid 不再保留占位副本。
+- 门禁：`vue-tsc --noEmit` exit 0；`vitest` 39 files / **661 passed**；`vite build` exit 0。新增模型层回归 4 条（`chat-model.test.ts`：seedLocalMsgIds 幂等、msgKey/testid、mergeMessages 引用复用、mergeFriends 行级复用），`chat-contract.test.ts` 的 CSS 锚点改为断言「`.bubble` 无常驻 animation / `.is-entering .bubble` 才播 / 关键帧无 scale」。
+
+**2026-11-25 三轮已落地 · 导航失败改人话（用户 m02288，未提交）**
+
+- 症状：右栏红条整段贴 Playwright 原文（`Error: Page.goto: net::ERR_ABORTED at …` + 多行 `Call log`），把对话框撑掉半块，用户以为程序卡死。**其实主线程没被挡住**：`chat_*` 是 Tauri 同步命令，跑在 Tauri 自己的命令线程上阻塞等回执（`commands_chat.rs` 的 `CHAT_TIMEOUT` 90 秒），前端渲染不受影响。
+- `ChatPage.vue` 新增 `navAbortOf(text, fallback)` / `isRetryableNote(text)`：认得 `ERR_ABORTED` / `ERR_CONNECTION` / `ERR_TIMED_OUT` / `ERR_NETWORK_CHANGED` → 翻成「Boss 页面没打开，重试即可」；认得浏览器断开 → 翻成「先点右上角「扫码登录」再点「刷新」」；**认不出的错误照原样显示**（不编话）。`loadFriends` / `loadMessages` / `openSessionFor` 的 catch 都过这一层。
+- `noteTone` 把这类「重试即可」的提示归到 `bad`（顶部红条），灰色说明条仍只走 `bottomNote`。
+- `styles/vue-chat.css` 的 `.detach-note` 加 `max-height: calc(var(--fs-sm) * 6); overflow-y: auto; overflow-wrap: anywhere;`——错误再长也不许把对话框撑高到看不见消息。
+- 后端侧配套（`_goto` 收口、`ERR_ABORTED` 判落地、`KEY_FRIENDS` 只记账不解析）见 `scraper/HANDOFF.md` §2.5。
+- 回归：新增 `scraper/tests/test_chat_goto.py`（6 条纯离线断言）。
+- 门禁：`vue-tsc --noEmit` exit 0；`vitest` 39 files / **682 passed**；`vite build` exit 0；`cargo test` 451 passed / 0 failed；`compileall` exit 0。
+
+**2026-11-25 四轮已落地 · uid 失效按岗位重建（用户 m02734 / m02802）**
+
+- 症状：还没打过招呼的岗位点开 ⇒ 红条「没拿到 Boss 会话列表：可能未登录，或 Boss 接口结构已变化」；发送同样报这句。**不是没登录**，是 `messages()` / `send()` 在列表里查不到 uid 时去重拉整个 `friends()`——未聊岗位永远不在这个列表里，白拉一次才报错。
+- 用户拍板的方案（m02802）：**uid 失效就按岗位重建**，不再去 `friends()` 里找。`ChatPage.vue` 新增 `rebindDeadSession(friend, text)`：错误文案命中「在 Boss 会话列表里找不到这条会话」且能拿到岗位 id 时，调 `chatOpen(jobId)` 走「立即沟通」拿服务端新 uid，把该行原 uid 原地换掉（`savePendingFriends` 落盘），再用新 uid 重拉一次消息。`loadMessages` 与 `send` 的 catch 都接这一层。
+- 岗位 id 从哪儿来：`friend.job_id ?? (isPendingFriend(friend) ? pendingJobId(friend) : '')`。`job_id` 是这轮新增的 `Friend` 字段，**由 Rust 层按公司名从 `job_queue` 回填**（Boss 列表本身不带岗位 id，见 `scraper/HANDOFF.md` §2.4.4）。拿不到岗位 id 就退回原来的报错，不假装成功。
+- **重建只做一次，不递归**：`loadMessages` 的 catch 里重拉成功后直接 return，不再回头走 `rebindDeadSession`；`send` 同理。否则一条永远建不起来的会话会无限重建。
+- `navAbortOf` 增第三类：命中「在 Boss 会话列表里找不到这条会话」也翻成可重试的人话（`RETRY_READ` / `RETRY_SEND`），不贴后端原文。
+- 顺带修掉两个真缺陷：
+  - `pick()` 的占位分支原本 `return pick(realUid)`，重建后 uid 变了但 `pick` 里 `switched` 判据用的是入参，会漏拉消息；改成直接 `await loadMessages(realUid !== '' ? realUid : uid)`。
+  - `watch(() => ui.value.chatOpen, …)` 在 `pick()` 之后立刻又调一次 `loadMessages(旧 uid)`，导致 `chat_messages` 发两次、`chat_open` 重建两次。新增两道守卫：`if (loadingMessages.value) return;` 与 `if (feedUid.value !== friend?.uid) return;`。为此引入 `feedUid`（「屏上这屏消息属于哪条会话」），与 `ui.value.activeFriendsUid`（选中）分开记——重建会中途换 uid，两者不能等同。
+- 回归：`chat-page.test.ts` 新增「点开的会话在 Boss 上找不到 ⇒ 按岗位重建会话并重新拉消息」，断言 `chat_open` 只发一次、载荷是 `{ job_id: 'job-u1' }`、`chat_messages` 依次用旧 uid 和新 uid 各拉一次、界面不含后端原文。
+- 门禁：`vue-tsc --noEmit` exit 0；`vitest` 38 files / **652 passed**；`vite build` exit 0；`cargo test` 451 passed / 0 failed；`compileall` exit 0。
+
+**仍待产品拍板**：三档第 7 条（点击会话只读本地库、抓取延后台）未做——它直接决定「读到的消息有多新」。右栏 `ChatError: 在 Boss 会话列表里找不到这条会话` 的后端病灶已除（见下），三档第 7 条不再是它的前提。二档第 5 条（虚拟化）按原判断不做。
+
+**上一轮已落地（`7f47cba`）**
+
+- 链路 B 不再是「刷新即 40 行全重建」的表面症状：会话列表已**落库** `chat_friends.last_ts`，`ChatPage.vue` 刷新先读本地、只把远程**更新**的行覆盖进内存（`chat_store.rs` 的 `WHERE excluded.last_ts IS NULL OR excluded.last_ts > COALESCE(chat_friends.last_ts, 0)`）。
+- 链路 A 的「一点就命令浏览器」未改（三档第 6 条已于二轮补上，见上）。
+- 同一提交另修：`.drawer` 基线 `opacity:0` 无复位导致「抽屉只有背景没内容」、抽屉关闭动画结束后再卸载、拖动 `inFlight` 不清账、L3 自激循环与克隆层节流（见「已修」表）。
+- 门禁自报：`cargo test` 450 passed；`vue-tsc` exit 0；`vitest` 39 files / 657 passed。
+
+**右栏错误文案 `读取消息失败：ChatError: 在 Boss 会话列表里找不到这条会话…`**：这不是前端 bug，是 `scraper/chat.py` 在实时页面上找不到该会话行时抛的 `ChatError`，经 Rust 透传到 `FriendList` 的 rail-error。**根因已于 2026-11-25 定位并修复，见 `scraper/HANDOFF.md` §2.4.1–2.4.3**：
+
+- 接口列表字段名写错（`zpData.geekFriendList` ≠ 真实的 `zpData.result`）→ 解析 0 行 → 退回 DOM 兜底造假 uid `dom:{i}` → 点它必然报这句。
+- 会话行名字选择器 `.name`/`.title` 对不上真实的 `.name-text` → `name` 恒空，只能靠公司名子串猜行。
+- `_wait_messages` 把 `geekEnter` 计入提前返回 → 0.08 秒就判「没有消息」，`historyMsg` 其实 1.5 秒后到。
+
+三处修完后实测：`friends()` 100 条 / 1.5 秒；`messages()` 0.33–0.37 秒出全部消息，`me`/`hr` 方向正确。**前端这条文案对应的后端病灶已除，三档第 7 条不再是根治此错的前提**（它仍是一个可选的「点击不阻塞」优化，新鲜度取舍须产品拍板）。
 
 **实施注意**
 

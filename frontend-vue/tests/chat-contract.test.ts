@@ -125,7 +125,11 @@ function expand(src: string): string {
     .replace(/\$\{f\.uid\}/g, 'U')
     // FriendList 的 ids 表也是模板串（`${props.prefix}-body` 之类），同样要代入。
     .replace(/\$\{props\.prefix\}-([\w-]+)/g, 'chat-rail-$1')
+    // 气泡 testid 现在走 `msgTestIdOrLocal(m, i)`（远程 = chat-msg-<id>，乐观 = chat-msg-local-<id>），
+    // 源码里是 `:data-testid="msgTestIdOrLocal(m, i)"`，字面量 `chat-msg-` 只出现在这个辅助函数的返回值里，
+    // 所以在展开阶段直接把模板串代入成命中形态。
     .replace(/\$\{msgTestId\(m\) \?\? undefined\}/g, 'chat-msg-X')
+    .replace(/msgTestIdOrLocal\(m, i\)/g, 'chat-msg-X')
     // SPEC §4.2 的未读角标契约名是 chat-detach-unread-<uid>，与列表前缀 chat-detach-rail- 不是一套。
     // 源码里由 ids.unread() 直接给出两套名字，两者都以字面量出现，扫描时无需再展开。
     .replace(/chat-detach-rail-unread-/g, 'chat-detach-unread-');
@@ -146,7 +150,8 @@ describe('testid 契约（SPEC §4.1 / §4.2 / §4.3）', () => {
     // 对话框
     'chat-detach',
     'chat-detach-title',
-    'chat-detach-count',
+    // chat-detach-count 已按用户裁决退役：未读总数改挂左段「Boss 列表」标题旁
+    // （chat-detach-rail-count），不再用会话数冒充「Boss 消息」的数量。
     'chat-detach-sub',
     'chat-detach-close-btn',
     'chat-detach-body',
@@ -161,6 +166,10 @@ describe('testid 契约（SPEC §4.1 / §4.2 / §4.3）', () => {
     'chat-detach-state-announce',
     'chat-detach-compose',
     'chat-detach-compose-input',
+    // 用户 m01148：发送按钮正上方的「AI 生成」
+    'chat-detach-ai-btn',
+    // 消息流末尾的灰色说明条（用户 m01273：「已是最新消息」不是错误）
+    'chat-detach-hint',
     'chat-detach-send-btn',
     'chat-detach-empty',
     'chat-detach-empty-title',
@@ -302,12 +311,12 @@ describe('CSS 契约（C6 同族）', () => {
   it('宽度过渡用 flex-basis，不用 translateX（A15：computed position 必须是 static）', () => {
     expect(css).toContain('flex-basis: var(--detach-w)');
     // 注释里会写到这两个词（解释为什么禁用），所以排除注释行后再断言。
-    // 收起按钮的双 chevron 是唯一的例外（用户 m04611「这个箭头悬浮起来」）：
-    // 它只是按钮内部一枚绝对定位的 SVG，位移的是图形本身，对话框宽度仍走 flex-basis。
+    // 收起按钮的双 chevron 曾按用户 m04611 用 translateX(-40px) 悬浮，
+    // 用户 m01669 判为遮挡 Boss 列表，已改为在列缝内就地 scaleX 生长 ——
+    // 至此全文（含 chevron）不再有任何 translateX，例外豁免随之删除。
     const rules = css
       .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/\.chat-detach-chevrons[^{}]*\{[^{}]*\}/g, '')
-      .replace(/translateX\(-40px\) scaleX\(1\)/g, 'none');
+      .replace(/\.chat-detach-chevrons[^{}]*\{[^{}]*\}/g, '');
     expect(rules).not.toContain('translateX');
     expect(rules).not.toContain('position: fixed');
   });
@@ -324,10 +333,16 @@ describe('CSS 契约（C6 同族）', () => {
     expect(rules).toMatch(/\.chat-detach-head \.auto-apply-bar\s*\{[^}]*flex:\s*0 0 auto/);
   });
 
-  it('M3 入场动效：rail-error 带 rail-in、对话框气泡带 bubble-in（原型 L1179/L1196）', () => {
+  it('M3 入场动效：rail-error 带 rail-in、气泡 bubble-in 只挂在 is-entering 上（原型 L1179/L1196）', () => {
     const rules = css.replace(/\/\*[\s\S]*?\*\//g, '');
     expect(rules).toMatch(/\.rail-error\s*\{[^}]*animation:\s*rail-in\s+var\(--dur\)\s+var\(--ease-out\)/);
-    expect(rules).toMatch(/\.chat-detach-chat \.bubble\s*\{[^}]*animation:\s*bubble-in\s+var\(--dur\)\s+var\(--ease-out\)/);
+    // 气泡本身不得常驻动画：远程数据每次替换都会让整列重播（用户报「点 Boss 卡一秒」）。
+    expect(rules).not.toMatch(/\.chat-detach-chat \.bubble\s*\{[^}]*animation:/);
+    expect(rules).toMatch(
+      /\.chat-detach-chat\.is-entering \.bubble\s*\{[^}]*animation:\s*bubble-in\s+var\(--dur\)\s+var\(--ease-out\)/,
+    );
+    // 入场关键帧不再带缩放（每气泡一个合成层，重建时逐层重合成）。
+    expect(rules).not.toMatch(/@keyframes bubble-in\s*\{[^}]*scale\(/);
     expect(rules).toContain('@keyframes rail-in');
     expect(rules).toContain('@keyframes bubble-in');
   });

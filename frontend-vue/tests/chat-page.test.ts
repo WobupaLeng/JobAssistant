@@ -54,7 +54,10 @@ function fakeInvoke(cmd: string, payload?: unknown): Promise<unknown> {
     case 'chat_friends':
       return Promise.resolve({ items: friendsSeed() });
     case 'chat_messages':
-      return Promise.resolve({ items: [] });
+      if (messagesError !== '') return Promise.reject(new Error(messagesError));
+      return Promise.resolve({ items: messagesSeed() });
+    case 'chat_open':
+      return Promise.resolve({ uid: 'u1' });
     case 'chat_resumes':
       return Promise.resolve({ items: [] });
     case 'list_expectations':
@@ -90,8 +93,19 @@ function fakeInvoke(cmd: string, payload?: unknown): Promise<unknown> {
 /** 会话列表的测试夹具：默认两位，个别用例可临时换一批（未读角标 / 空列表）。 */
 let friendsOverride: Friend[] | null = null;
 
+/** 会话消息的夹具：默认空（多数用例不关心消息流），个别用例临时换一批。 */
+let messagesOverride: unknown[] | null = null;
+/** 非空时 `chat_messages` 直接失败，用来验错误条的去处。 */
+let messagesError = '';
+
+function messagesSeed(): unknown[] {
+  return messagesOverride ?? [];
+}
+
 function friendsSeed(): Friend[] {
-  return friendsOverride ?? [friend('u1'), friend('u2')];
+  // 每行都带岗位 id：真实后端在 `chat_friends` 里从 `job_queue` 补上它，
+  // 会话 uid 失效时靠它重新点「立即沟通」（用户 m02802）。
+  return friendsOverride ?? [friend('u1', { job_id: 'job-u1' }), friend('u2', { job_id: 'job-u2' })];
 }
 
 /**
@@ -117,6 +131,8 @@ beforeEach(() => {
 afterEach(() => {
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   friendsOverride = null;
+  messagesOverride = null;
+  messagesError = '';
   vi.restoreAllMocks();
 });
 
@@ -126,6 +142,74 @@ async function mountPage(opts: { friends?: Friend[] } = {}) {
   await flushPromises();
   return wrapper;
 }
+
+describe('提示条的语气与位置（用户 m01273）', () => {
+  it('「已是最新消息」⇒ 消息流末尾的灰色说明条，不进顶部红条', async () => {
+    messagesOverride = [
+      { sender: 'hr', content: '在吗', time: '10:00', msg_id: 'm1', recalled: false },
+    ];
+    const w = await mountPage({ friends: [friend('u1', { last_ts: 1_700_000_000_000 })] });
+    await w.find('[data-testid="friend-u1"]').trigger('click');
+    await flushPromises();
+    // 点同一位不重拉（`pick` 只在切换时 loadMessages），所以从别处切回来：
+    // 关掉、挑一位不存在的 uid（不触发加载）、再切回 u1 ⇒ 上次已成功拉过 ⇒ 跳过远端。
+    await w.find('[data-testid="chat-detach-close-btn"]').trigger('click');
+    await flushPromises();
+    await (w.vm as unknown as { pick: (uid: string) => Promise<void> }).pick('nobody');
+    await flushPromises();
+    await w.find('[data-testid="friend-u1"]').trigger('click');
+    await flushPromises();
+
+    expect((w.vm as { note: string }).note).toBe('已是最新消息，点「刷新」可重新拉取。');
+    const hint = w.find('[data-testid="chat-detach-hint"]');
+    expect(hint.exists()).toBe(true);
+    expect(hint.text()).toBe('已是最新消息，点「刷新」可重新拉取。');
+    // 顶部错误条不能出现这句话。
+    expect(w.find('[data-testid="chat-note-detach"]').exists()).toBe(false);
+    w.unmount();
+  });
+
+  it('「已是最新消息」同时出现在 Boss 列表最上方（用户 m01764）', async () => {
+    messagesOverride = [
+      { sender: 'hr', content: '在吗', time: '10:00', msg_id: 'm1', recalled: false },
+    ];
+    const w = await mountPage({ friends: [friend('u1', { last_ts: 1_700_000_000_000 })] });
+    await w.find('[data-testid="friend-u1"]').trigger('click');
+    await flushPromises();
+    // 先确认没提示：首次拉取不该出现「已是最新消息」。
+    expect(w.find('[data-testid="chat-rail-fresh"]').exists()).toBe(false);
+
+    await w.find('[data-testid="chat-detach-close-btn"]').trigger('click');
+    await flushPromises();
+    await (w.vm as unknown as { pick: (uid: string) => Promise<void> }).pick('nobody');
+    await flushPromises();
+    await w.find('[data-testid="friend-u1"]').trigger('click');
+    await flushPromises();
+
+    // 两处都要有：Boss 列表最上方 + 消息流末尾。
+    const rail = w.find('[data-testid="chat-rail-fresh"]');
+    const detachRail = w.find('[data-testid="chat-detach-rail-fresh"]');
+    expect(rail.text()).toBe('已是最新消息，点「刷新」可重新拉取。');
+    expect(detachRail.text()).toBe('已是最新消息，点「刷新」可重新拉取。');
+    // 它必须在 Boss 列表（rail-body）之前 —— 也就是「最上方」，不是列表里。
+    const railHead = w.find('[data-testid="chat-rail-body-slot"]');
+    expect(railHead.exists()).toBe(true);
+    w.unmount();
+  });
+
+  it('读消息失败 ⇒ 仍然是顶部红条，不进灰色说明条', async () => {
+    messagesError = '会话不存在';
+    const w = await mountPage();
+    await w.find('[data-testid="friend-u1"]').trigger('click');
+    await flushPromises();
+
+    expect(w.find('[data-testid="chat-note-detach"]').text()).toBe('读取消息失败：会话不存在');
+    expect(w.find('[data-testid="chat-detach-hint"]').exists()).toBe(false);
+    // 失败时列表上方也不能冒出「已是最新消息」。
+    expect(w.find('[data-testid="chat-rail-fresh"]').exists()).toBe(false);
+    w.unmount();
+  });
+});
 
 describe('展开 / 收起（SPEC §3 状态机 + 单处渲染）', () => {
   it('首帧：右栏与对话框是层的两个根节点，`page-chat` 整页锚点已退役（ADR-004）', async () => {
@@ -199,6 +283,41 @@ describe('展开 / 收起（SPEC §3 状态机 + 单处渲染）', () => {
     expect(w.find('[data-testid="chat-rail-unread-u1"]').exists()).toBe(false);
     expect(w.find('[data-testid="chat-detach-unread-u2"]').exists()).toBe(true);
     expect(w.find('[data-testid="chat-detach-unread-u2"]').text()).toBe('7');
+    w.unmount();
+  });
+
+  it('标题徽标是未读条数之和，副行按「未读 / 已读 / 送达」上色（用户 m01427）', async () => {
+    const w = await mountPage({
+      friends: [
+        friend('u1', { unread: 3, last_from_me: false }),
+        friend('u2', { unread: 7, last_from_me: true, last_status: 2 }),
+        friend('u3', { unread: 0, last_from_me: true, last_status: 2, last_msg: '收到' }),
+        friend('u4', { unread: 0, last_from_me: true, last_status: 1, last_msg: '在吗' }),
+      ],
+    });
+    // 140 那种「会话数」已退役：这里 3+7+0+0 = 10，会话数是 4。
+    expect(w.find('[data-testid="chat-rail-count"]').text()).toBe('10');
+
+    // 未读：状态词 [未读] + is-unread
+    const u1 = w.find('[data-testid="friend-msg-u1"]');
+    expect(u1.find('[data-testid="friend-msg-tag-u1"]').text()).toBe('[未读]');
+    expect(u1.classes()).toContain('is-unread');
+
+    // 已读（status=2）
+    const u3 = w.find('[data-testid="friend-msg-u3"]');
+    expect(u3.find('[data-testid="friend-msg-tag-u3"]').text()).toBe('[已读]');
+    expect(u3.classes()).toContain('is-read');
+
+    // 已送达（status=1）
+    const u4 = w.find('[data-testid="friend-msg-u4"]');
+    expect(u4.find('[data-testid="friend-msg-tag-u4"]').text()).toBe('[送达]');
+    expect(u4.classes()).toContain('is-sent');
+    w.unmount();
+  });
+
+  it('一条未读都没有时标题不显示徽标', async () => {
+    const w = await mountPage({ friends: [friend('u1', { unread: 0 })] });
+    expect(w.find('[data-testid="chat-rail-count"]').exists()).toBe(false);
     w.unmount();
   });
 
@@ -324,6 +443,48 @@ describe('唯一输入框', () => {
 });
 
 describe('空态与错误态', () => {
+  /**
+   * 用户 m02802 拍板的口径：会话 uid 在 Boss 上不存在时，**按岗位重新建会话**
+   * （`chat_open` 走「立即沟通」），不再去 `chat_friends` 里找一遍。
+   */
+  it('点开的会话在 Boss 上找不到 ⇒ 按岗位重建会话（chat_open）并重新拉消息', async () => {
+    let opened = 0;
+    let openPayload: unknown = null;
+    const asked: string[] = [];
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+      invoke: (cmd: string, payload?: unknown) => {
+        if (cmd === 'chat_messages') {
+          // 第一次用旧 uid 落空，重建之后的 uid 能读到。
+          const uid = (payload as { uid?: string }).uid;
+          asked.push(String(uid));
+          if (uid === 'u1') return Promise.reject(new Error('在 Boss 会话列表里找不到这条会话'));
+          return Promise.resolve({ items: messagesSeed() });
+        }
+        if (cmd === 'chat_open') {
+          opened += 1;
+          openPayload = payload;
+          return Promise.resolve({ uid: 'u9' });
+        }
+        return fakeInvoke(cmd, payload);
+      },
+    };
+    const w = await mountPage();
+    await w.find('[data-testid="friend-u1"]').trigger('click');
+    await flushPromises();
+    // `pick()` 里套了两层 await（本地缓存 → 远端），一轮 flush 不够。
+    await flushPromises();
+
+    expect(opened).toBe(1);
+    expect(openPayload).toEqual({ job_id: 'job-u1' });
+    // 必须拿**新** uid 再拉一次消息，而不是停在旧 uid 上。
+    expect(asked).toEqual(['u1', 'u9']);
+    // 不再把「列表里找不到」原文贴给用户，也不再多拉一次会话列表。
+    expect(w.text()).not.toContain('在 Boss 会话列表里找不到这条会话');
+    // 也不再回头多拉一次会话列表（那正是重复失败的那一步）。
+    expect(w.find('[data-testid="chat-rail-error"]').exists()).toBe(false);
+    w.unmount();
+  });
+
   it('未选中时对话区显示两句逐字空态', async () => {
     const w = await mountPage();
     // 还没点过任何 Boss：对话区走「在左侧 Boss 列表点一位」分支。

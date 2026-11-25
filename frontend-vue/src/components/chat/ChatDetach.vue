@@ -46,7 +46,9 @@ const emit = defineEmits<{ (e: 'close'): void }>();
       <div class="chat-detach-head-row">
         <span class="card-title" data-testid="chat-detach-title">
           {{ CHAT_DETACH_TITLE }}
-          <span class="chip" data-testid="chat-detach-count">{{ props.count }}</span>
+          <!-- 未读数徽标已移走（用户）：原先这里显示的是「会话数」，与「Boss 消息」这个
+               标题语义不符；未读总数现在挂在对话框左段「Boss 列表」标题旁
+               （chat-detach-rail-count，由 ChatPage 按远端会话列表的未读总和传入）。 -->
         </span>
         <span class="chat-detach-sub" data-testid="chat-detach-sub">{{ headSub(props.friend) }}</span>
         <slot name="head-sub" />

@@ -75,6 +75,7 @@ const EXPECTED_COMMANDS = [
 'chat_friends',
     'chat_friends_local',
     'chat_messages_local',
+  'chat_open',
   'chat_messages',
   'chat_send',
   'chat_resumes',
@@ -124,7 +125,7 @@ afterEach(() => {
  * 直接读源文件做文本扫描，不做 AST：48 条命令名都在同一行。
  */
 describe('命令名覆盖：与 generate_handler! 逐条对齐（C1）', () => {
-  it('57 条命令恰好覆盖一次，不多不少', () => {
+  it('58 条命令恰好覆盖一次，不多不少', () => {
     const dir = fileURLToPath(new URL('../src/api/commands/', import.meta.url));
     const used = new Set<string>();
     for (const name of readdirSync(dir).filter((f: string) => f.endsWith('.ts'))) {
@@ -138,7 +139,7 @@ describe('命令名覆盖：与 generate_handler! 逐条对齐（C1）', () => {
         used.add(m[1]!);
       }
     }
-    expect(used.size).toBe(57);
+    expect(used.size).toBe(58);
     expect(EXPECTED_COMMANDS.filter((c) => !used.has(c))).toEqual([]);
     const known: readonly string[] = EXPECTED_COMMANDS;
     expect([...used].filter((c) => !known.includes(c))).toEqual([]);
@@ -327,7 +328,10 @@ describe('commands_scrape', () => {
 });
 
 describe('commands_chat', () => {
-  it('chat_send：jobId 空/空白时丢掉该键', async () => {
+  // 平铺参数的键名**必须等于 Rust 参数名**（蛇形）：Tauri 不支持在单个函数参数上
+  // 写 `#[serde(alias)]`，发驼峰会被当成未知键静默丢弃——那会让「聊过就算投过」
+  // 永远不生效，且没有任何报错可查。
+  it('chat_send：job_id 空/空白时丢掉该键', async () => {
     await chat.chatSend('u1', '你好', '');
     expect(last()).toEqual({ cmd: 'chat_send', payload: { uid: 'u1', text: '你好' } });
     calls = [];
@@ -335,12 +339,17 @@ describe('commands_chat', () => {
     expect(last()).toEqual({ cmd: 'chat_send', payload: { uid: 'u1', text: '你好' } });
     calls = [];
     await chat.chatSend('u1', '你好', 'job-1');
-    expect(last()).toEqual({ cmd: 'chat_send', payload: { uid: 'u1', text: '你好', jobId: 'job-1' } });
+    expect(last()).toEqual({ cmd: 'chat_send', payload: { uid: 'u1', text: '你好', job_id: 'job-1' } });
   });
 
-  it('chat_send_resume：驼峰 resumeId', async () => {
+  it('chat_send_resume：蛇形 resume_id', async () => {
     await chat.chatSendResume('u1', 'r1');
-    expect(last()).toEqual({ cmd: 'chat_send_resume', payload: { uid: 'u1', resumeId: 'r1' } });
+    expect(last()).toEqual({ cmd: 'chat_send_resume', payload: { uid: 'u1', resume_id: 'r1' } });
+  });
+
+  it('chat_open：蛇形 job_id', async () => {
+    await chat.chatOpen('boss:abc');
+    expect(last()).toEqual({ cmd: 'chat_open', payload: { job_id: 'boss:abc' } });
   });
 
   it('chat_messages / chat_recall：平铺 { uid }', async () => {

@@ -41,6 +41,7 @@ import {
   chatFriendsLocal,
   chatMessages,
   chatMessagesLocal,
+  chatOpen,
   chatRecall,
 
   chatSend,
@@ -62,15 +63,18 @@ import {
 } from '../lib_ui/auto-model';
 import { BROWSER_DETACHED_NOTE, startHeartbeat, type HeartbeatTimer } from '../lib_ui/auto-heartbeat';
 import {
+  AI_DRAFT_FAIL_PREFIX,
   CHAT_RAIL_TITLE,
   CHAT_STATE_ANNOUNCE_TEXT,
   FRIENDS_EMPTY_NOTE,
   FRIENDS_FAIL_PREFIX,
   GREET_SENT_NOTE,
   MESSAGES_FAIL_PREFIX,
+  MESSAGES_FRESH_NOTE,
   RECALL_DONE_NOTE,
   SEND_FAIL_PREFIX,
   SESSION_BOOTING_NOTE,
+  aiReplyContext,
   canSend,
   chatAreaWidth,
   closeDetach,
@@ -79,16 +83,24 @@ import {
   filterFriends,
   isPendingFriend,
   loadPendingFriends,
+  makeMessagesMemo,
+  mergeFriends,
+  mergeMessages,
+  OPENING_SESSION_NOTE,
+  OPEN_SESSION_FAIL_PREFIX,
   savePendingFriends,
+  seedLocalMsgIds,
   CHAT_ACTIVE_COMPANY_KEY,
   CHAT_ACTIVE_COMPANY_EVENT,
   isSendableFriend,
   matchFriendByCompany,
   nowText,
   pendingFriend,
+  pendingJobId,
   pickFriend,
   shouldRetryWithSession,
   sortFriends,
+  unreadTotal,
   withPending,
 } from '../lib_ui/chat-model';
 import { needsSession } from '../lib_ui/session';
@@ -124,6 +136,59 @@ const ui = ref(createChatUi());
 const messages = ref<ChatMessage[]>([]);
 const loadingMessages = ref(false);
 const note = ref('');
+/**
+ * `note` 的语气：`bad` 红条（失败，可执行），`hint` 灰色说明（不是错误）。
+ *
+ * 用户 m01273：「已是最新消息」不是错误，别用红条 —— 它只是解释「为什么没新东西」。
+ * 判据按文案前缀一次性给出，而不是在每个写入点各标一遍，避免二义性：
+ * 成功提示无前缀（「消息已发送」），失败提示都带 `…失败：` 前缀。
+ */
+const noteTone = computed<'bad' | 'hint'>(() => {
+  const text = note.value;
+  if (text === MESSAGES_FRESH_NOTE) return 'hint';
+  // 用户 m02288：读取失败占半个界面又不说怎么办。抓取/导航类失败一律按「重试」呈现。
+  if (isRetryableNote(text)) return 'bad';
+  if (/失败[:：]/.test(text)) return 'bad';
+  return 'hint';
+});
+/** 顶部红条用的那句（只有真错误才占顶部）。 */
+const topNote = computed(() => (noteTone.value === 'bad' ? note.value : ''));
+/** 消息流末尾灰色说明条用的那句。 */
+const bottomNote = computed(() => (noteTone.value === 'hint' ? note.value : ''));
+/**
+ * 「已是最新消息」单独拎出来（用户 m01764）：它要出现**两处** ——
+ * Boss 列表最上方 + 消息流末尾（自己那条消息的下方），都是灰色居中。
+ * 其余灰色说明仍只走 `bottomNote`，不受影响。
+ */
+const freshNote = computed(() => (note.value === MESSAGES_FRESH_NOTE ? note.value : ''));
+
+/**
+ * 读取/建会话/发送失败时把原始技术文案换成一句「能照做」的话（用户 m02288）。
+ *
+ * 之前右栏直接贴 Playwright 原文（Page.goto 的 ERR_ABORTED 加整段 Call log），
+ * 占掉半个界面，还让用户以为整个程序卡死了。原始文案仍进日志，
+ * 界面上只留结论与下一步。
+ *
+ * 只认三类已知原因：导航被页面自身跳转打断（网络慢/风控）、浏览器连接断了、
+ * 以及后端把「会话列表没拉到」当成「这条会话不存在」报上来。
+ * 其余错误一律照原样显示 —— 不认识的失败编不出准确的话，别糊弄。
+ */
+const RETRY_READ = '读取消息失败：Boss 页面没打开（网络慢或被风控拦了一次）。再点一次这条会话即可，仍失败就点「刷新」。';
+const RETRY_FRIENDS = '读取会话失败：Boss 页面没打开（网络慢或被风控拦了一次）。点「刷新」重试。';
+const RETRY_SEND = '发送失败：Boss 页面没打开（网络慢或被风控拦了一次）。再点一次发送，仍失败就点「刷新」。';
+function navAbortOf(text: string, fallback: string): string {
+  if (/ERR_ABORTED|ERR_CONNECTION|ERR_TIMED_OUT|ERR_NETWORK_CHANGED/.test(text)) return fallback;
+  if (/Target page, context or browser has been closed|has been closed|浏览器未连接/.test(text)) {
+    return 'Boss 浏览器连接断了。先点右上角「扫码登录」把浏览器拉起来，再点「刷新」。';
+  }
+  // 拉列表失败被当成「这条会话不存在」报上来时，原文里的「可能未登录」会把人带偏。
+  if (/在 Boss 会话列表里找不到这条会话/.test(text)) return fallback;
+  return '';
+}
+/** 这条提示是否属于「重试即可」的技术失败（决定它用什么样式显示）。 */
+function isRetryableNote(text: string): boolean {
+  return navAbortOf(text, 'x') !== '';
+}
 
 /* -------------------------------- 打招呼草稿 --------------------------------- */
 
@@ -180,19 +245,42 @@ const composeRef = ref<InstanceType<typeof ChatCompose> | null>(null);
 
 /* ---------------------------------- 加载 ------------------------------------ */
 
+/**
+ * 「该不该跳过远端拉取」的账本（模块级，整个页面生命周期有效）。
+ *
+ * 不用 ref：它只影响要不要发请求，不参与渲染；放响应式里只会多一轮无谓更新。
+ */
+const messagesMemo = makeMessagesMemo();
+
+/**
+ * 界面这屏消息属于哪条会话（空串 = 还没显示过任何人的会话）。
+ *
+ * 与 `ui.value.activeFriendsUid` 分开记：点开新会话时选中会先变，而消息要等
+ * `loadMessages` 回来才换；重建会话时 uid 又会中途变一次。这条「屏上是谁」的账
+ * 单独记，才能既不误清屏、也不把上一位的消息串到这一位身上。
+ */
+const feedUid = ref('');
+
 async function loadFriends(allowOpenSession = false): Promise<void> {
   loadingFriends.value = true;
   friendsError.value = '';
-  // 先把刷新前持久化的占位放回列表：后端报错（浏览器未连接）时它们也必须可见。
-  friends.value = [...loadPendingFriends(), ...friends.value.filter((f) => !isPendingFriend(f))];
-  // 先默认展示持久化的会话列表（不触发浏览器），远程成功后再增量替换。
-  try {
-    const cached = await chatFriendsLocal();
-    if (friends.value.length === 0 && cached.items.length > 0) {
-      friends.value = cached.items;
+  // 刷新前持久化的占位先并进列表（追加，不重建现有行）：后端报错（浏览器未连接）时它们也必须可见。
+  const pending = loadPendingFriends();
+  const known = new Set(friends.value.map((f) => f.uid));
+  const fresh = pending.filter((f, i) => !known.has(f.uid) && pending.findIndex((g) => g.uid === f.uid) === i);
+  if (fresh.length > 0) friends.value = [...fresh, ...friends.value];
+  // 本地缓存的会话列表：库里有就直接先渲染，远程拉到之后按 uid 就地合并。
+  // 不读它，界面上就只剩「正在加载 + 一句报错」，本地数据等于白存（用户：没有读本地数据）。
+  // 只在列表还空的时候补：已有内容时不该被一份可能更旧的缓存盖一下。
+  if (friends.value.length === 0) {
+    try {
+      const cached = await chatFriendsLocal();
+      if (friends.value.length === 0 && cached.items.length > 0) {
+        friends.value = mergeFriends(friends.value, cached.items);
+      }
+    } catch {
+      /* 本地读失败不阻断远程加载 */
     }
-  } catch {
-    /* 本地读取失败不阻断远程加载 */
   }
   try {
     let reply;
@@ -206,16 +294,12 @@ async function loadFriends(allowOpenSession = false): Promise<void> {
       await sessionOpen('boss', 'chat');
       reply = await chatFriends();
     }
-    // 占位（后端尚无会话）条目：内存里的 + 刷新前持久化的，去重后保留在列表头部。
-    const seen = new Set(reply.items.map((r) => r.company));
-    const locals = [...friends.value, ...loadPendingFriends()].filter((f, i, all) => {
-      if (!isPendingFriend(f) || seen.has(f.company)) return false;
-      return all.findIndex((g) => g.uid === f.uid) === i;
-    });
-    friends.value = [...locals, ...reply.items];
-    savePendingFriends(friends.value);
-    if (reply.items.length === 0 && locals.length === 0) note.value = FRIENDS_EMPTY_NOTE;
     // 刷新不得改变展开态与选中（SPEC §3）：只把 activeFriend 的字段换成新的。
+    // 顺序不变，不整体替换：远程行与现有行**按 uid 就地改写**，未变的行引用保持不变，
+    // 只有真正变更的字段才触发那一行的重渲染（用户报「点刷新卡住」的根因是整表重建）。
+    friends.value = mergeFriends(friends.value, reply.items);
+    savePendingFriends(friends.value);
+    if (reply.items.length === 0 && !friends.value.some(isPendingFriend)) note.value = FRIENDS_EMPTY_NOTE;
     const uid = ui.value.activeFriendsUid;
     if (uid !== null && !friends.value.some((f) => f.uid === uid)) {
       ui.value = closeDetach(ui.value);
@@ -223,7 +307,9 @@ async function loadFriends(allowOpenSession = false): Promise<void> {
   } catch (e) {
     friendsError.value = errText(e);
     // 浏览器未连接时 rail 已给出引导提示，不再把原始报错重复写进 note（否则两段文字叠在一起）。
-    if (!needsSession(errText(e))) note.value = FRIENDS_FAIL_PREFIX + errText(e);
+    if (!needsSession(errText(e))) {
+      note.value = navAbortOf(errText(e), RETRY_FRIENDS) || FRIENDS_FAIL_PREFIX + errText(e);
+    }
   } finally {
     loadingFriends.value = false;
   }
@@ -231,23 +317,65 @@ async function loadFriends(allowOpenSession = false): Promise<void> {
 
 async function loadMessages(uid: string): Promise<void> {
   loadingMessages.value = true;
-  // 先展示本地持久化消息（不触发浏览器），再用远程结果增量覆盖。
+  // 先展示本地持久化消息（不触发浏览器），再用远程结果增量合并。
   try {
     const local = await chatMessagesLocal(uid);
-    if (ui.value.activeFriendsUid === uid && messages.value.length === 0) {
-      messages.value = local.items;
+    // feedUid：界面显示的这屏消息属于哪条会话。与选中 uid 分开记，是因为
+    // 「重建会话」会中途把 uid 换掉，此时屏上还是旧 uid 的那一屏。
+    if (ui.value.activeFriendsUid === uid && feedUid.value !== uid && local.items.length > 0) {
+      messages.value = seedLocalMsgIds(local.items, messages.value);
+      feedUid.value = uid;
     }
   } catch {
     /* 本地读取失败不阻断远程加载 */
   }
+  // 会话列表里的 last_ts 说明服务端认为这条会话没有新消息，且上次已成功拉过同样的值
+  // → 直接用本地渲染，不打这一枪（用户：点开 Boss 每次都要等 historyMsg 卡住）。
+  // 每次进来都按当前 uid 重取：重建会话会把这个 uid 换掉，闭包里留旧对象会重复重建。
+  const friend = friends.value.find((f) => f.uid === uid) ?? null;
+  // 判据只看「上次拉取成功时的 last_ts 与此刻是否相等」，与**此刻消息表是否为空无关**：
+  // `pick()` 切换会话时会先清空 `messages`，再进来读缓存，那一刻必然是空的 ——
+  // 早先要求「length > 0」等于让这个跳过分支永远不成立（用户报：说好的跳过没生效）。
+  // 空表的正常路径由下面「本地缓存 >0 才渲染」与本函数末尾的远端请求兜住。
+  if (messagesMemo.shouldSkip(uid, friend?.last_ts)) {
+    note.value = MESSAGES_FRESH_NOTE;
+    loadingMessages.value = false;
+    return;
+  }
   try {
     const reply = await chatMessages(uid);
     if (ui.value.activeFriendsUid !== uid) return;
-    messages.value = reply.items;
+    // 远程结果**合并**而不是整体替换：按 msg_id 认同一行，乐观气泡原地保留。
+    // 浏览器抓取慢是事实，但界面不该为它闪一下（用户报「点 Boss 看对话卡住」）。
+    messages.value = seedLocalMsgIds(mergeMessages(messages.value, reply.items), messages.value);
+    feedUid.value = uid;
+    // 只有成功拉取才记账：失败/空结果记账会让下次误判「已最新」而漏消息。
+    messagesMemo.noteFetched(uid, friend?.last_ts);
   } catch (e) {
     if (ui.value.activeFriendsUid !== uid) return;
-    messages.value = [];
-    note.value = MESSAGES_FAIL_PREFIX + errText(e);
+    // 这条会话的 uid 在 Boss 上已经不存在（列表没拉到也算这一类）：按岗位重新建一次会话，
+    // 拿到真 uid 再抓。**不去列表里再找一遍**——那正是重复失败的那一步（用户 m02802）。
+    // 重建成功后直接在本函数里按新 uid 再拉一次，**不递归**：新 uid 也落空时会无限重建。
+    const rebound = await rebindDeadSession(friend, errText(e));
+    if (rebound !== null) {
+      ui.value = pickFriend(ui.value, rebound.uid);
+      try {
+        const again = await chatMessages(rebound.uid);
+        if (ui.value.activeFriendsUid !== rebound.uid) return;
+        messages.value = seedLocalMsgIds(mergeMessages(messages.value, again.items), messages.value);
+        feedUid.value = rebound.uid;
+        messagesMemo.noteFetched(rebound.uid, rebound.friend.last_ts);
+        return;
+      } catch (e2) {
+        if (ui.value.activeFriendsUid !== rebound.uid) return;
+        note.value = navAbortOf(errText(e2), RETRY_READ) || MESSAGES_FAIL_PREFIX + errText(e2);
+        return;
+      }
+    }
+    // 本地已有内容时不清屏：抓取失败不该把已展示的对话抹掉，只补一句提示。
+    if (messages.value.length === 0) {
+      note.value = navAbortOf(errText(e), RETRY_READ) || MESSAGES_FAIL_PREFIX + errText(e);
+    }
   } finally {
     loadingMessages.value = false;
   }
@@ -262,11 +390,90 @@ async function pick(uid: string): Promise<void> {
   if (friend !== null && friend.unread > 0) friend.unread = 0;
   if (switched) {
     messages.value = [];
+    feedUid.value = '';
     greet.value = null;
     draft.value = '';
     note.value = '';
+    // 占位会话（还没打过招呼的岗位）在 Boss 上**根本不存在**，直接拿它的假 uid
+    // 去拉消息只会报「找不到这条会话」。先真去建会话，拿到服务端分配的 uid，
+    // 再用真 uid 继续——占位行原地换掉。
+    if (friend !== null && isPendingFriend(friend)) {
+      const realUid = await openSessionFor(friend);
+      // 拿到真 uid 后同样走 `loadMessages`（不递归 `pick`）：
+      // uid 没变时递归进去 `switched` 为 false，会连消息都不拉。
+      await loadMessages(realUid !== '' ? realUid : uid);
+      return;
+    }
     await loadMessages(uid);
   }
+}
+
+/**
+ * 后端说「在 Boss 会话列表里找不到这条会话」时，重新在 Boss 上拿一次真实 uid。
+ *
+ * 为什么会有这种情况：会话列表可能没拉到（`getGeekFriendList` 这一次没回来，后端就把它
+ * 当成「这条会话不存在」报上来），也可能是这条会话的 uid 已经失效。两种情况都只有
+ * 「按岗位重新建会话」这一条真能走通的路 —— 继续去列表里找是白等（用户 m02802 拍板）。
+ *
+ * 只认这一句文案，别的失败一律不动：乱猜原因编不出准确的话。
+ * 返回新 uid 与**换过 uid 的那一行**；不是这种错误 / 没有岗位信息 / 重建失败时返回 `null`。
+ */
+async function rebindDeadSession(
+  friend: Friend | null,
+  text: string,
+): Promise<{ uid: string; friend: Friend } | null> {
+  if (friend === null || !/在 Boss 会话列表里找不到这条会话/.test(text)) return null;
+  const jobId = friend.job_id ?? (isPendingFriend(friend) ? pendingJobId(friend) : '');
+  if (jobId === '') return null;
+  try {
+    const reply = await chatOpen(jobId);
+    const realUid = (reply.uid ?? '').trim();
+    if (realUid === '') return null;
+    const rebound: Friend = { ...friend, uid: realUid };
+    friends.value = friends.value.map((f) => (f.uid === friend.uid ? rebound : f));
+    savePendingFriends(friends.value);
+    return { uid: realUid, friend: rebound };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 把一条占位会话变成 Boss 上的真实会话，返回真实 uid（失败返回空串并写好提示）。
+ *
+ * 用户点「立即沟通」后页面自己跳到聊天页，跳转地址里就带着本次会话的 id ——
+ * 后端 `chat_open` 读的就是它，前端不做任何推断。
+ */
+async function openSessionFor(friend: Friend): Promise<string> {
+  // 真实会话也带着岗位 id（`commands_chat.rs` 从库里落的 `job_id`）：uid 失效时
+  // 同一套「立即沟通」同样能把它接回来，所以不只占位行能建会话（用户 m02802）。
+  const jobId = friend.job_id ?? (isPendingFriend(friend) ? pendingJobId(friend) : '');
+  if (jobId === '') {
+    note.value = '这条会话缺少岗位信息，无法在 Boss 上建立会话';
+    return '';
+  }
+  note.value = OPENING_SESSION_NOTE;
+  let realUid = '';
+  try {
+    const reply = await chatOpen(jobId);
+    realUid = (reply.uid ?? '').trim();
+  } catch (e) {
+    note.value = navAbortOf(errText(e), RETRY_READ) || OPEN_SESSION_FAIL_PREFIX + errText(e);
+    return '';
+  }
+  if (realUid === '') {
+    note.value = OPEN_SESSION_FAIL_PREFIX + 'Boss 没有返回会话标识';
+    return '';
+  }
+  // 占位行原地换成真实会话：uid 变了，名字/公司沿用占位行（服务端还没回列表）。
+  friends.value = friends.value.map((f) =>
+    f.uid === friend.uid
+      ? { ...f, uid: realUid, last_time: f.last_time, unread: f.unread }
+      : f,
+  );
+  savePendingFriends(friends.value);
+  note.value = '';
+  return realUid;
 }
 
 /** 收起：保留 activeFriend（A7）；再点同一位也能重开（A8）。 */
@@ -308,6 +515,9 @@ async function send(): Promise<void> {
   if (friend === null || !canSend(draft.value, sending.value)) return;
   const text = draft.value.trim();
   sending.value = true;
+  // 只有发给「卡片打招呼的那位 Boss」时才带岗位 id，后端据此只标记这一个岗位已投递。
+  // 在 try 外算：下面重建会话后的重发要用同一个值。
+  const jobId = greetJob.value !== null && greetJob.value.uid === friend.uid ? greetJob.value.jobId : null;
   try {
     // 发送前先验证登录态：只有已登录才真正发出，否则给出对应提示。
     // sidecar 未启动时 loginStatus 本身会抛错：同样视为「浏览器未连接」，不落入「发送失败」。
@@ -317,14 +527,12 @@ async function send(): Promise<void> {
       note.value = '浏览器未连接：请先登录';
       return;
     }
-    // 只有发给「卡片打招呼的那位 Boss」时才带岗位 id，后端据此只标记这一个岗位已投递。
-    const jobId = greetJob.value !== null && greetJob.value.uid === friend.uid ? greetJob.value.jobId : null;
     const reply = await chatSend(friend.uid, text, jobId);
     const outgoing = String(reply.text ?? '') !== '' ? String(reply.text) : text;
-    messages.value = [
+    messages.value = seedLocalMsgIds([
       ...messages.value,
       { sender: 'me', content: outgoing, time: nowText(), msg_id: '', recalled: false },
-    ];
+    ], messages.value);
     draft.value = '';
     note.value = '消息已发送';
     // 已用掉这次岗位标记：之后再发给同一 Boss 不得重复标记。
@@ -332,7 +540,31 @@ async function send(): Promise<void> {
     // 发完消息主动请求一次自动投递状态（不计入 60~90 秒的心跳节拍）。
     if (beat !== null) void beat.start();
   } catch (e) {
-    note.value = SEND_FAIL_PREFIX + errText(e);
+    const text = errText(e);
+    const moved = await rebindDeadSession(friend, text);
+    if (moved !== null) {
+      // 会话 uid 变了（旧 uid 在 Boss 上已经不存在）：选中态换到新 uid，再用新 uid 发一次。
+      // 只重发这一层，`jobId` 沿用本次算出的值——重走 `send()` 会把岗位标记丢掉。
+      ui.value = pickFriend(ui.value, moved.uid);
+      try {
+        const reply = await chatSend(moved.uid, text, jobId);
+        const outgoing = String(reply.text ?? '') !== '' ? String(reply.text) : text;
+        messages.value = seedLocalMsgIds([
+          ...messages.value,
+          { sender: 'me', content: outgoing, time: nowText(), msg_id: '', recalled: false },
+        ], messages.value);
+        draft.value = '';
+        note.value = '消息已发送';
+        if (jobId !== null) greetJob.value = null;
+        if (beat !== null) void beat.start();
+        return;
+      } catch (e2) {
+        const t2 = errText(e2);
+        note.value = navAbortOf(t2, RETRY_SEND) || SEND_FAIL_PREFIX + t2;
+        return;
+      }
+    }
+    note.value = navAbortOf(text, RETRY_SEND) || SEND_FAIL_PREFIX + text;
   } finally {
     sending.value = false;
   }
@@ -347,10 +579,10 @@ async function sendGreet(): Promise<void> {
   sendingGreet.value = true;
   try {
     await greetOne(friend.uid, text);
-    messages.value = [
+    messages.value = seedLocalMsgIds([
       ...messages.value,
       { sender: 'me', content: text, time: nowText(), msg_id: '', recalled: false },
-    ];
+    ], messages.value);
     greet.value = null;
     // 打招呼成功即把对方挂进 Boss 列表：占位会话（无后端会话）此时才真正入列。
     if (isPendingFriend(friend)) {
@@ -427,6 +659,48 @@ function generateReply(): void {
     return;
   }
   void generateGreet(reply);
+}
+
+/**
+ * 输入框上方「AI 生成」（用户 m01148）：生成的句子**直接落进输入框**，不另开草稿框。
+ *
+ * 提示词三件套的来路：
+ * - Boss 回复上下文：`aiReplyContext` 把最近几条消息压成一段文本，走 `reply` 字段；
+ * - JD 详细：`findByCompany` 由后端按公司名翻库里的**整段 JD**（好友列表没有 jd_text）；
+ * - 我的技能：后端从配置画像取，前端不碰。
+ *
+ * 与右栏「生成回复」的区别只在于落地方式：那边留在草稿框等确认，这里直接写进输入框。
+ */
+async function generateAiDraft(): Promise<void> {
+  const friend = talkableFriend.value;
+  if (friend === null || generating.value) return;
+  generating.value = true;
+  try {
+    const reply = await greetDraft({
+      jobId: greetJob.value?.uid === friend.uid ? greetJob.value.jobId : '',
+      title: friend.title,
+      company: friend.company,
+      salary: '',
+      experience: '',
+      jd: '',
+      findByCompany: friend.company,
+      reply: aiReplyContext(messages.value ?? []),
+    });
+    const text = reply.text.trim();
+    if (text === '') {
+      // 规则兜底与模型都可能给出空串：不把空内容塞进输入框，也不清掉用户已打的字。
+      note.value = AI_DRAFT_FAIL_PREFIX + (reply.note || '模型没有返回内容');
+      return;
+    }
+    draft.value = text;
+    // 回执里的降级原因照实说：走的是规则话术时用户要知道。
+    if (reply.note !== '') note.value = reply.note;
+    composeRef.value?.focus();
+  } catch (e) {
+    note.value = AI_DRAFT_FAIL_PREFIX + errText(e);
+  } finally {
+    generating.value = false;
+  }
 }
 
 async function recall(): Promise<void> {
@@ -756,6 +1030,10 @@ watch(
     emit('chat-open', open);
     if (!open) return;
     const friend = activeFriend.value;
+    // 别抢在 pick() 前面再拉一次：pick() 自己会拉，这里只补「收起后又重开」那一档。
+    // 少了这个守卫，点开会连发两条 chat_messages，那条会话若已失效就会重建两次会话。
+    if (loadingMessages.value) return;
+    if (feedUid.value !== friend?.uid) return;
     if (friend !== null && messages.value.length === 0) void loadMessages(friend.uid);
   },
 );
@@ -779,8 +1057,13 @@ defineExpose({
   autoBarLocation,
   autoPhase,
   note,
+  topNote,
+  bottomNote,
+  freshNote,
+  noteTone,
   friends,
   messages,
+  feedUid,
   draft,
   pick,
   close,
@@ -809,6 +1092,7 @@ defineExpose({
     <FriendList
       prefix="chat-rail"
       :title="CHAT_RAIL_TITLE"
+      :unread="unreadTotal(friends)"
       :friends="visibleFriends"
       :active-uid="ui.activeFriendsUid"
       :loading="loadingFriends"
@@ -821,7 +1105,17 @@ defineExpose({
       @refresh="loadFriends"
       @retry="loadFriends"
       @search="search = $event"
-    />
+    >
+      <!-- 「已是最新消息」放 Boss 列表最上方（用户 m01764）：它说的是列表/会话这一层
+           的取数结果，放在会话列表头顶比塞在消息流里更有归属感。 -->
+      <template #rail-head>
+        <span
+          v-if="freshNote !== ''"
+          class="rail-fresh"
+          data-testid="chat-rail-fresh"
+        >{{ freshNote }}</span>
+      </template>
+    </FriendList>
     <!-- 右栏 aria-live 汇报区（SPEC §4.2 的 chat-rail-state-announce）：
          与对话框里的 chat-detach-state-announce 同源，文案都由常量给出，不复制字面量。 -->
     <span class="sr-only" data-testid="chat-rail-state-announce" aria-live="polite">{{
@@ -834,8 +1128,8 @@ defineExpose({
          的「读取期望职位」承载（DashboardPage.loadExpects 不动，api 封装与契约面都不动）。
 
          展开态不渲染这条：对话框里的 #notices 会再渲染一份同源提示（用户 m01228：
-         「boss列表未展开聊天框时，这里显示了 2 次」）。两处必须**互斥**——`ChatDetach`
-         收起时用 `[hidden]` 改成零宽盒（`motion.css`）而不是 `display:none`，所以
+         「boss列表未展开聊天框时，这里显示了 2 次」）。两处必须**互斥**——ChatDetach
+         收起时用 [hidden] 改成零宽盒（motion.css）而不是 display:none，所以
          不互斥时收起态那两份都会落在同一屏上，看起来就是同一句提示出现了两次。 -->
     <template v-if="!ui.chatOpen">
       <div v-if="note !== ''" class="cfg-hint chat-note" data-testid="chat-note">{{ note }}</div>
@@ -879,6 +1173,7 @@ defineExpose({
         v-if="ui.chatOpen"
         prefix="chat-detach-rail"
         :title="'Boss 列表'"
+        :unread="unreadTotal(friends)"
         :friends="visibleFriends"
         :active-uid="ui.activeFriendsUid"
         :loading="loadingFriends"
@@ -892,7 +1187,15 @@ defineExpose({
         @greet="greetFor"
         :removable-uids="removableUids"
         @remove="removePending"
-      />
+      >
+        <template #rail-head>
+          <span
+            v-if="freshNote !== ''"
+            class="rail-fresh"
+            data-testid="chat-detach-rail-fresh"
+          >{{ freshNote }}</span>
+        </template>
+      </FriendList>
     </template>
 
     <ChatThread
@@ -912,11 +1215,18 @@ defineExpose({
       @discard-greet="greet = null"
     >
       <template #notices>
-        <!-- 展开态的提示：右栏的 note / autoNote 在对话框展开时看不到，这里同源再渲染一份（置顶）。 -->
-        <div v-if="note !== '' || autoNote !== ''" class="detach-notes">
-          <div v-if="note !== ''" class="detach-note" data-testid="chat-note-detach">{{ note }}</div>
+        <!-- 顶部只挂真错误（红条）：右栏的 note / autoNote 在对话框展开时看不到，这里同源再渲染一份。
+             灰色说明不占顶部，见下方 #footer（用户 m01273）。 -->
+        <div v-if="topNote !== '' || autoNote !== ''" class="detach-notes">
+          <div v-if="topNote !== ''" class="detach-note" data-testid="chat-note-detach">{{ topNote }}</div>
           <div v-if="autoNote !== ''" class="detach-note" data-testid="auto-note-detach">{{ autoNote }}</div>
         </div>
+      </template>
+      <template #footer>
+        <!-- 消息流末尾的说明条（用户 m01273 → m01764）：不住在输入框上方了，
+             而是跟着内容走、紧接最后一条气泡，灰色小字居中。
+             「已是最新消息」同时也出现在 Boss 列表最上方（见 #rail-head）。 -->
+        <div v-if="bottomNote !== ''" class="detach-hint" data-testid="chat-detach-hint">{{ bottomNote }}</div>
       </template>
       <template #compose>
         <!-- 唯一输入框：显式绑 modelValue + update（不走 v-model 的模板展开）。 -->
@@ -925,8 +1235,10 @@ defineExpose({
           ref="composeRef"
           :model-value="draft"
           :sending="sending"
+          :generating="generating"
           @update:model-value="draft = $event"
           @send="send"
+          @generate="generateAiDraft"
         />
       </template>
     </ChatThread>
