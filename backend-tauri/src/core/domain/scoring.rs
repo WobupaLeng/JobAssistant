@@ -3,6 +3,10 @@
 //! 口径来源：`backend/app/scorer.py:200 RuleScorer`（用户 m00628 拍板「按现有实现改 SPEC」）。
 //! 平移原则是**量纲换算**而非重新定义维度，因此旧岗位分数 = 新分数 / 10，
 //! 存量数据可无缝迁移（`score_scale` 幂等标记见 SPEC-002 第 3.3 节）。
+//!
+//! 与 `scorer.py` 的**刻意偏差**（用户 m00070 决定修掉，不是平移遗漏）：
+//! 技能/方向按词边界匹配、技能维度核心与加分分开归一、薪资按上限单调、
+//! 外包否定语境与 `reject` 统一口径。修这些时不要「照 Python 恢复原样」。
 
 use crate::core::scoring::SCORE_MAX;
 
@@ -52,7 +56,7 @@ pub const WEIGHTS: &[(Dimension, u8)] = &[
 /// + `_direction` 最多 15 + `_company` 最多 10 = 57。
 ///
 /// 注意这只是**下界**而非恒定值：薪资和经验能解析出来时分数会更高
-/// （如「20-35K」得 15、「5-10年」得 15，合计可达 67）。
+/// （如「20-35K」得 20、「5-10年」得 15，合计可达 72）。
 /// 真正的硬约束是「无 JD 岗位必须低于门槛」，由 [`rule_score_all`] 的测试保证。
 pub const NO_JD_SCORE_FLOOR: u8 = 57;
 
@@ -113,71 +117,129 @@ pub const MIN_SCORE_DEFAULT: u8 = crate::core::scoring::SCORE_MIN_DEFAULT;
 
 use crate::core::domain::parse::parse_salary;
 use crate::core::domain::profile::Profile;
-use crate::core::domain::rules::{is_short_term, outsource_hit, OUTSOURCE_WORDS};
+use crate::core::domain::rules::outsource_hit;
 use regex::Regex;
 use std::sync::OnceLock;
 
+/// 技能维度内部拆分：核心技能 30 分（命中 [`SKILL_CORE_FULL_HITS`] 项即满）、
+/// 加分技能 10 分（命中 [`SKILL_BONUS_FULL_HITS`] 项即满）。
+///
+/// 分开归一是因为旧实现按「命中条数 / 5」统一归一：5 个核心技能与 10 个通用工具
+/// 等价，`Git/Linux/Docker/Html` 这类套话就能把技能分堆满（用户 m00070 决定修掉）。
+const SKILL_CORE_POINTS: f64 = 30.0;
+const SKILL_CORE_FULL_HITS: f64 = 4.0;
+const SKILL_BONUS_POINTS: f64 = 10.0;
+const SKILL_BONUS_FULL_HITS: f64 = 5.0;
+
+/// 无 JD 时的技能分（刻意降权，见 [`score_skill`]）。
+const SKILL_NO_JD: u8 = 12;
+
+/// 关键词别名：主词匹配不到时再试一次（`go` 必须写全称 `golang` 才算命中）。
+const TOKEN_ALIASES: &[(&str, &str)] = &[("go", "golang"), ("node", "nodejs")];
+
+/// 关键词是否出现在文本里（`text_lower` 必须已转小写）。
+///
+/// 纯 ASCII 词走**词边界**匹配：`java` 不再命中 `javascript`，`go` 不再命中
+/// `django`/`mongodb`/`google`；含中文的词没有词边界语义，仍按子串匹配。
+fn token_hit(text_lower: &str, token: &str) -> bool {
+    let token = token.to_lowercase();
+    if token.is_empty() {
+        return false;
+    }
+    let alias = TOKEN_ALIASES
+        .iter()
+        .find(|(k, _)| *k == token.as_str())
+        .map(|(_, v)| *v);
+    std::iter::once(token.as_str()).chain(alias).any(|c| {
+        if c.is_ascii() {
+            ascii_word_hit(text_lower, c)
+        } else {
+            text_lower.contains(c)
+        }
+    })
+}
+
+/// ASCII 词边界命中：命中位置前后都不能紧挨字母或数字。
+fn ascii_word_hit(text_lower: &str, needle_lower: &str) -> bool {
+    let bytes = text_lower.as_bytes();
+    let needle_len = needle_lower.len();
+    let mut from = 0;
+    while let Some(rel) = text_lower[from..].find(needle_lower) {
+        let start = from + rel;
+        let end = start + needle_len;
+        let head_ok = start == 0 || !bytes[start - 1].is_ascii_alphanumeric();
+        let tail_ok = end == bytes.len() || !bytes[end].is_ascii_alphanumeric();
+        if head_ok && tail_ok {
+            return true;
+        }
+        // needle 全 ASCII：命中起点是字符边界，起点 +1 也是
+        from = start + 1;
+    }
+    false
+}
+
 /// 技能维度（`_skill`，满分 40）。
 ///
-/// 核心技能命中每个 +1.0、加分技能 +0.5，换算 `min(1.0, weight/5.0) * 40`。
+/// 核心技能 30 分（4 项即满，每项 7.5）、加分技能 10 分（5 项即满，每项 2），
+/// 四舍五入后相加：**零核心技能时最多 10 分**，通用工具堆不出高分。
 ///
 /// 无 JD 返回 12：这是**刻意降权**，不是缺陷——没拿到详情页时既不该给满分，
 /// 也不该判死，12 分保证它无法越过 70 分门槛，但不会把整个维度清零。
 pub fn score_skill(jd: Option<&str>, profile: &Profile) -> u8 {
     let Some(jd) = jd else {
-        return 12;
+        return SKILL_NO_JD;
     };
     if jd.trim().is_empty() {
         // Python 侧 `if not jd` 对空串同样走降权分支
-        return 12;
+        return SKILL_NO_JD;
     }
     let text = jd.to_lowercase();
-    let mut weight = 0.0f64;
-    for s in profile.core_skills {
-        if text.contains(&s.to_lowercase()) {
-            weight += 1.0;
-        }
-    }
-    for s in profile.bonus_skills {
-        if text.contains(&s.to_lowercase()) {
-            weight += 0.5;
-        }
-    }
-    (weight.min(5.0) / 5.0 * 40.0) as u8
+    let core_hits = profile
+        .core_skills
+        .iter()
+        .copied()
+        .filter(|s| token_hit(&text, s))
+        .count() as f64;
+    let bonus_hits = profile
+        .bonus_skills
+        .iter()
+        .copied()
+        .filter(|s| token_hit(&text, s))
+        .count() as f64;
+    let core_part = core_hits.min(SKILL_CORE_FULL_HITS) / SKILL_CORE_FULL_HITS * SKILL_CORE_POINTS;
+    let bonus_part =
+        bonus_hits.min(SKILL_BONUS_FULL_HITS) / SKILL_BONUS_FULL_HITS * SKILL_BONUS_POINTS;
+    (core_part + bonus_part).round() as u8
 }
 
 /// 薪资维度（`_salary`，满分 20）。
 ///
-/// 先把岗位薪资夹到画像区间 [salary_low, salary_high]，
-/// 再按覆盖比例给分。解析失败返回 10（保守值）。
+/// 只看**岗位薪资上限**（能谈到多少），期望区间为 `[salary_low, salary_high]`：
+/// - 上限 ≥ 期望上限 → 20（开得比期望高不扣分）；
+/// - 上限落在期望区间 → `10 + 10 × (上限 − salary_low) / span`，下沿给 10；
+/// - 上限够不到期望下限 → `10 × 上限 / salary_low`，越远越低（5 分/2 分档因此可达）。
+///
+/// 不再按「区间宽度」给分：宽度与实得无关，且会制造非单调——旧实现
+/// 14-16K 得 1 分、30-60K 得 5 分、50-80K 得 10 分，开得更高反而更低。
+/// 解析失败仍返回 10（保守值）。
 pub fn score_salary(salary: Option<&str>, profile: &Profile) -> u8 {
-    let Some((low_raw, high_raw)) = parse_salary(salary) else {
+    let Some((_, high_raw)) = parse_salary(salary) else {
         return 10;
     };
-    // 上限用 9999 这类写法时 high 会远超期望区间，必须先夹到画像上限，
-    // 否则下面的 hi - lo 反而可能溢出给出满分
-    let high = high_raw.min(profile.salary_high);
-    let low = low_raw.min(profile.salary_high);
-    if high == 0 {
-        return 10;
-    }
-    let lo = low.max(profile.salary_low);
-    let hi = high.min(profile.salary_high);
-    if hi <= lo {
-        let gap = low as i64 - profile.salary_high as i64;
-        return if gap <= 5 {
-            10
-        } else if gap <= 15 {
-            5
-        } else {
-            2
-        };
-    }
     let span = profile.salary_span();
-    if span == 0 {
+    if high_raw == 0 || profile.salary_low == 0 || span == 0 {
         return 10;
     }
-    ((hi - lo) as f64 / span as f64 * 20.0) as u8
+    if high_raw >= profile.salary_high {
+        return 20;
+    }
+    if high_raw >= profile.salary_low {
+        let into = (high_raw - profile.salary_low) as f64 / span as f64;
+        return (10.0 + 10.0 * into.min(1.0)).round() as u8;
+    }
+    ((high_raw as f64 / profile.salary_low as f64) * 10.0)
+        .min(10.0)
+        .round() as u8
 }
 
 fn exp_range_re() -> &'static Regex {
@@ -220,14 +282,16 @@ pub fn score_experience(exp: Option<&str>, jd: Option<&str>, profile: &Profile) 
 }
 
 /// 岗位方向（`_direction`，满分 15）。
+///
+/// 与技能维度共用 [`token_hit`] 的词边界：`JavaScript 前端` 不会被 `java` 判成核心方向。
 pub fn score_direction(title: Option<&str>) -> u8 {
     let t = title.unwrap_or("").to_lowercase();
     const CORE: [&str; 5] = ["java", "后端", "服务端", "全栈", "backend"];
     const ADJACENT: [&str; 4] = ["node", "go", "python", "前端"];
-    if CORE.iter().any(|k| t.contains(k)) {
+    if CORE.iter().any(|k| token_hit(&t, k)) {
         return 15;
     }
-    if ADJACENT.iter().any(|k| t.contains(k)) {
+    if ADJACENT.iter().any(|k| token_hit(&t, k)) {
         return 10;
     }
     7
@@ -235,18 +299,10 @@ pub fn score_direction(title: Option<&str>) -> u8 {
 
 /// 公司质量（`_company`，满分 10）。
 ///
-/// 命中外包词或短期信号直接 0 分；JD 含离职期/过渡岗给 4 分。
+/// 外包/短期信号直接 0 分，判定与总分减半共用 [`outsource_hit`]（含否定语境剔除），
+/// 因此 JD 写「非外包、非驻场」不会被扣分；JD 含离职期/过渡岗给 4 分。
 pub fn score_company(company: Option<&str>, title: Option<&str>, jd: Option<&str>) -> u8 {
-    let text = format!(
-        "{} {} {}",
-        company.unwrap_or(""),
-        title.unwrap_or(""),
-        jd.unwrap_or("")
-    );
-    if OUTSOURCE_WORDS.iter().any(|w| text.contains(w)) {
-        return 0;
-    }
-    if is_short_term(&format!("{} {}", title.unwrap_or(""), jd.unwrap_or(""))) {
+    if outsource_hit(company, title, jd) {
         return 0;
     }
     if let Some(jd) = jd {
@@ -388,26 +444,53 @@ mod tests {
     }
 
     #[test]
-    fn skill_all_core_hits_is_full_marks() {
+    fn skill_all_core_hits_fills_core_points() {
         // 用画像自身的技能拼 JD，避免本测试变成「画像内容快照」。
         let jd = DEFAULT_PROFILE.core_skills.join(" ");
-        assert_eq!(score_skill(Some(&jd), &DEFAULT_PROFILE), 40);
+        // 核心 30 分打满，加分项一个没提 → 30
+        assert_eq!(score_skill(Some(&jd), &DEFAULT_PROFILE), 30);
     }
 
     #[test]
     fn skill_partial_hits() {
-        // 取画像里前两项 core 技能：各 1.0 → 2.0 / 5.0 * 40 = 16
+        // 取画像里前两项 core 技能：2/4 × 30 = 15
         let core_two = format!(
             "{} 与 {}",
             DEFAULT_PROFILE.core_skills[0], DEFAULT_PROFILE.core_skills[1]
         );
-        assert_eq!(score_skill(Some(&core_two), &DEFAULT_PROFILE), 16);
-        // 取画像里前两项 bonus 技能：各 0.5 → 1.0 / 5.0 * 40 = 8
+        assert_eq!(score_skill(Some(&core_two), &DEFAULT_PROFILE), 15);
+        // 取画像里前两项 bonus 技能：2/5 × 10 = 4
         let bonus_two = format!(
             "{} {}",
             DEFAULT_PROFILE.bonus_skills[0], DEFAULT_PROFILE.bonus_skills[1]
         );
-        assert_eq!(score_skill(Some(&bonus_two), &DEFAULT_PROFILE), 8);
+        assert_eq!(score_skill(Some(&bonus_two), &DEFAULT_PROFILE), 4);
+    }
+
+    #[test]
+    fn skill_ignores_substring_false_positives() {
+        // `javascript` 不算命中 `java`，纯前端 JD 技能分为 0
+        assert_eq!(score_skill(Some("JavaScript 前端开发"), &DEFAULT_PROFILE), 0);
+        // `django`/`mongodb` 不算命中 `go`
+        assert_eq!(
+            score_skill(Some("Django + MongoDB 后端"), &DEFAULT_PROFILE),
+            0
+        );
+        // 写全称 `golang` 才按 GO 加分（10/5 = 2 分）
+        assert_eq!(score_skill(Some("Golang 服务端"), &DEFAULT_PROFILE), 2);
+    }
+
+    #[test]
+    fn skill_zero_core_is_capped_by_bonus_points() {
+        // 零核心技能时加分项最多 10 分，通用工具堆不出技能分
+        let jd = DEFAULT_PROFILE.bonus_skills.join(" ");
+        assert_eq!(score_skill(Some(&jd), &DEFAULT_PROFILE), 10);
+        // 两项核心技能（15 分）已经强于满分加分项
+        let core_two = format!(
+            "{} {}",
+            DEFAULT_PROFILE.core_skills[0], DEFAULT_PROFILE.core_skills[1]
+        );
+        assert!(score_skill(Some(&core_two), &DEFAULT_PROFILE) > 10);
     }
 
     #[test]
@@ -440,30 +523,51 @@ mod tests {
     fn salary_unparsable_returns_10() {
         assert_eq!(score_salary(Some("面议"), &DEFAULT_PROFILE), 10);
         assert_eq!(score_salary(None, &DEFAULT_PROFILE), 10);
-    }
-
-    #[test]
-    fn salary_full_span_is_20() {
-        // 15-35K 正好覆盖期望区间
-        assert_eq!(score_salary(Some("15-35K"), &DEFAULT_PROFILE), 20);
-    }
-
-    #[test]
-    fn salary_above_range_gives_fallback() {
-        // 100-9999K：low 夹到 35 → hi<=lo，gap = 35-35 = 0 → 10
+        // 四位数上限超出 `salary_re` 的 \d{1,3}，按解析失败处理
         assert_eq!(score_salary(Some("100-9999K"), &DEFAULT_PROFILE), 10);
     }
 
     #[test]
-    fn salary_far_below_range_penalized() {
-        // 1-2K：hi<=lo，gap = 1-35 = -34 ≤ 5 → 10
-        assert_eq!(score_salary(Some("1-2K"), &DEFAULT_PROFILE), 10);
+    fn salary_full_span_is_20() {
+        // 上限覆盖到期望上限即满分
+        assert_eq!(score_salary(Some("15-35K"), &DEFAULT_PROFILE), 20);
+        assert_eq!(score_salary(Some("20-35K"), &DEFAULT_PROFILE), 20);
     }
 
     #[test]
-    fn salary_partial_overlap() {
-        // 20-35K：lo=max(20,15)=20, hi=min(35,35)=35 → (15/20)*20 = 15
-        assert_eq!(score_salary(Some("20-35K"), &DEFAULT_PROFILE), 15);
+    fn salary_above_expectation_is_full_marks() {
+        // 开得比期望高不扣分（旧实现给 5/10 分，方向反了）
+        assert_eq!(score_salary(Some("30-60K"), &DEFAULT_PROFILE), 20);
+        assert_eq!(score_salary(Some("50-80K"), &DEFAULT_PROFILE), 20);
+    }
+
+    #[test]
+    fn salary_inside_range_scales_from_floor() {
+        // 上限 15 = 期望下沿 → 10；上限 30 → 10 + 10×15/20 = 17.5 → 18
+        assert_eq!(score_salary(Some("10-15K"), &DEFAULT_PROFILE), 10);
+        assert_eq!(score_salary(Some("20-30K"), &DEFAULT_PROFILE), 18);
+    }
+
+    #[test]
+    fn salary_below_range_decays() {
+        // 上限 2K：10×2/15 = 1.33 → 1（旧实现给 10，名为惩罚实则满分）
+        assert_eq!(score_salary(Some("1-2K"), &DEFAULT_PROFILE), 1);
+        // 上限 8K：10×8/15 = 5.33 → 5
+        assert_eq!(score_salary(Some("5-8K"), &DEFAULT_PROFILE), 5);
+    }
+
+    #[test]
+    fn salary_is_monotone_in_upper_bound() {
+        let mut prev = 0;
+        for s in [
+            "1-2K", "5-8K", "8-10K", "10-14K", "10-15K", "15-25K", "20-30K", "30-60K",
+            "50-80K",
+        ] {
+            let v = score_salary(Some(s), &DEFAULT_PROFILE);
+            assert!(v >= prev, "薪资 {s} 得 {v}，低于前一档 {prev}");
+            prev = v;
+        }
+        assert_eq!(prev, 20);
     }
 
     // ---- 经验维度 ----
@@ -518,9 +622,25 @@ mod tests {
 
     #[test]
     fn direction_adjacent_titles() {
-        for t in ["Node 工程师", "Go 开发", "Python 开发", "前端工程师"] {
+        for t in [
+            "Node 工程师",
+            "Node.js 工程师",
+            "Go 开发",
+            "Golang 工程师",
+            "Python 开发",
+            "前端工程师",
+        ] {
             assert_eq!(score_direction(Some(t)), 10, "「{t}」应为 10");
         }
+    }
+
+    #[test]
+    fn direction_does_not_match_inside_words() {
+        // `JavaScript` 不是 `java`：按「前端」相邻档给 10，而不是核心档 15
+        assert_eq!(score_direction(Some("JavaScript 前端工程师")), 10);
+        // `Django`/`MongoDB` 不是 `go`
+        assert_eq!(score_direction(Some("Django 工程师")), 7);
+        assert_eq!(score_direction(Some("MongoDB 运维")), 7);
     }
 
     #[test]
@@ -545,6 +665,19 @@ mod tests {
     #[test]
     fn company_transient_jd_is_4() {
         assert_eq!(score_company(Some("某科技"), Some("Java"), Some("这是离职期替岗")), 4);
+    }
+
+    #[test]
+    fn company_negated_outsourcing_keeps_full_marks() {
+        // 声明「非外包、非驻场」的岗位不该被当成外包
+        assert_eq!(
+            score_company(
+                Some("某科技"),
+                Some("Java 后端"),
+                Some("本岗位非外包、非驻场，自有产品研发")
+            ),
+            10
+        );
     }
 
     // ---- 完整打分 ----
@@ -681,5 +814,46 @@ mod tests {
             &DEFAULT_PROFILE,
         );
         assert!(r.score <= 100, "实际 {}", r.score);
+    }
+
+    #[test]
+    fn negated_outsourcing_jd_is_not_halved() {
+        // JD 主动声明「非外包、非驻场」：公司质量不该 0 分，总分也不该减半
+        let jd = format!(
+            "本岗位非外包、非驻场，自有产品研发。{}",
+            DEFAULT_PROFILE.core_skills.join(" ")
+        );
+        let r = rule_score_all(
+            Some("某某科技有限公司"),
+            Some("Java 后端工程师"),
+            Some("20-35K"),
+            Some("5-10年"),
+            Some(&jd),
+            &DEFAULT_PROFILE,
+        );
+        assert!(!r.reason.contains("总分减半"), "{}", r.reason);
+        // 30 技能 + 20 薪资 + 15 经验 + 15 方向 + 10 公司 = 90
+        assert_eq!(r.score, 90);
+        assert!(r.passes(MIN_SCORE_DEFAULT));
+    }
+
+    #[test]
+    fn probation_and_bonus_jd_is_not_short_term() {
+        // 「试用期3-6个月」「年终奖2-6个月」是待遇文案，不是项目制
+        let jd = format!(
+            "{} 试用期3-6个月，年终奖2-6个月。",
+            DEFAULT_PROFILE.core_skills.join(" ")
+        );
+        let r = rule_score_all(
+            Some("某某科技有限公司"),
+            Some("Java 后端工程师"),
+            Some("20-35K"),
+            Some("5-10年"),
+            Some(&jd),
+            &DEFAULT_PROFILE,
+        );
+        assert!(!r.reason.contains("总分减半"), "{}", r.reason);
+        assert_eq!(r.score, 90);
+        assert!(r.passes(MIN_SCORE_DEFAULT));
     }
 }

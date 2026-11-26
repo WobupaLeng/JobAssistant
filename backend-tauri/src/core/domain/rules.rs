@@ -247,15 +247,31 @@ fn rest_family(hit: &str) -> RestFamily {
     }
 }
 
+/// 待遇语境词：所在分句讲的是员工待遇而非岗位周期，参与短期判定前整段丢弃。
+const SHORT_TERM_NOISE: &[&str] = &[
+    "试用期", "实习期", "转正", "年终奖", "绩效", "奖金", "提成", "补贴", "福利",
+];
+
 /// 岗位是否属于短期/项目制。
+///
+/// 先按句读切段并丢掉待遇语境段：旧实现把「试用期3-6个月」「年终奖2-6个月」
+/// 判成项目制 → 公司质量 0 分 + 总分减半，正常岗位必被淘汰（用户 m00070 决定修掉）。
 pub fn is_short_term(text: &str) -> bool {
-    short_term_re().is_match(text)
+    short_term_re().is_match(&strip_treatment_clauses(text))
 }
 
-/// 外包/短期信号判定（`_company` 与总分减半共用）。
+/// 丢弃讲员工待遇的分句，只留下描述岗位本体的文本。
+fn strip_treatment_clauses(text: &str) -> String {
+    text.split_inclusive(['。', '！', '？', '；', ';', '，', ',', '\n'])
+        .filter(|seg| !SHORT_TERM_NOISE.iter().any(|w| seg.contains(w)))
+        .collect()
+}
+
+/// 外包/短期信号判定（`score_company` 与总分减半共用）。
 ///
-/// 注意：这里**不做**否定语境剔除，与 Python 的 `_company` 一致；
-/// `reject()` 内部另有剔除逻辑，两者不同，不要合并。
+/// 先剔除否定语境（「非外包」「非驻场」），与 [`reject_labeled`] 的 `outsource`
+/// 分支同一口径。旧实现在这里不剔除，导致 JD 主动声明「非外包」的岗位公司质量
+/// 0 分 + 总分减半必被淘汰（用户 m00070 决定修掉）。
 pub fn outsource_hit(company: Option<&str>, title: Option<&str>, jd: Option<&str>) -> bool {
     let text = format!(
         "{} {} {}",
@@ -263,7 +279,8 @@ pub fn outsource_hit(company: Option<&str>, title: Option<&str>, jd: Option<&str
         title.unwrap_or(""),
         jd.unwrap_or("")
     );
-    if OUTSOURCE_WORDS.iter().any(|w| text.contains(w)) {
+    let cleaned = outsource_neg_re().replace_all(&text, "${1}__NEG__").to_string();
+    if OUTSOURCE_WORDS.iter().any(|w| cleaned.contains(w)) {
         return true;
     }
     is_short_term(&format!("{} {}", title.unwrap_or(""), jd.unwrap_or("")))
@@ -833,8 +850,24 @@ mod tests {
     fn outsource_hit_detects_and_ignores_negation() {
         assert!(outsource_hit(Some("某科技"), Some("Java"), Some("外包岗位")));
         assert!(outsource_hit(None, Some("3个月短期项目制"), None));
-        // 注意：这个函数不做否定剔除，与 Python `_company` 一致
-        assert!(outsource_hit(None, None, Some("非外包")));
+        // 否定语境与 `reject_labeled` 的 outsource 分支同口径
+        assert!(!outsource_hit(None, None, Some("非外包")));
+        assert!(!outsource_hit(
+            None,
+            None,
+            Some("本岗位非外包、非驻场，自有产品")
+        ));
+    }
+
+    #[test]
+    fn short_term_ignores_treatment_clauses() {
+        // 员工待遇不是岗位周期
+        assert!(!is_short_term("试用期3-6个月，五险一金"));
+        assert!(!is_short_term("年终奖2-6个月"));
+        // 真·项目制仍然命中
+        assert!(is_short_term("项目周期3-6个月"));
+        assert!(is_short_term("3个月短期项目制"));
+        assert!(is_short_term("岗位名显示短期项目"));
     }
 
     #[test]

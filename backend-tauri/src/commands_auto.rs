@@ -354,6 +354,44 @@ pub async fn auto_greet_next(
     }) {
         Ok(text) => text,
         Err(e) => {
+            // 没有「立即沟通」入口的岗位重试也不会变：标成不投递、只提示一次，
+            // 不计失败（否则连撞三个关岗就会把自动投递暂停掉）。
+            if crate::commands_chat::no_chat_entry(&e) {
+                let marked = with_store(&store, |s| {
+                    s.set_rejected(&[summary.job_id.clone()], true)
+                        .map_err(store_err)
+                });
+                if let Err(err) = marked {
+                    crate::commands_logs::push(
+                        "warn",
+                        format!("标记不投递失败（{}）：{err}", summary.company),
+                    );
+                }
+                let rt = state.0.lock().map_err(|_| "自动投递状态锁已中毒".to_string())?;
+                crate::commands_logs::push(
+                    "warn",
+                    format!(
+                        "岗位没有「立即沟通」入口，已标记不投递：{} · {}",
+                        summary.company, summary.title
+                    ),
+                );
+                return Ok(AutoNextReply {
+                    ok: false,
+                    stage: "pick".into(),
+                    error: "岗位没有「立即沟通」入口，已标记为不投递".to_string(),
+                    skip: true,
+                    job_id: summary.job_id,
+                    company: summary.company,
+                    title: summary.title,
+                    text: String::new(),
+                    source: String::new(),
+                    note: String::new(),
+                    tokens: 0,
+                    next_at_ms: 0,
+                    remaining_ms: rt.remaining_ms(now),
+                    sent: rt.sent,
+                });
+            }
             let mut rt = state.0.lock().map_err(|_| "自动投递状态锁已中毒".to_string())?;
             let gave_up = rt.record_failure();
             crate::commands_logs::push("warn", format!("自动投递失败（{}）：{e}", summary.company));

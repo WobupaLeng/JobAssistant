@@ -101,6 +101,14 @@ pub(crate) fn handle_of(state: &tauri::State<'_, ScrapeState>) -> CmdResult<Side
     }
 }
 
+/// 岗位详情页没有「立即沟通」入口：职位已关闭，或已与该 Boss 建过会话。
+///
+/// sidecar 的 `ChatError` 文案带条件说明（「职位可能已关闭，或你已与该 Boss
+/// 建立过会话」），这里只认入口名，不依赖后半句的具体措辞。
+pub(crate) fn no_chat_entry(err: &str) -> bool {
+    err.contains("立即沟通")
+}
+
 /// 在锁外等待一条聊天回执。
 pub(crate) fn request_chat(
     handle: &SidecarHandle,
@@ -287,13 +295,35 @@ fn row_to_message(r: &ChatMessageRow) -> ChatMessage {
 /// 前端拿到 uid 后应把它当作该会话的正式标识：后续 `chat_messages` / `chat_send`
 /// 都用它，并且可以把占位行替换掉。
 #[tauri::command]
-pub async fn chat_open(state: tauri::State<'_, ScrapeState>, job_id: String) -> CmdResult<OpenReply> {
+pub async fn chat_open(
+    state: tauri::State<'_, ScrapeState>,
+    store: tauri::State<'_, crate::commands_db::StoreState>,
+    job_id: String,
+) -> CmdResult<OpenReply> {
     let job_id = job_id.trim().to_string();
     if job_id.is_empty() {
         return Err("缺少 jobId：无法建立会话".to_string());
     }
     let handle = handle_of(&state)?;
-    let data = request_chat(&handle, &Command::ChatOpen { job_id })?;
+    let data = match request_chat(&handle, &Command::ChatOpen { job_id: job_id.clone() }) {
+        Ok(data) => data,
+        Err(e) if no_chat_entry(&e) => {
+            // 没有入口的岗位不会因为重试变成有入口：标成不投递，从待投递里摘掉。
+            let marked = with_store(&store, |s| {
+                s.set_rejected(std::slice::from_ref(&job_id), true)
+                    .map_err(store_err)
+            });
+            if let Err(e) = marked {
+                crate::commands_logs::push("warn", format!("标记不投递失败（{job_id}）：{e}"));
+            }
+            crate::commands_logs::push(
+                "warn",
+                format!("岗位没有「立即沟通」入口，已标记不投递：{job_id}"),
+            );
+            return Err("该岗位没有「立即沟通」入口，已标记为不投递".to_string());
+        }
+        Err(e) => return Err(e),
+    };
     let uid = data
         .get("uid")
         .and_then(|v| v.as_str())
