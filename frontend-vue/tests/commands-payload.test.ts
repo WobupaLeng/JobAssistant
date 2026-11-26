@@ -1,5 +1,5 @@
 /**
- * 载荷形状契约（C2）：48 条命令「包 args / 平铺 / 无参」逐条钉死。
+ * 载荷形状契约（C2）：59 条命令「包 args / 平铺 / 无参」逐条钉死。
  *
  * 用一个只记录调用的假 `window.__TAURI_INTERNALS__`（**只在测试里存在**，
  * `src/` 里没有任何假桩），断言真正发出去的 `(cmd, payload)`。
@@ -31,6 +31,7 @@ const EXPECTED_COMMANDS = [
   'window_minimize',
   'window_toggle_maximize',
   'window_close',
+  'set_window_theme',
   'list_jobs',
   'get_job',
   'db_overview',
@@ -125,7 +126,7 @@ afterEach(() => {
  * 直接读源文件做文本扫描，不做 AST：48 条命令名都在同一行。
  */
 describe('命令名覆盖：与 generate_handler! 逐条对齐（C1）', () => {
-  it('58 条命令恰好覆盖一次，不多不少', () => {
+  it('59 条命令恰好覆盖一次，不多不少', () => {
     const dir = fileURLToPath(new URL('../src/api/commands/', import.meta.url));
     const used = new Set<string>();
     for (const name of readdirSync(dir).filter((f: string) => f.endsWith('.ts'))) {
@@ -139,7 +140,7 @@ describe('命令名覆盖：与 generate_handler! 逐条对齐（C1）', () => {
         used.add(m[1]!);
       }
     }
-    expect(used.size).toBe(58);
+    expect(used.size).toBe(59);
     expect(EXPECTED_COMMANDS.filter((c) => !used.has(c))).toEqual([]);
     const known: readonly string[] = EXPECTED_COMMANDS;
     expect([...used].filter((c) => !known.includes(c))).toEqual([]);

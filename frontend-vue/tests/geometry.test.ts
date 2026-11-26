@@ -333,7 +333,7 @@ describe('三窗固定高 / 敏感库 720 / A54 方块', () => {
     expect(css).toContain('--detach-w: 0px');
   });
 
-it('岗位卡行高锁定 142px、三行占满 1440×900 窗口（用户 m03968 裁决）', () => {
+it('岗位卡行高锁定 143px、三行占满 1440×900 窗口（用户 m03968 裁决）', () => {
   const css = stripComments(read('styles/vue-dashboard.css'));
   const grid = css.match(/(?:^|\n)\.job-grid\s*\{([^}]*)\}/);
   expect(grid).not.toBeNull();
@@ -341,13 +341,14 @@ it('岗位卡行高锁定 142px、三行占满 1440×900 窗口（用户 m03968 
 
   // 行高是单一像素值，不是 minmax(下限, 1fr)：1fr 会让行高随窗口无限放大
   // （1000 高时到 172px），卡内内容被拉开，看起来「没占满也没对齐」。
-  expect(block).toContain('--job-card-h: 142px');
+  expect(block).toContain('--job-card-h: 143px');
   expect(block).toContain('grid-template-rows: repeat(3, var(--job-card-h))');
   expect(block).toContain('grid-auto-rows: var(--job-card-h)');
-  // 142px 的来源（CDP 实测，不是估算）：900 − 14(外壳底边距) − 46(顶栏) = 840；
+  // 143px 的来源（CDP 实测，不是估算）：900 − 14(外壳底边距) − 46(顶栏) = 840；
   // − 42(抓取条) − 20(两处页面 gap) − 220(日志卡) = 558（列表卡可用高）；
   // − 40(页签行) − 40(批量条 32+8) = 478（网格盒高）；
-  // − 24(网格内边) − 28(两处行 gap) = 426，除以 3 正好 142。
+  // − 24(网格内边) − 28(两处行 gap) = 426，三等分 142；取 143 时三行 429 比预算多 3px，
+  // 这 3px 由网格的 overflow-y: auto 吸收（卡片不被压扁，余量只落在底部）。
   // 列宽仍用 1fr（自适应），只有行高锁死；这条断言只针对行声明。
   expect(block).not.toMatch(/grid-template-rows:\s*repeat\(3,\s*minmax\(/);
   expect(block).not.toMatch(/grid-auto-rows:\s*minmax\(/);

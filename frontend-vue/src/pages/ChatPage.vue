@@ -1346,6 +1346,7 @@ defineExpose({
 
     <template #rail>
       <FriendList
+        v-if="ui.chatOpen"
         prefix="chat-detach-rail"
         :title="'Boss 列表'"
         :unread="unreadSessions(friends, readMarks)"

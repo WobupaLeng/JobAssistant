@@ -90,7 +90,9 @@ describe('顶栏与对话框', () => {
 describe('日志行（原型 2526 用固定 log-row）', () => {
   it('每行都有 data-testid="log-row"', () => {
     const card = read('frontend-vue/src/components/LogCard.vue');
-    expect(card).toContain('class="log-row" data-testid="log-row"');
+    // 两个属性各自成行（多行属性写法），逐条断言，别把空格与换行顺序钉死。
+    expect(card).toContain('class="log-row"');
+    expect(card).toContain('data-testid="log-row"');
   });
 });
 

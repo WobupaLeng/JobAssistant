@@ -278,7 +278,8 @@ function onPickThemeMode(mode: 'dark' | 'light'): void {
   themeLabel.value = mode === 'dark' ? '深色' : '浅色';
   applyPalette(paletteId.value, mode);
   // 窗口模糊底色分深浅两档：深色档是深蓝黑，浅色必须换成近白，否则整窗发灰。
-  void setWindowTheme(mode);
+  // 非 Tauri 环境（单测 / 浏览器预览）里这条命令必然失败：纯外观增强，吞掉即可。
+  void setWindowTheme(mode).catch(() => undefined);
 }
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -537,23 +538,20 @@ async function primeLogs(): Promise<void> {
 watch(
   () => login.value?.state,
   (state) => {
-    if (state === 'logged_in') {
-      void primeLogs();
-      startLogPolling();
-    } else {
-      stopLogPolling();
-    }
+    // 只补首屏快照；轮询闸门由 `syncTick` 按「已登录 + 运行中」自己开关。
+    if (state === 'logged_in') void primeLogs();
+    else stopLogPolling();
   },
   { immediate: true },
 );
 
 /**
- * 日志轮询的唯一闸门：**已登录**即可轮询。
- * 日志来自 Rust 内存环（不碰浏览器），空闲态也要能看见登录/聊天产生的日志；
+ * 日志轮询的唯一闸门：**已登录 + 抓取运行中**才允许继续轮询。
+ * 空闲态一条定时 IPC 都不发（首屏那一次快照由 `primeLogs` 补，不算轮询）；
  * 读失败（sidecar 不可用 / 管道关闭）即停，不循环重试。
  */
 function canPollLogs(): boolean {
-  return isLoggedIn();
+  return isLoggedIn() && progress.value.running;
 }
 
 let logPollStopped = false;
@@ -1203,7 +1201,8 @@ function onGlobalPointerDown(ev: PointerEvent): void {
 onMounted(() => {
   overlayRoot.value = document.querySelector('#app-overlay-root');
   // 首帧主题来自 index.html 脚本，Rust 不知道；挂载时补一次，让窗口底色与界面一致。
-  void setWindowTheme(readInitialTheme());
+  // 非 Tauri 环境里 `set_window_theme` 不可用，失败不影响界面（纯外观增强）。
+  void setWindowTheme(readInitialTheme()).catch(() => undefined);
   tailInTopbar.value = document.querySelector('.tb-embed') !== null;
   highlightCompany.value = readHighlightCompany();
   window.addEventListener('storage', onStorageHighlight);
