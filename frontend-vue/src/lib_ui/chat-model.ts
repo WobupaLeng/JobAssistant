@@ -113,11 +113,12 @@ export type FriendMsgTone = 'unread' | 'read' | 'sent' | 'plain';
 
 /**
  * 副行该用哪种颜色（已送达 / 已读 / 未读）：
- * `unread > 0` 为未读；否则在 `last_from_me` 为真时看 `last_status`（`2` 已读、`1` 已送达）。
- * 对方发的最后一条不加状态词，标出来只是噪声。
+ * `unread`（派生未读，判据见 `chat-read.ts`）或 `unread > 0` 为未读；否则在
+ * `last_from_me` 为真时看 `last_status`（`2` 已读、`1` 已送达）。对方发的最后一条
+ * 只有「未读」一种状态词——已读 / 送达说的都是我发的那条。
  */
-export function friendMsgTone(friend: Friend): FriendMsgTone {
-  if ((friend.unread ?? 0) > 0) return 'unread';
+export function friendMsgTone(friend: Friend, unread = false): FriendMsgTone {
+  if (unread || (friend.unread ?? 0) > 0) return 'unread';
   if (friend.last_from_me !== true) return 'plain';
   const status = friend.last_status ?? 0;
   if (status === 2) return 'read';

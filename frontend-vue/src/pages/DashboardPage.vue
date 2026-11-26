@@ -41,6 +41,7 @@ import type {
   SensitivePage,
 } from '../api/types';
 import { setGreetDraft } from '../features/chat/greet-draft';
+import { tokenSpentTick } from '../lib_ui/token-ledger';
 import {
   LIST_TAB_DEFAULT,
   SORT_DEFAULT,
@@ -187,8 +188,8 @@ const minScore = ref<number | null>(null);
 const maxJd = ref(0);
 const config = shallowRef<AppConfigReply | null>(null);
 const tokensTotal = computed(() => config.value?.tokens_total ?? 0);
-/* 分项读数：只读既有 config 字段，零新增 invoke。Rust 核心暂无累计写入路径，
- * 读数为旧库遗留值，前端不造数。 */
+/* 分项读数：只读既有 config 字段，零新增 invoke 形状。累加由后端 ADR-005 的 `bump_tokens`
+ * 落库，前端只负责重读（见下方 `refreshTokens`）。 */
 const tokensGreet = computed(() => config.value?.tokens_greet ?? 0);
 const tokensScore = computed(() => config.value?.tokens_score ?? 0);
 
@@ -619,7 +620,10 @@ async function loadSpecAndConfig(): Promise<void> {
     const cfg = await getAppConfig();
     config.value = cfg;
     if (scoreMax.value === null) scoreMax.value = cfg.score_max;
-    if (minScore.value === null) minScore.value = cfg.min_score;
+    // 门槛以库里存的为准：`score_min_default` 只是「从没设置过」时的兜底。
+    // 只在 null 时回填会让用户改过的值在重进页面后被默认值盖掉（输入框回显 70，
+    // 而打分日志按库里的 60 生效）。
+    if (Number.isFinite(cfg.min_score)) minScore.value = cfg.min_score;
     maxJd.value = cfg.max_jd;
     scoreMode.value = cfg.score_mode === 'llm' ? 'llm' : 'rule';
     llmPrefilter.value = clampPrefilter(cfg.llm_prefilter);
@@ -633,6 +637,22 @@ async function loadSpecAndConfig(): Promise<void> {
     fail(`配置读取失败：${errText(e)}`, 'get_app_config', { label: '重试', run: () => void loadSpecAndConfig() });
   }
 }
+
+/**
+ * 只重读 token 三键。后端在打分 / 打招呼 / 自动投递的回执里累加（ADR-005），读数变了顶栏就得
+ * 当场跳一下（`TopbarTail` 的 `token-bump` 挂在 props 变化上）。失败静默：读数是辅助信息，
+ * 不值得一张错误卡片，下一轮自会重读。
+ */
+async function refreshTokens(): Promise<void> {
+  try {
+    config.value = await getAppConfig();
+  } catch {
+    /* 见上：不弹错误卡片、不进重试队列 */
+  }
+}
+
+// 有人刚花掉 token（聊天里生成话术、自动投递发出一条）：重读一次权威累计。
+watch(tokenSpentTick, () => void refreshTokens());
 
 // ---------------------------------------------------------------- 写：筛选
 

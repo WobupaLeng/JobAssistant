@@ -20,13 +20,16 @@ import {
 } from '../api/commands/chat';
 import { greetDraft, greetOne } from '../api/commands/greet';
 import { loginAck, loginStatus, sessionOpen } from '../api/commands/scrape';
+import { allowJobs, getJob, markDelivered, rejectJobs, unmarkDelivered } from '../api/commands/db';
+import { getScoringSpec } from '../api/commands/shell';
 import { listenLoginState, type UnlistenFn } from '../api/events';
-import type { ChatMessage, Friend, GreetReply } from '../api/types';
+import type { ChatMessage, Friend, GreetReply, Job } from '../api/types';
 import AutoApplyBar from '../components/chat/AutoApplyBar.vue';
 import ChatCompose from '../components/chat/ChatCompose.vue';
 import ChatDetach from '../components/chat/ChatDetach.vue';
 import ChatThread from '../components/chat/ChatThread.vue';
 import FriendList from '../components/chat/FriendList.vue';
+import JobDetailDrawer from '../components/JobDetailDrawer.vue';
 import {
   emptyStatus,
   toggleAction,
@@ -39,6 +42,7 @@ import {
   type HeartbeatTimer,
 } from '../lib_ui/auto-heartbeat';
 import { markJobSent } from '../lib_ui/job-live';
+import { markTokensSpent } from '../lib_ui/token-ledger';
 import {
   AI_DRAFT_FAIL_PREFIX,
   CHAT_RAIL_TITLE,
@@ -79,13 +83,14 @@ import {
   pickFriend,
   shouldRetryWithSession,
   sortFriends,
-  unreadTotal,
   withPending,
 } from '../lib_ui/chat-model';
+import { loadReadMarks, saveReadMark, unreadSessions, type ReadMarks } from '../lib_ui/chat-read';
 import { needsSession } from '../lib_ui/session';
 import { isKnownState, isLoggedIn } from '../lib_ui/login-model';
 import { withLoginAck } from '../lib_ui/login-broadcast';
 import { peekGreetDraft, setGreetDraft, takeGreetDraft } from '../features/chat/greet-draft';
+import { actionFailPrefix, actionNote, type DetailAct } from '../lib_ui/job-detail-model';
 import { hasHigherOverlay } from '../lib_ui/overlay-stack';
 
 /**
@@ -100,6 +105,8 @@ const emit = defineEmits<{
 /* ---------------------------------- 会话列表 ---------------------------------- */
 
 const friends = ref<Friend[]>([]);
+/** 已读水位：Boss 的 unreadMsgCount 恒为 0，未读只能按「HR 最后发言 + 我没读过」派生。 */
+const readMarks = ref<ReadMarks>(loadReadMarks());
 const loadingFriends = ref(true);
 const friendsError = ref('');
 /** 卡片「打招呼」带来的岗位：只对该 Boss 生效，发送成功时只标记此岗位已投递。 */
@@ -156,6 +163,12 @@ const extraNote = computed(() => {
   return text;
 });
 
+/** 心跳写的这条是不是真错误（决定 auto-note 用红条还是中性条）。 */
+const autoNoteBad = computed(() => {
+  const text = extraNote.value;
+  return text !== '' && (isSessionNote(text) || /失败[:：]/.test(text));
+});
+
 /**
  * 读取/建会话/发送失败时把 Playwright 原始文案换成一句「能照做」的话，
  * 原文仍进日志。只认三类原因：导航被打断、浏览器断开、会话被报成不存在；
@@ -193,6 +206,9 @@ const autoStatus = ref(emptyStatus());
 const autoSending = ref(false);
 const autoBusy = ref(false);
 const autoNote = ref('');
+/** 自动投递成功提示：绿色、2 秒后淡出（失败提示仍然常驻，等用户处理）。 */
+const autoNoteOk = ref(false);
+let autoNoteTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * 状态心跳（`lib_ui/auto-heartbeat.ts`）：60~90 秒随机，只受登录限制。
@@ -368,6 +384,10 @@ async function pick(uid: string): Promise<void> {
   ui.value = pickFriend(ui.value, uid);
   const friend = friends.value.find((f) => f.uid === uid) ?? null;
   if (friend !== null && friend.unread > 0) friend.unread = 0;
+  // 打开即已读：把水位抬到这条会话的最新时刻，红点与「[未读]」当场消失。
+  if (friend !== null) {
+    readMarks.value = saveReadMark(readMarks.value, friend.uid, friend.last_ts ?? 0);
+  }
   if (switched) {
     messages.value = [];
     feedUid.value = '';
@@ -507,6 +527,82 @@ async function greetFor(uid: string): Promise<void> {
   await generateGreet();
 }
 
+/* -------------------------------- 岗位详情抽屉 -------------------------------- */
+
+/**
+ * 复用概览页那只 `JobDetailDrawer`：本页只负责按这一行的岗位 id 取数，抽屉自己画、自己补拉 JD。
+ * 门槛 / 满分仍只来自 `get_scoring_spec`（C10），本页不写任何分数常量。
+ */
+const detailJob = ref<Job | null>(null);
+const detailMinScore = ref<number | null>(null);
+const detailScoreMax = ref<number | null>(null);
+/** 抽屉是整窗浮层，挂在 `#app-overlay-root` 上（与概览页同一条路线）。 */
+const overlayRoot = ref<HTMLElement | null>(null);
+
+/** 这一行对应的岗位 id；占位会话的岗位记在本机 localStorage（`pendingJobId`）。 */
+function friendJobId(friend: Friend): string {
+  return friend.job_id ?? (isPendingFriend(friend) ? pendingJobId(friend) : '');
+}
+
+async function openFriendDetail(uid: string): Promise<void> {
+  const friend = friends.value.find((f) => f.uid === uid) ?? null;
+  if (friend === null) return;
+  const jobId = friendJobId(friend);
+  if (jobId === '') {
+    note.value = '这条会话没有关联岗位，看不到岗位详情';
+    return;
+  }
+  try {
+    if (detailScoreMax.value === null) {
+      const spec = await getScoringSpec();
+      detailScoreMax.value = spec.score_max;
+      detailMinScore.value = spec.score_min_default;
+    }
+    const job = await getJob(jobId);
+    if (job === null) {
+      note.value = '这个岗位已不在库里（可能被清理过）';
+      return;
+    }
+    detailJob.value = job;
+  } catch (e) {
+    note.value = `读取岗位详情失败：${errText(e)}`;
+  }
+}
+
+function closeFriendDetail(): void {
+  detailJob.value = null;
+}
+
+/**
+ * 抽屉底部单条动作：与概览页共用同一批命令（载荷 `{args:{jobIds}}`）。
+ * 本页没有列表快照要刷，动作成功后只关抽屉 + 一句提示。
+ */
+async function onFriendDetailAct(action: DetailAct, jobId: string): Promise<void> {
+  if (jobId === '') return;
+  const ids = [jobId];
+  try {
+    const hit =
+      action === 'reject'
+        ? await rejectJobs(ids)
+        : action === 'allow'
+          ? await allowJobs(ids)
+          : action === 'undo-deliver'
+            ? await unmarkDelivered(ids)
+            : ((await markDelivered(ids)), ids.length);
+    note.value = actionNote(action, hit);
+    closeFriendDetail();
+  } catch (e) {
+    note.value = `${actionFailPrefix(action)}${errText(e)}`;
+  }
+}
+
+/** 「去跟 Boss 聊」：抽屉里那一行的岗位 → 列表里同岗位的会话。 */
+function onFriendDetailChat(jobId: string): void {
+  closeFriendDetail();
+  const hit = friends.value.find((f) => friendJobId(f) === jobId) ?? null;
+  if (hit !== null) void pick(hit.uid);
+}
+
 /* ---------------------------------- 发送 ------------------------------------ */
 
 /** 发出一条消息后，把会话列表里那一行改成「刚发过」（副行文本 + `[送达]`）。 */
@@ -639,6 +735,8 @@ async function generateGreet(reply = ''): Promise<void> {
       findByCompany: friend.company,
       reply,
     });
+    // 这次生成花了 token：让概览把累计重读一遍（顶栏读数当场跳一下）。
+    markTokensSpent();
   } catch (e) {
     note.value = `生成打招呼失败：${errText(e)}`;
   } finally {
@@ -697,6 +795,8 @@ async function generateAiDraft(): Promise<void> {
       findByCompany: friend.company,
       reply: aiReplyContext(messages.value ?? []),
     });
+    // 同「生成打招呼」：回执一到就通知概览重读累计（空串回执也可能已经花掉了 token）。
+    markTokensSpent();
     const text = reply.text.trim();
     if (text === '') {
       // 规则兜底与模型都可能给出空串：不把空内容塞进输入框，也不清掉用户已打的字。
@@ -777,9 +877,24 @@ const autoPhase = computed<AutoPhase>(() => {
 });
 
 function onAutoNote(text: string): void {
-  if (text.trim() === '') return;
-  autoNote.value = text;
-  note.value = text;
+  const t = text.trim();
+  if (t === '') return;
+  autoNote.value = t;
+  note.value = t;
+  if (autoNoteTimer !== null) {
+    clearTimeout(autoNoteTimer);
+    autoNoteTimer = null;
+  }
+  // 心跳成功时写的是「自动投递已发出一条」；其余都是要人处理的失败/引导语。
+  autoNoteOk.value = t.startsWith('自动投递已发出');
+  if (!autoNoteOk.value) return;
+  // 成功只是回执：绿条留 2 秒（CSS 同步淡出），随后清掉，避免一直挂在右栏。
+  autoNoteTimer = setTimeout(() => {
+    autoNoteTimer = null;
+    autoNoteOk.value = false;
+    if (autoNote.value === t) autoNote.value = '';
+    if (note.value === t) note.value = '';
+  }, 2000);
 }
 
 async function onAutoToggle(): Promise<void> {
@@ -982,6 +1097,7 @@ async function subscribeLoginState(): Promise<void> {
 }
 
 onMounted(() => {
+  overlayRoot.value = document.querySelector('#app-overlay-root');
   window.addEventListener('resize', onResize);
   window.addEventListener('keydown', onKeydown);
   // 首帧先把已存在的草稿渲染出来（可能来自本页内的「生成打招呼」往返）；
@@ -1026,6 +1142,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   disposed = true;
+  if (autoNoteTimer !== null) {
+    clearTimeout(autoNoteTimer);
+    autoNoteTimer = null;
+  }
   window.removeEventListener('resize', onResize);
   window.removeEventListener('keydown', onKeydown);
   if (unlistenLogin !== null) {
@@ -1121,7 +1241,8 @@ defineExpose({
     <FriendList
       prefix="chat-rail"
       :title="CHAT_RAIL_TITLE"
-      :unread="unreadTotal(friends)"
+      :unread="unreadSessions(friends, readMarks)"
+      :read-marks="readMarks"
       :friends="visibleFriends"
       :active-uid="ui.activeFriendsUid"
       :loading="loadingFriends"
@@ -1129,6 +1250,7 @@ defineExpose({
       :search="search"
       @pick="pick"
       @greet="greetFor"
+      @detail="openFriendDetail"
       :removable-uids="removableUids"
       @remove="removePending"
       @refresh="loadFriends"
@@ -1157,7 +1279,12 @@ defineExpose({
     <template v-if="!ui.chatOpen">
       <!-- 同一条「已是最新消息」只在列表头顶用灰字说一次（freshNote），
            不再落到下面这条红底瞬态条上重复一遍。 -->
-      <div v-if="note !== '' && freshNote === ''" class="cfg-hint chat-note" data-testid="chat-note">
+      <div
+        v-if="note !== '' && freshNote === ''"
+        class="cfg-hint chat-note"
+        :class="{ 'is-bad': noteTone === 'bad', 'is-ok': autoNoteOk && note === autoNote }"
+        data-testid="chat-note"
+      >
         <span class="note-text">{{ note }}</span>
         <button
           v-if="noteNeedsCheck"
@@ -1173,7 +1300,12 @@ defineExpose({
            #notices 与右栏共用一份来源），所以这里必须去重：内容相同时只留上面那条，
            否则右栏会上下并排出现两条一模一样的提示。去重口径见 `extraNote`：
            不只是「一模一样」，登录/连接类说同一件事的两句话也只留一条。 -->
-      <div v-if="extraNote !== ''" class="cfg-hint chat-note" data-testid="auto-note">
+      <div
+        v-if="extraNote !== ''"
+        class="cfg-hint chat-note"
+        :class="{ 'is-bad': autoNoteBad, 'is-ok': autoNoteOk }"
+        data-testid="auto-note"
+      >
         <span class="note-text">{{ extraNote }}</span>
         <button
           v-if="autoNoteNeedsCheck"
@@ -1216,7 +1348,8 @@ defineExpose({
       <FriendList
         prefix="chat-detach-rail"
         :title="'Boss 列表'"
-        :unread="unreadTotal(friends)"
+        :unread="unreadSessions(friends, readMarks)"
+        :read-marks="readMarks"
         :friends="visibleFriends"
         :active-uid="ui.activeFriendsUid"
         :loading="loadingFriends"
@@ -1228,6 +1361,7 @@ defineExpose({
         @retry="loadFriends"
         @search="search = $event"
         @greet="greetFor"
+        @detail="openFriendDetail"
         :removable-uids="removableUids"
         @remove="removePending"
       >
@@ -1261,7 +1395,11 @@ defineExpose({
         <!-- 顶部只挂真错误（红条）：右栏的 note / autoNote 在对话框展开时看不到，这里同源再渲染一份。
              灰色说明不占顶部，见下方 #footer。 -->
         <div v-if="topNote !== '' || extraNote !== ''" class="detach-notes">
-          <div v-if="topNote !== ''" class="detach-note" data-testid="chat-note-detach">
+          <div
+            v-if="topNote !== ''"
+            class="detach-note is-bad"
+            data-testid="chat-note-detach"
+          >
             <span class="note-text">{{ topNote }}</span>
             <button
               v-if="noteNeedsCheck"
@@ -1273,7 +1411,12 @@ defineExpose({
               @click="retryBrowserCheck"
             >{{ checkingBrowser ? '检查中…' : '重试' }}</button>
           </div>
-          <div v-if="extraNote !== ''" class="detach-note" data-testid="auto-note-detach">
+          <div
+            v-if="extraNote !== ''"
+            class="detach-note"
+            :class="{ 'is-bad': autoNoteBad, 'is-ok': autoNoteOk }"
+            data-testid="auto-note-detach"
+          >
             <span class="note-text">{{ extraNote }}</span>
             <button
               v-if="autoNoteNeedsCheck"
@@ -1308,4 +1451,18 @@ defineExpose({
       </template>
     </ChatThread>
   </ChatDetach>
+
+  <!-- 岗位详情抽屉：全窗浮层，必须挂在没有 overflow / transform 的浮层根上，
+       否则会被页面滚动容器裁进一列（与概览页同一处坑）。 -->
+  <Teleport to="#app-overlay-root" :disabled="overlayRoot === null">
+    <JobDetailDrawer
+      :job="detailJob"
+      :open="detailJob !== null"
+      :min-score="detailMinScore"
+      :score-max="detailScoreMax"
+      @close="closeFriendDetail"
+      @act="onFriendDetailAct"
+      @chat="onFriendDetailChat"
+    />
+  </Teleport>
 </template>

@@ -165,6 +165,21 @@
   opacity: var(--spec-strength);
 }
 
+/* ---------- 浅色档：默认光带撤除，改画实边 ----------
+   浅底上没有暗部托住渐变，1px 光带会发成一条绿边；这里把默认对角弧整块清空，
+   同一条 1px 环改由真 border 画成 `--card-edge` 实线（配合 tokens 里的 2px 窄影）。
+   悬停的指针光斑在 ::before 上，鼠标移入的光带完全不变。
+   ::after 必须清成 transparent，不能只把 `--spec-strength` 归零：main.ts 会直接对
+   ::after 补间 opacity（WAAPI 压得住 CSS 变量），留一块底色就会在首次进卡时闪出一条弧。 */
+[data-theme='light'] .card::after,
+[data-theme='light'] .hl-surface::after {
+  background: transparent;
+}
+
+/* 浅色档那条 1px 实边与 2px 窄影落在 `src/app.css`：该文件把 `.card` / `.chat-rail` 的
+   box-shadow 统一清零（「边界只由 1px 高光边给出」），光带撤除后要在同一处顶回来，
+   写在后面的文件才压得住它。drawer / 敏感库 / 决策记录本来就有 border，不在此列。 */
+
 /* 指针光斑：叠在同一条边框环上，圆心是 main.ts 写入的 --hl-x / --hl-y（卡内百分比），
    中心 100% 不衰减，向两侧对称衰减 300px。位置过渡走 background-position。 */
 .card.is-lit::before,
@@ -213,6 +228,13 @@
   mask-composite: exclude;
   opacity: var(--spec-strength);
   pointer-events: none;
+}
+
+/* 浅色档：右栏的渐变边同样撤掉（已由上面那条 1px 实边接管）。
+   `:not(.is-lit)` 是必需的：这一层同时兼作指针光斑的底子，
+   不加限定会在悬停时把 `.hl-surface.is-lit::before` 的光斑一起顶掉。 */
+[data-theme='light'] .chat-rail:not(.is-lit)::before {
+  background: transparent;
 }
 
 .card-head {

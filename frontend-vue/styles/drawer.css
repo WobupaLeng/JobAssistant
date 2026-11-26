@@ -83,11 +83,13 @@
   gap: 14px;
 }
 
-/* kv 信息列表：左窄右宽两列。dd 允许换行，长公司名不会把抽屉顶宽。 */
+/* kv 信息列表：两列成对铺开（dt/dd/dt/dd 四条轨道，逐行依次占满）。
+   dt 走 max-content 自适应标签宽度，dd 吃掉剩余空间并允许换行，长公司名不会把抽屉顶宽。 */
 .kv {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
-  gap: 6px 12px;
+  grid-template-columns: max-content minmax(0, 1fr) max-content minmax(0, 1fr);
+  gap: 6px 16px;
+  align-items: baseline;
   margin: 0;
   font-size: var(--fs-sm);
 }
@@ -187,4 +189,3 @@
   transform: translateX(-24px);
   transition: transform var(--drawer-dur) var(--ease-out);
 }
-

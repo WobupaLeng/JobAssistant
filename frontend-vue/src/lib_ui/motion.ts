@@ -24,6 +24,17 @@ export function playOnce(el: Element, cls: string): void {
 }
 
 /**
+ * 重播一次性动画：值跳变（分数 / token 累计）用，节点不重建也要再播一次。
+ * 类已经挂在元素上时再 `add` 不会起播，必须「摘类 → 强制重排 → 挂回」，让计算样式真正
+ * 回落到无动画态。`offsetWidth` 只为触发重排，读到的值不用。
+ */
+export function replayOnce(el: HTMLElement, cls: string): void {
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+}
+
+/**
  * 两帧之后再挂类：确保浏览器已经用初始态完成一次布局，否则同一帧内「初始态 + 动画」会被
  * 合并，进场整段不播。用 `requestAnimationFrame` 而不是固定延时：后台标签页会被节流，
  * 但那时用户也看不见。

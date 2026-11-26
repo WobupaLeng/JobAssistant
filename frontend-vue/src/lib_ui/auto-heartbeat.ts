@@ -8,6 +8,7 @@ import { loginStatus } from '../api/commands/scrape';
 import type { AutoStatusReply } from '../api/types';
 import { replyNote, shouldSend } from './auto-model';
 import { isLoggedIn } from './login-model';
+import { markTokensSpent } from './token-ledger';
 
 /** 心跳间隔下限（毫秒）：60 秒。 */
 export const HEARTBEAT_MIN_MS = 60_000;
@@ -230,6 +231,8 @@ export function startHeartbeat(hooks: HeartbeatHooks, maxFails = HEARTBEAT_MAX_F
         if (msg.trim() !== '') hooks.onNote(msg.trim());
       } else {
         hooks.onNote('自动投递已发出一条');
+        // 自动投递的招呼是模型生成的：花掉 token 就通知概览重读累计。
+        markTokensSpent();
         const sentId = String(reply.job_id ?? '').trim();
         if (sentId !== '') hooks.onSent?.(sentId);
       }

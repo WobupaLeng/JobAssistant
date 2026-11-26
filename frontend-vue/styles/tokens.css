@@ -62,6 +62,8 @@
   /* ---------- 描边 ---------- */
   --hairline: rgba(255, 255, 255, 0.10);
   --hairline-strong: rgba(255, 255, 255, 0.18);
+  /* 卡片实边：深色档不画（1px 渐变光带就是边），浅色档用它顶替光带。 */
+  --card-edge: transparent;
 
   /* ---------- 文字层级 ---------- */
   --text-1: #e8eef7;
@@ -180,13 +182,17 @@
   --panel-solid: var(--popup-surface);
   --scrim: rgba(15, 23, 42, 0.32);
 
-  /* 高光带取主题色：白底上近白高光等于没有，浅色档改跟 --primary，明暗次序与深色档一致。 */
+  /* 光带：浅色档整层撤除。浅底上渐变描边与上下沿内光带都读作「光带」，与磨砂底打架；
+     卡片改由 1px 实边（--card-edge）+ 2px 窄影（--shadow-card）立起来。
+     --spec-strength 归零只是让令牌语义直白：默认对角弧在浅色档已被清成 transparent，
+     悬停的指针光斑仍取下面四枚 --spec-*，鼠标移入的光带与深色档完全一致。 */
   --spec-top: color-mix(in srgb, var(--primary) 62%, transparent);
   --spec-bottom: color-mix(in srgb, var(--primary) 14%, transparent);
   --spec-side: color-mix(in srgb, var(--primary) 34%, transparent);
-  --spec-strength: 0.7;
-  /* 峰值色（对角弧与指针光斑的起点）同族取主题色本色。 */
+  --spec-strength: 0;
+  /* 峰值色（指针光斑的起点）同族取主题色本色。 */
   --spec-peak: var(--primary);
+  --card-edge: var(--hairline-strong);
 
   --hairline: rgba(15, 23, 42, 0.10);
   --hairline-strong: rgba(15, 23, 42, 0.16);
@@ -239,11 +245,14 @@
   /* 浅底投影必须更重：没有暗部托住，轻影会让卡片「浮不起来」 */
   --shadow-near: 0 1px 3px rgba(15, 23, 42, 0.08);
   --shadow-far: 0 14px 40px rgba(15, 23, 42, 0.12);
+  /* 撤掉光带后卡片靠「1px 实边 + 2px 窄影」定形：宽影会把透明卡片糊成一圈光晕。 */
+  --shadow-card: 0 2px 2px rgba(15, 23, 42, 0.08);
   --shadow-pop: 0 4px 14px rgba(15, 23, 42, 0.10), 0 28px 72px rgba(15, 23, 42, 0.18);
 
-  --inner-light: inset 0 1px 0 0 var(--spec-top),
-    inset 0 -1px 0 0 var(--spec-bottom);
-  --inner-scatter: inset 0 20px 40px -30px rgba(255, 255, 255, 0.9);
+  /* 上下沿内光带同样撤除。置零而不是 none：这两枚常拼在 box-shadow 列表里，
+     "none, 0 2px …" 会让整条声明失效，外壳会连投影一起丢。 */
+  --inner-light: 0 0 0 0 transparent;
+  --inner-scatter: 0 0 0 0 transparent;
 }
 
 /* ---------- 基础重置 ---------- */

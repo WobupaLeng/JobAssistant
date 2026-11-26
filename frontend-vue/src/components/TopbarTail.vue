@@ -19,6 +19,7 @@ import {
   tokenText,
   type ScoreModeSeg,
 } from '../lib_ui/scrape-panel-model';
+import { CLASS, replayOnce } from '../lib_ui/motion';
 
 const props = withDefaults(
   defineProps<{
@@ -66,6 +67,38 @@ const emit = defineEmits<{
  * 常驻会把顶栏撑乱（落位顺序不变）。
  */
 const llmActive = computed(() => props.segs.some((s) => s.key === 'llm' && s.active));
+
+/* ---------------- token 读数：值跳变时补一次「落定」（C17 的 token-bump）
+ * 同一份累计读数有两份 DOM（宽屏 `.tb-tokens` 三枚数字 / 窄屏折叠 chip），各挂各的类——
+ * 任何时刻只有一份可见，不必判断当前断点。watch 默认不 immediate：初次挂载与父组件重渲
+ * 同值都不播，只有数字真的变了才播。 */
+const totalEl = ref<HTMLElement | null>(null);
+const chipEl = ref<HTMLElement | null>(null);
+const scoreEl = ref<HTMLElement | null>(null);
+const greetEl = ref<HTMLElement | null>(null);
+
+function bumpToken(el: HTMLElement | null): void {
+  if (el === null) return;
+  replayOnce(el, CLASS.TOKEN_BUMP);
+}
+
+watch(
+  () => props.tokensTotal,
+  () => {
+    bumpToken(totalEl.value);
+    bumpToken(chipEl.value);
+  },
+);
+
+watch(
+  () => props.tokensScore,
+  () => bumpToken(scoreEl.value),
+);
+
+watch(
+  () => props.tokensGreet,
+  () => bumpToken(greetEl.value),
+);
 
 /* ---------------- 主题面板（调色板 + 字号）
  * 面板 teleport 到 body：顶栏只有 46px 高，留在原地会被这条带子裁掉。
@@ -240,17 +273,17 @@ function onPrefilterInput(ev: Event): void {
     <!-- 同一枚读数两种 DOM，CSS 在窄窗断点互换显隐，各唯一 1 份。
          数据来自 config DTO 的 tokens_* 三键，由后端累加。 -->
     <span class="tb-tokens" :title="`累计 ${tokenText(tokensTotal)} token`">
-      <span>累计 <b class="token-total" data-testid="token-total">{{ tokenText(tokensTotal) }}</b> token</span>
+      <span>累计 <b ref="totalEl" class="token-total" data-testid="token-total">{{ tokenText(tokensTotal) }}</b> token</span>
       <i class="tb-sep" aria-hidden="true"></i>
-      <span class="rail-stat">模型打分 <b>{{ tokenText(tokensScore) }}</b></span>
-      <span class="rail-stat">打招呼 <b>{{ tokenText(tokensGreet) }}</b></span>
+      <span class="rail-stat">模型打分 <b ref="scoreEl">{{ tokenText(tokensScore) }}</b></span>
+      <span class="rail-stat">打招呼 <b ref="greetEl">{{ tokenText(tokensGreet) }}</b></span>
     </span>
     <span
       class="chip tb-token-chip"
       tabindex="0"
       data-testid="token-total-chip"
       :title="`累计 ${tokenText(tokensTotal)} token · 模型打分 ${tokenText(tokensScore)} · 打招呼 ${tokenText(tokensGreet)}`"
-    >累计 <b>{{ tokenText(tokensTotal) }}</b> token</span>
+    >累计 <b ref="chipEl">{{ tokenText(tokensTotal) }}</b> token</span>
     <button class="btn btn-sm btn-ghost" type="button" data-testid="shell-config-btn" @click="emit('open-config')">
       配置
     </button>

@@ -16,6 +16,7 @@ import {
   unreadText,
   unreadTotal,
 } from '../../lib_ui/chat-model';
+import { isUnreadRow, type ReadMarks } from '../../lib_ui/chat-read';
 import { needsSession } from '../../lib_ui/session';
 
 const props = withDefaults(
@@ -38,8 +39,13 @@ const props = withDefaults(
      * 不传则退回组件内对 friends 的求和；页面传入时以页面口径为准。
      */
     unread?: number;
+    /**
+     * 会话已读水位（uid → 我读到的那条的时刻）。Boss 的 `unreadMsgCount` 实测恒为 0，
+     * 未读由 `chat-read.ts` 派生：HR 最后发言且晚于水位即未读，打开会话后清除。
+     */
+    readMarks?: ReadMarks;
   }>(),
-  { loading: false, error: '', greetingUid: '', removableUids: () => [] },
+  { loading: false, error: '', greetingUid: '', removableUids: () => [], readMarks: () => ({}) },
 );
 
 const emit = defineEmits<{
@@ -49,6 +55,8 @@ const emit = defineEmits<{
   (e: 'retry'): void;
   /** 行内「打招呼」：先选中该行，再生成话术（由页面串起来）。 */
   (e: 'greet', uid: string): void;
+  /** 行内「岗位详情」：页面按这一行的岗位 id 打开详情抽屉。 */
+  (e: 'detail', uid: string): void;
   (e: 'remove', uid: string): void;
 }>();
 
@@ -90,6 +98,20 @@ const ids = computed(() => ({
 const emptyText = computed(() =>
   props.search.trim() === '' ? CHAT_EMPTY_TITLE : '没有匹配的会话',
 );
+
+/**
+ * 名字行后面的公司（原型口径 `李女士 · 星瀚科技`）。公司只是补充信息：缺失时整段不渲染，
+ * 不留一个孤零零的分隔点；长度交给 `.friend-name` 的单行省略处理。
+ */
+function rowCompany(f: Friend): string {
+  // 展示用原文，不走 `normCompany`（那份会把括号里的后缀剥掉，是匹配口径不是文案口径）。
+  return String(f.company ?? '').trim();
+}
+
+/** 这一行算不算未读：Boss 报的条数优先，否则「HR 最后发言 + 我没读过」。 */
+function rowUnread(f: Friend): boolean {
+  return isUnreadRow(f, props.readMarks);
+}
 
 /** 标题旁的计数是**未读消息条数**，不是会话数。0 时不渲染。 */
 const unreadSum = computed(() => unreadTotal(props.friends));
@@ -223,25 +245,29 @@ defineExpose({ listEl });
                @click.stop 防止同时触发整行的 pick。 -->
           <span class="avatar" aria-hidden="true">{{ friendName(f).slice(0, 1) }}</span>
           <span class="friend-main">
-            <span class="friend-name" :data-testid="`friend-name-${f.uid}`">{{ friendName(f) }}</span>
-            <!-- 副行按「未读 / 已读 / 已送达」上色。状态词只管我发的最后一条，对方发的不加词。 -->
+            <span class="friend-name" :data-testid="`friend-name-${f.uid}`">{{ friendName(f) }}<span
+              v-if="rowCompany(f) !== ''"
+              class="friend-company"
+              :data-testid="`friend-company-${f.uid}`"
+            > · {{ rowCompany(f) }}</span></span>
+            <!-- 副行按「未读 / 已读 / 已送达」上色。对方发的最后一条只标未读，已读/送达说的是我发的。 -->
             <span
               class="friend-msg"
-              :class="`is-${friendMsgTone(f)}`"
+              :class="`is-${friendMsgTone(f, rowUnread(f))}`"
               :data-testid="`friend-msg-${f.uid}`"
             >
               <span
-                v-if="friendMsgTone(f) === 'unread'"
+                v-if="friendMsgTone(f, rowUnread(f)) === 'unread'"
                 class="friend-msg-tag"
                 :data-testid="`friend-msg-tag-${f.uid}`"
               >[未读]</span>
               <span
-                v-else-if="friendMsgTone(f) === 'read'"
+                v-else-if="friendMsgTone(f, rowUnread(f)) === 'read'"
                 class="friend-msg-tag"
                 :data-testid="`friend-msg-tag-${f.uid}`"
               >[已读]</span>
               <span
-                v-else-if="friendMsgTone(f) === 'sent'"
+                v-else-if="friendMsgTone(f, rowUnread(f)) === 'sent'"
                 class="friend-msg-tag"
                 :data-testid="`friend-msg-tag-${f.uid}`"
               >[送达]</span>
@@ -251,15 +277,16 @@ defineExpose({ listEl });
           <span class="friend-side">
             <span class="friend-time" :data-testid="`friend-time-${f.uid}`">{{ f.last_time || '—' }}</span>
             <span
-              v-if="f.unread > 0"
+              v-if="rowUnread(f)"
               class="unread"
+              :class="{ 'is-dot': (f.unread ?? 0) <= 0 }"
               :data-testid="ids.unread(f.uid)"
-              :title="`${f.unread} 条未读`"
-            >{{ unreadText(f.unread) }}</span>
+              :title="(f.unread ?? 0) > 0 ? `${f.unread} 条未读` : 'HR 有新回复'"
+            >{{ (f.unread ?? 0) > 0 ? unreadText(f.unread) : '' }}</span>
           </span>
           <span class="friend-acts">
-            <!-- 两个操作画 16px 图标、同一行并排，避免文字药丸把行撑高；文字标签在悬停 /
-                 键盘聚焦时浮在按钮左侧。 -->
+            <!-- 操作列竖排（打招呼在上、岗位详情在下），两枚压到 15px 高，合计约等于头像高度，
+                 行高不变；文字标签在悬停 / 键盘聚焦时浮在按钮左侧。 -->
             <span
               role="button"
               tabindex="0"
@@ -273,6 +300,19 @@ defineExpose({ listEl });
             >
               <svg class="friend-act-svg" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.6 3.4h10.8v7H7.4L4.2 13.4v-3H2.6z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/></svg>
               <span class="friend-act-label" aria-hidden="true">{{ props.greetingUid === f.uid ? '生成中…' : '打招呼' }}</span>
+            </span>
+            <span
+              role="button"
+              tabindex="0"
+              class="friend-act friend-act-detail"
+              :data-testid="`friend-detail-${f.uid}`"
+              aria-label="岗位详情"
+              @click.stop="emit('detail', f.uid)"
+              @keydown.enter.stop.prevent="emit('detail', f.uid)"
+              @keydown.space.stop.prevent="emit('detail', f.uid)"
+            >
+              <svg class="friend-act-svg" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3.6 2.6h5.6l3.2 3.2v7.6H3.6z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none"/><path d="M5.8 7.8h4.4M5.8 10.1h4.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              <span class="friend-act-label" aria-hidden="true">岗位详情</span>
             </span>
             <span
               v-if="props.removableUids.includes(f.uid)"

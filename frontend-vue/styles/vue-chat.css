@@ -387,6 +387,12 @@
   white-space: nowrap;
 }
 
+/* 名字行里的公司名：同一行、压低一档颜色，省略号由 .friend-name 统一负责，
+   这里只做「次要信息」的视觉降级，不另起一行撑高行。 */
+.friend-company {
+  color: var(--text-3);
+}
+
 .friend-msg {
   font-size: var(--fs-xs);
   color: var(--text-3);
@@ -430,9 +436,11 @@
    报出文字与 data-testid。 */
 .friend-acts {
   display: inline-flex;
-  flex-direction: row;
+  /* 竖排：打招呼在上、岗位详情在下。两枚各 15px + 2px 间距 = 头像的 32px，行高不变。 */
+  flex-direction: column;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: 2px;
   flex: 0 0 auto;
   margin-left: auto;
   opacity: 0;
@@ -450,10 +458,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 31px;
-  height: 31px;
+  width: 30px;
+  height: 15px;
   padding: 0;
-  border-radius: var(--radius-pill);
+  border-radius: 5px;
   border: 1px solid var(--hairline);
   background: var(--surface-0);
   color: var(--text-2);
@@ -465,8 +473,8 @@
 /* 图标只画图形，无障碍名与提示都由文字标签承担。 */
 .friend-act-svg {
   display: block;
-  width: 21px;
-  height: 21px;
+  width: 13px;
+  height: 13px;
 }
 
 /* 悬停提示：向右让开自己、盖到好友摘要上（本行右侧到列表边缘只有约 20px，
@@ -529,6 +537,16 @@
   font-size: var(--fs-2xs);
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+}
+
+/* 派生未读（Boss 的 unreadMsgCount 恒为 0，见 lib_ui/chat-read.ts）：拿不到条数就只点一个红点，
+   不写数字——写了就是编造条数。 */
+.unread.is-dot {
+  min-width: 8px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  font-size: 0;
 }
 
 /* ------------------------------------------------------------ 列表态 */
@@ -1009,27 +1027,10 @@
   flex: 0 0 auto;
 }
 
-/* 主按钮在自动投递条里不铺渐变底与投影，文字走正文色，描边回到中性发丝线，
- * 悬停/按下只提亮文字。只动颜色与阴影，盒模型与排版不碰。 */
-.auto-apply-acts .btn-primary {
-  background: transparent;
-  border-color: var(--hairline);
-  color: var(--text-1);
-  font-weight: 650;
-  box-shadow: none;
-}
-
-.auto-apply-acts .btn-primary:hover:not(:disabled) {
-  background: transparent;
-  color: var(--primary);
-  box-shadow: none;
-}
-
-.auto-apply-acts .btn-primary:active:not(:disabled) {
-  background: transparent;
-  color: var(--primary);
-  box-shadow: none;
-}
+/* 主按钮（「开始自动投递」/「继续」）走主题色实底，配色完全交给 controls.css 的
+ * .btn-primary，这里不再压成中性描边：条里只有它一个主动作，磨砂底上的描边按钮
+ * 读不出「可以点」，主题色实底才能在右栏最上方一眼被看见。暂停态是 .btn-pause
+ * （警示琥珀），两态天然分色。盒模型与排版不碰。 */
 
 /* 待投递 / 已投递：各自独占一行，放在自动投递条的正下方（收起态在右栏、展开态在
  * 对话框头第二行）。原先挂在列表头里与「刷新」抢宽度，两个数字都会被挤掉。 */
@@ -1105,13 +1106,28 @@
   overflow-wrap: anywhere;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--bad-border);
-  background: var(--bad-bg);
-  color: var(--bad-text-soft);
+  /* 默认中性（「待投递列表已经处理完了」这类回执）；只有真失败才转红。 */
+  border: 1px solid var(--hairline);
+  background: var(--surface-1);
+  color: var(--text-2);
   font-size: var(--fs-2xs);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.chat-note.is-bad {
+  border-color: var(--bad-border);
+  background: var(--bad-bg);
+  color: var(--bad-text-soft);
+}
+
+/* 投递成功回执：绿色，2 秒内淡出（JS 同步清空文案）。 */
+.chat-note.is-ok {
+  border-color: var(--good);
+  background: var(--good-soft);
+  color: var(--good);
+  animation: note-fade 2s ease-in forwards;
 }
 
 /* 提示文字占满剩余宽度，右侧「重试」不参与换行。 */
@@ -1140,9 +1156,9 @@
   gap: 8px;
   padding: 8px 12px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--bad-border);
-  background: var(--bad-bg);
-  color: var(--bad-text-soft);
+  border: 1px solid var(--hairline);
+  background: var(--surface-1);
+  color: var(--text-2);
   font-size: var(--fs-sm);
   line-height: 1.5;
   white-space: pre-wrap;
@@ -1151,6 +1167,29 @@
   max-height: calc(var(--fs-sm) * 6);
   overflow-y: auto;
   overflow-wrap: anywhere;
+}
+
+.detach-note.is-bad {
+  border-color: var(--bad-border);
+  background: var(--bad-bg);
+  color: var(--bad-text-soft);
+}
+
+.detach-note.is-ok {
+  border-color: var(--good);
+  background: var(--good-soft);
+  color: var(--good);
+  animation: note-fade 2s ease-in forwards;
+}
+
+@keyframes note-fade {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 /* 消息流末尾的说明条：「已是最新消息」这类不是错误，用小一号灰字，不抢消息视觉。

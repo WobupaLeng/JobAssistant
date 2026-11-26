@@ -133,6 +133,9 @@
 }
 
 /* ---------- 批量条 ---------- */
+/* 不铺底色：批量条与页签行同层，直接浮在窗口级磨砂背景上（窗口模糊在 Rust 侧，
+   CSS 不叠任何半透明层）。左右内边距归零，文字左沿回到与网格同一条 14px 线。
+   border 留 1px transparent 只为保住盒高 30px——拿掉会让下方网格整体上移 2px。 */
 .job-batch {
   display: flex;
   align-items: center;
@@ -140,11 +143,11 @@
   flex-wrap: wrap;
   flex: 0 0 auto;
   margin: 0 14px 8px;
-  padding: 5px 10px;
+  padding: 5px 0;
   min-height: 30px;
   border-radius: var(--radius-sm);
-  background: var(--surface-0);
-  border: 1px solid var(--hairline);
+  background: transparent;
+  border: 1px solid transparent;
   font-size: var(--fs-sm);
   color: var(--text-2);
 }
@@ -152,9 +155,59 @@
 .batch-check {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   color: var(--text-2);
   cursor: pointer;
+}
+
+/* 勾选框自绘：批量条不再有卡片底托着，原生控件在磨砂背景上会显得「裸」。
+   面取 --surface-input、边取 --text-1 的 40%，选中态铺主色 + 反白对勾，
+   与 .pill 选中态同一套主题色语言。尺寸固定 14px，不随字号档位跳。 */
+.batch-check input {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  box-sizing: border-box;
+  border-radius: 4px;
+  /* 边线取 --text-1 的 40%：--hairline-strong（16%）压在近白的框面上比磨砂背景还亮，
+     浅色下会变成一圈「光晕」而不是轮廓。 */
+  border: 1px solid color-mix(in srgb, var(--text-1) 40%, transparent);
+  background: var(--surface-input);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.batch-check input:hover {
+  border-color: var(--primary);
+}
+
+.batch-check input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.batch-check input:checked {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+/* 对勾由两条边框拼成，变换原点在字形中心，落在 14px 盒的正中（7,7）。 */
+.batch-check input:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 2px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--on-primary);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
 }
 
 .batch-count,
@@ -284,6 +337,13 @@
   --spec-strength: 1;
 }
 
+/* 浅色档没有默认光带可当轮廓（layout.css 已把 ::after 清空），改用「1px 实边 + 2px 窄影」定形。
+ * 必须排在 .is-checked / .is-linked 之前：那两条只改 border-color，靠顺序接管选中与关联态。 */
+[data-theme='light'] .job-card {
+  border: 1px solid var(--card-edge);
+  box-shadow: var(--shadow-card);
+}
+
 .job-card.is-checked {
   border-color: var(--primary);
   background: var(--primary-soft);
@@ -322,6 +382,16 @@
   --spec-top: color-mix(in srgb, var(--bad) 62%, transparent);
   --spec-side: color-mix(in srgb, var(--bad) 34%, transparent);
   --spec-bottom: color-mix(in srgb, var(--bad) 14%, transparent);
+}
+
+/* 浅色档没有光带可染色，语气色改挂在实边上（--card-edge 由 layout.css 的 1px border 消费）：
+   已投递 / 不投递在浅底下仍要一眼分得开，色值继续由 --good / --bad 派生。 */
+[data-theme='light'] .job-card.tone-delivered {
+  --card-edge: color-mix(in srgb, var(--good) 55%, transparent);
+}
+
+[data-theme='light'] .job-card.tone-rejected {
+  --card-edge: color-mix(in srgb, var(--bad) 55%, transparent);
 }
 
 .job-card.is-linked {
@@ -1361,6 +1431,14 @@ body {
 }
 .tb-token-chip {
   display: none;
+}
+
+/* token 读数跳变时的「落定」（motion.css 的 .token-bump）走 transform，而 transform 对 inline
+   元素无效：三处数字 <b> 统一 inline-block。基线对齐不变，也不改变任何布局尺寸。 */
+.token-total,
+.tb-tokens .rail-stat b,
+.tb-token-chip b {
+  display: inline-block;
 }
 
 @media (max-width: 1359px) {

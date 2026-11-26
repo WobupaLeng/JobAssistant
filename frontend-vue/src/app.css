@@ -57,6 +57,15 @@ body,
   box-shadow: none;
 }
 
+/* 浅色档例外：1px 渐变光带在浅底上会糊成一条绿边，styles/layout.css 已把默认光带清空，
+   这里在清零投影的同一处把轮廓顶回来 —— 1px 实边定形、2px 窄影托高。指针光斑在 ::before 上，
+   不经过这条规则，悬停光带照旧。.chat-detach 是玻璃面，不参与。 */
+[data-theme='light'] .card,
+[data-theme='light'] .chat-rail {
+  border: 1px solid var(--card-edge);
+  box-shadow: var(--shadow-card);
+}
+
 .chat-detach {
   /* 对话框是一层很薄的玻璃，不是第二块更白的面板：
      只用 4% 文字色做极轻的压暗/提亮，叠在外壳磨砂上，避免比左侧内容区更白。 */

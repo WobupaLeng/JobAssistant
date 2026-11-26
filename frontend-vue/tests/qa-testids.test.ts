@@ -148,8 +148,10 @@ describe('撤导航后的锚点净口径（用户裁决 5 / SPEC-001 AC9）', ()
 
   it('分项 token 读数接线（原型 L1402-1403/L1406）：模型打分/打招呼 + chip 全量 title + 分项常驻显示', () => {
     const tail = read('frontend-vue/src/components/TopbarTail.vue');
-    expect(tail).toContain('模型打分 <b>{{ tokenText(tokensScore) }}</b>');
-    expect(tail).toContain('打招呼 <b>{{ tokenText(tokensGreet) }}</b>');
+    // 门禁意图是「分项读数的值来自 props」，不是钉死标签上的属性表：数字节点挂了 `ref`
+    // 供 `replayOnce` 播 token-bump，所以这里按正则吃任意属性，值插值仍逐字校验。
+    expect(tail).toMatch(/模型打分 <b[^>]*>\{\{ tokenText\(tokensScore\) \}\}<\/b>/);
+    expect(tail).toMatch(/打招呼 <b[^>]*>\{\{ tokenText\(tokensGreet\) \}\}<\/b>/);
     // 折叠 chip 的 title 给全量三值（原型 L1406 逐字格式）。
     expect(tail).toContain('token · 模型打分');
     expect(tail).toContain('· 打招呼');
