@@ -1848,3 +1848,188 @@ body {
    原型 是用户硬约束「页面最小宽度 1200px；小于 1200 保持 1200 布局并出现
    横向滚动条——不做任何落底/单列降级。原先那三条（platform-card 压到 26px、
    app-error-rest 隐藏、f-tri 与 f-grid2 退单列）都与之相反；app-shell 已有的 */
+
+/* ---------- 按公司搜岗位（用户 m01529） ----------
+ * 搜索框是 26px 高的窄胶囊，与页签行里的 sort-pill 同高，不撑高那条 40px 的行。
+ * 浮层自带一套 `cs-*` 类，不复用 drawer：它居中弹出、没有底部动作条。
+ * 页面最小宽度 1200px 且不做降级（用户硬约束），所以这里没有任何断点。 */
+.job-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.job-search-input {
+  width: 150px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--surface-input);
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.job-search-input::placeholder {
+  color: var(--text-3);
+}
+
+.job-search-input:hover {
+  border-color: var(--hairline-strong);
+}
+
+.job-search-input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+  border-color: var(--primary);
+}
+
+.cs-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: transparent;
+  cursor: default;
+}
+
+.cs-panel {
+  position: fixed;
+  z-index: 51;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  width: min(760px, calc(100vw - 48px));
+  max-height: min(72vh, 640px);
+  min-height: 0;
+  border-radius: var(--radius-lg);
+  /* 浮层必须自己铺不透明底：外壳只有半透明染色（--shell-tint），页面卡片也都刻意透明，
+     所以 .card 的 background: transparent 会让本面板把身后的岗位列表透出来。
+     与 .drawer / .config-modal / .decisions-modal 同用 --popup-surface。 */
+  background: var(--popup-surface);
+  overflow: hidden;
+}
+
+.cs-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.cs-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px 14px 14px;
+  overflow-y: auto;
+}
+
+.cs-headline {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.cs-note {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+
+.cs-note.is-error {
+  color: var(--bad);
+}
+
+.cs-note.is-ok {
+  color: var(--good);
+}
+
+.cs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cs-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+}
+
+.cs-row-main {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.cs-row-title {
+  max-width: 280px;
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cs-row-salary {
+  color: var(--primary);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.cs-row-company {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.cs-row-meta {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.cs-row-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.cs-detail-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.cs-jd {
+  max-height: 46vh;
+  margin: 0;
+  padding: 10px 12px;
+  overflow-y: auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface-input);
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

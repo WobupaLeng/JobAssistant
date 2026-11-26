@@ -10,7 +10,6 @@ import {
   CITY_DEFAULT,
   DEFAULT_EXCLUDE,
   DEGREE_OPTIONS,
-  DEGREE_VETO_OPTIONS,
   EXPERIENCE_OPTIONS,
   HR_ACTIVE_OPTIONS,
   INDUSTRY_OPTIONS,
@@ -60,8 +59,9 @@ export interface FilterDraft {
   exclude: string;
   hr_active: string;
   weekend: string;
-  veto_degrees: string[];
   founded: string;
+  /** `'on'`/`'off'`：投递前是否按「岗位名显示短期项目」排除。 */
+  short_term: string;
 }
 
 /** 默认草稿：每次调用返回全新对象，避免共享可变更的数组。 */
@@ -81,8 +81,8 @@ export function createDraft(): FilterDraft {
     exclude: DEFAULT_EXCLUDE,
     hr_active: 'any',
     weekend: 'any',
-    veto_degrees: [],
     founded: '',
+    short_term: 'on',
   };
 }
 
@@ -104,8 +104,8 @@ const KEYS: readonly (keyof FilterDraft)[] = [
   'exclude',
   'hr_active',
   'weekend',
-  'veto_degrees',
   'founded',
+  'short_term',
 ];
 
 /** 反斜杠与换行要转义：草稿是 `key=value` 逐行的，值里带换行会把行结构冲垮。 */
@@ -146,7 +146,7 @@ function splitIds(raw: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-/** 草稿 → 单行文本。16 行，顺序见 `KEYS`。 */
+/** 草稿 → 单行文本。17 行，顺序见 `KEYS`。 */
 export function encode(d: FilterDraft): string {
   const value = (k: keyof FilterDraft): string => {
     const v = d[k];
@@ -250,15 +250,14 @@ export function decode(raw: string | null | undefined): FilterDraft {
         if (WEEKEND_OPTIONS.some((o) => o.value === v)) d.weekend = v;
         break;
       }
-      case 'veto_degrees': {
-        const sel = new Set(splitIds(value));
-        // 学历否决表是纯字符串数组，没有代码列，直接按表顺序过滤。
-        d.veto_degrees = [...DEGREE_VETO_OPTIONS.filter((name) => sel.has(name))];
-        break;
-      }
       case 'founded':
         d.founded = value.trim();
         break;
+      case 'short_term': {
+        const v = value.trim();
+        if (v === 'on' || v === 'off') d.short_term = v;
+        break;
+      }
       default:
         break;
     }
@@ -301,8 +300,8 @@ export const BACKEND_KEYS: readonly BackendKey[] = [
   { field: 'exclude', name: 'excludeKeywords' },
   { field: 'hr_active', name: 'hrActive' },
   { field: 'weekend', name: 'workWeekend' },
-  { field: 'veto_degrees', name: 'jdDegree' },
   { field: 'founded', name: 'minYears' },
+  { field: 'short_term', name: 'shortTermTitle' },
 ];
 
 /**
@@ -322,8 +321,8 @@ export const BACKEND_READ_KEYS: Readonly<Record<keyof ScrapeDefaultsArgs, string
   excludeKeywords: 'exclude_keywords',
   hrActive: 'hr_active',
   workWeekend: 'work_weekend',
-  jdDegree: 'jd_degree',
   minYears: 'min_years',
+  shortTermTitle: 'short_term_title',
 };
 
 /** 单个字段 → 后端 JSON 值。数组给数组，数字给数字，空 `founded` 给 `null`。 */
@@ -343,8 +342,6 @@ function backendValue(d: FilterDraft, field: keyof FilterDraft): unknown {
       return d.stages.slice();
     case 'industries':
       return d.industries.slice();
-    case 'veto_degrees':
-      return d.veto_degrees.slice();
     case 'founded':
       // 空串 → null，后端认 null 为「不限年限」。
       return d.founded.trim() === '' ? null : d.founded.trim();
@@ -490,15 +487,6 @@ export function applyBackend(d: FilterDraft, backend: unknown): number {
         }
         break;
       }
-      case 'veto_degrees': {
-        const list = strList(raw);
-        if (list !== null) {
-          const sel = new Set(list);
-          d.veto_degrees = [...DEGREE_VETO_OPTIONS.filter((name) => sel.has(name))];
-          n += 1;
-        }
-        break;
-      }
       case 'hr_active': {
         const v = strOf(raw);
         if (v !== null && HR_ACTIVE_OPTIONS.some((o) => o.value === v)) {
@@ -531,6 +519,14 @@ export function applyBackend(d: FilterDraft, backend: unknown): number {
         }
         break;
       }
+      case 'short_term': {
+        const v = strOf(raw);
+        if (v === 'on' || v === 'off') {
+          d.short_term = v;
+          n += 1;
+        }
+        break;
+      }
       default:
         break;
     }
@@ -554,8 +550,8 @@ export function activeCount(d: FilterDraft): number {
   n += d.industries.length;
   if (d.hr_active !== 'any') n += 1;
   if (d.weekend !== 'any') n += 1;
-  n += d.veto_degrees.length;
   if (d.founded.trim() !== '') n += 1;
+  if (d.short_term !== 'on') n += 1;
   if (d.exclude.trim() !== DEFAULT_EXCLUDE && d.exclude.trim() !== '') n += 1;
   return n;
 }

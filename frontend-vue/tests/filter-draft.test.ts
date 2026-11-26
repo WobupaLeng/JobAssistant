@@ -54,7 +54,6 @@ describe('encode / decode', () => {
       exclude: '外包\n驻场\\测试',
       hr_active: '3',
       weekend: 'double',
-      veto_degrees: ['硕士', '博士'],
       founded: '5',
     });
     // 薪资按 `keep_known` 语义落表，表里没有的自定义区间排在其后；断言时按集合比较。
@@ -188,7 +187,7 @@ describe('applyBackend（后端权威优先，C12）', () => {
     expect(d.max_pages).toBe(10);
   });
 
-  // 回归：9 个多词键曾经按驼峰名读（src[name]），而回显是蛇形 → 重启后全部回读不中。
+  // 回归：多词键曾经按驼峰名读（src[name]），而回显是蛇形 → 重启后全部回读不中。
   // 单字键（city/salary/experience/degree/industry）两种写法相同，把缺陷掩盖了很久。
   it('蛇形回显 → 9 个多词键全部命中（重启后筛选条件不丢）', () => {
     const d = createDraft();
@@ -200,8 +199,8 @@ describe('applyBackend（后端权威优先，C12）', () => {
       exclude_keywords: '外包,驻场',
       hr_active: '3',
       work_weekend: 'double',
-      jd_degree: ['本科'],
       min_years: '4',
+      short_term_title: 'off',
     });
     expect(d.scales).toEqual(['303']);
     expect(d.stages).toEqual(['806']);
@@ -210,9 +209,18 @@ describe('applyBackend（后端权威优先，C12）', () => {
     expect(d.exclude).toBe('外包,驻场');
     expect(d.hr_active).toBe('3');
     expect(d.weekend).toBe('double');
-    expect(d.veto_degrees).toEqual(['本科']);
     expect(d.founded).toBe('4');
+    expect(d.short_term).toBe('off');
     expect(n).toBe(9);
+  });
+
+  it('短期项目开关：只认 on/off，脏值回落默认开', () => {
+    expect(decode('short_term=off').short_term).toBe('off');
+    expect(decode('short_term=oops').short_term).toBe('on');
+    const d = createDraft();
+    expect(applyBackend(d, { short_term_title: 'off' })).toBe(1);
+    expect(d.short_term).toBe('off');
+    expect(activeCount(d)).toBe(1);
   });
 
   // SPEC-004：single 档由 WEEKEND_OPTIONS 选项表驱动校验（decode L266 / applyBackend L546），
@@ -249,8 +257,8 @@ describe('applyBackend（后端权威优先，C12）', () => {
       excludeKeywords: 'exclude_keywords',
       hrActive: 'hr_active',
       workWeekend: 'work_weekend',
-      jdDegree: 'jd_degree',
       minYears: 'min_years',
+      shortTermTitle: 'short_term_title',
     });
   });
 

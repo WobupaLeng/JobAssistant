@@ -8,7 +8,6 @@ import { computed, ref } from 'vue';
 import CityPicker from './CityPicker.vue';
 import {
   DEGREE_OPTIONS,
-  DEGREE_VETO_OPTIONS,
   EXPERIENCE_OPTIONS,
   HR_ACTIVE_OPTIONS,
   INDUSTRY_OPTIONS,
@@ -88,27 +87,6 @@ function toggle(field: 'experiences' | 'degrees' | 'scales' | 'stages' | 'indust
 function toggleSalary(code: string): void {
   patch({ salaries: toggleCode(props.draft.salaries, code, SALARY_OPTIONS) });
 }
-
-function toggleVeto(name: string): void {
-  const has = props.draft.veto_degrees.includes(name);
-  patch({
-    veto_degrees: has
-      ? props.draft.veto_degrees.filter((x) => x !== name)
-      : [...DEGREE_VETO_OPTIONS.filter((x) => props.draft.veto_degrees.includes(x) || x === name)],
-  });
-}
-
-/** 学历否决是**多选**：下拉框只是 chips 的快捷入口，清空 = 不限。 */
-function onVetoPick(value: string): void {
-  patch({ veto_degrees: value === '' ? [] : [...DEGREE_VETO_OPTIONS.filter((x) => x === value)] });
-}
-
-/** 「已选 N 项」摘要：空选回落到「不限」。 */
-const vetoSummary = computed(() => {
-  const list = props.draft.veto_degrees;
-  if (list.length === 0) return '不限';
-  return list.length === 1 ? list[0] : `已选 ${list.length} 项：${list.join(' / ')}`;
-});
 
 /** 关键词入口：写 `keywords`，**绝不写 `draft.exclude`**。 */
 function addKeywords(raw: string): void {
@@ -581,26 +559,6 @@ function salaryCodeLabel(code: string): string {
             </span>
           </label>
           <label class="f-cell">
-            <span class="f-cell-label">JD 学历要求否决</span>
-            <!-- 多选：下拉框只是快捷入口，选中即并入 chips；框内显示当前已选（不止第一项）。 -->
-            <span class="f-select-wrap">
-              <select
-                class="input f-select"
-                :value="''"
-                data-testid="filter-jd-edu-select"
-                :title="vetoSummary"
-                aria-label="JD 学历要求否决（多选，可在此追加一档）"
-                @change="onVetoPick(($event.target as HTMLSelectElement).value)"
-              >
-                <option value="">{{ vetoSummary }}</option>
-                <option v-for="name in DEGREE_VETO_OPTIONS" :key="name" :value="name">{{ name }}</option>
-              </select>
-              <svg class="f-select-caret" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                <path d="M4 6.4 8 10.4l4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-            </span>
-          </label>
-          <label class="f-cell">
             <span class="f-cell-label">公司成立年限（起）</span>
             <input
               class="input input-num"
@@ -612,24 +570,23 @@ function salaryCodeLabel(code: string): string {
               @input="patch({ founded: ($event.target as HTMLInputElement).value })"
             />
           </label>
-        </div>
-        <div class="f-veto-line">
-          <span class="f-glabel-inline">可多选，点一下即否决</span>
-          <span class="f-veto-count" :data-testid="'filter-veto-count'">已选 {{ draft.veto_degrees.length }} / {{ DEGREE_VETO_OPTIONS.length }}</span>
-        </div>
-        <div class="f-chips" data-testid="filter-group-veto">
-          <button
-            v-for="name in DEGREE_VETO_OPTIONS"
-            :key="name"
-            class="f-chip f-chip-veto"
-            :class="{ 'is-on': draft.veto_degrees.includes(name) }"
-            type="button"
-            :aria-pressed="draft.veto_degrees.includes(name)"
-            :data-testid="`filter-veto-${name}`"
-            @click="toggleVeto(name)"
-          >
-            {{ name }}
-          </button>
+          <label class="f-cell">
+            <span class="f-cell-label">短期项目 / 项目制</span>
+            <span class="f-select-wrap">
+              <select
+                class="input f-select"
+                :value="draft.short_term"
+                data-testid="filter-short-term-select"
+                @change="patch({ short_term: ($event.target as HTMLSelectElement).value })"
+              >
+                <option value="on">排除</option>
+                <option value="off">不排除</option>
+              </select>
+              <svg class="f-select-caret" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path d="M4 6.4 8 10.4l4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
+          </label>
         </div>
       </div>
     </div>

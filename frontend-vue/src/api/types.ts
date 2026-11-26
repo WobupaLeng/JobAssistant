@@ -266,8 +266,9 @@ export interface ScrapeDefaultsArgs {
   hrActive?: unknown;
   /** 休息制度三档＋不限；字面量逐字同源 SPEC-004（后端 rules.rs 枚举），错一个字母＝筛选静默丢失 */
   workWeekend?: 'any' | 'double' | 'no_bigweek' | 'single';
-  jdDegree?: unknown;
   minYears?: unknown;
+  /** 岗位名显示短期项目/项目制是否排除：`'on'`（默认）/`'off'` */
+  shortTermTitle?: 'on' | 'off';
 }
 
 /**
@@ -504,3 +505,29 @@ export interface RescoreChange {
 
 /** 空 `Job`：列表占位用（避免各处各写一份 28 字段字面量）。 */
 export type { Job as JobDto };
+
+/**
+ * 公司搜索结果里的一条岗位（`company_jobs` 的返回项）。
+ *
+ * 只含界面要显示的字段：JD 正文不随搜索结果下发（一次几十条太长），
+ * 用户点「查看 JD」时才由 `company_job_preview` 单独读一次。
+ */
+export interface CompanyJobItem {
+  /** Boss 加密岗位 id，不带 `boss:` 前缀 */
+  job_id: string;
+  title: string;
+  salary: string;
+  /** 接口说的公司名：包含匹配时可能和用户输入的不同，必须逐行显示 */
+  company: string;
+  location: string;
+  experience: string;
+  degree: string;
+  url: string;
+}
+
+/** 公司搜索结果。`matched` 说明这次是严格同名还是「包含关键词」。 */
+export interface CompanyJobsReply {
+  company: string;
+  matched: 'exact' | 'contains' | 'none' | string;
+  jobs: CompanyJobItem[];
+}

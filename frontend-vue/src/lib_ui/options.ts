@@ -141,9 +141,6 @@ export const HR_ACTIVE_OPTIONS: readonly ValueOpt[] = [
   { value: '7', name: '一周内', hint: '只保留最近 7 天内活跃的 HR；活跃度未知的也会被排除' },
 ];
 
-// ---------------------------------------------------------------- JD 学历要求
-export const DEGREE_VETO_OPTIONS: readonly string[] = ['大专', '本科', '硕士', '博士'];
-
 // ---------------------------------------------------------------- 平台 / 推荐词 / 排除词
 export interface PlatformOpt {
   id: string;
