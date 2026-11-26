@@ -15,6 +15,7 @@ import {
   chatOpen,
   chatRecall,
 
+  jobFetchDetail,
   chatSend,
 
 } from '../api/commands/chat';
@@ -139,13 +140,17 @@ const topNote = computed(() => (noteTone.value === 'bad' ? note.value : ''));
 /**
  * 消息流末尾灰色说明条用的那句。
  * 「已是最新消息，点「刷新」可重新拉取」在气泡区只用前半句：刷新按钮就在列表头顶，
- * 对话框里重复一遍只会把一句灰字挤成两行。列表头顶仍是完整那句。
+ * 对话框里重复一遍只会把一句灰字挤成两行。列表头顶不再重复（用户要求撤掉那条灰条）。
  */
 const bottomNote = computed(() => {
   if (noteTone.value !== 'hint') return '';
   return note.value === MESSAGES_FRESH_NOTE ? MESSAGES_FRESH_SHORT : note.value;
 });
-/** 「已是最新消息」要出现**两处**：Boss 列表最上方 + 消息流末尾，都是灰色居中。 */
+/**
+ * 「已是最新消息」只在消息流末尾出现一次（见 `bottomNote`）。
+ * 从前它还会在 Boss 列表最上方顶一条灰条，用户要求撤掉；这里保留判据是因为
+ * 列表下方那条瞬态提示条要靠它让位（同一句话不必说两遍，见模板 `chat-note` 的 `v-if`）。
+ */
 const freshNote = computed(() => (note.value === MESSAGES_FRESH_NOTE ? note.value : ''));
 /**
  * 第二条提示（`autoNote`，心跳/自动投递写的）：与 `note` 说的是**同一件事**时不再重复。
@@ -544,15 +549,51 @@ function friendJobId(friend: Friend): string {
   return friend.job_id ?? (isPendingFriend(friend) ? pendingJobId(friend) : '');
 }
 
+/**
+ * 拿到这条会话的岗位 id；本地没有、但会话行自带 `encryptJobId` 时，去详情页把 JD
+ * 补抓一次入库再返回。
+ *
+ * 只由点击触发（看岗位详情 / 生成话术），且幂等：已经在库的岗位后端直接返回，
+ * 不重抓不覆盖。抓回来的 id 就地写回这一行，同一次会话里不会再补第二遍。
+ */
+async function ensureFriendJob(friend: Friend): Promise<string> {
+  const local = friendJobId(friend);
+  if (local !== '') return local;
+  let enc = (friend.encrypt_job_id ?? '').trim();
+  if (enc === '') {
+    // 首屏那一份来自本地缓存（`chat_friends` 表存不下加密岗位 id），所以点开时向
+    // Boss 现取一次会话列表补齐——等价于用户手点「刷新」，且只在这一行缺岗位时发生。
+    const live = await chatFriends();
+    const hit = live.items.find((f) => f.uid === friend.uid);
+    const known = (hit?.job_id ?? '').trim();
+    if (known !== '') {
+      friend.job_id = known;
+      return known;
+    }
+    enc = (hit?.encrypt_job_id ?? '').trim();
+    if (enc === '') return '';
+    friend.encrypt_job_id = enc;
+  }
+  const job = await jobFetchDetail(enc);
+  friend.job_id = job.job_id;
+  return job.job_id;
+}
+
 async function openFriendDetail(uid: string): Promise<void> {
   const friend = friends.value.find((f) => f.uid === uid) ?? null;
   if (friend === null) return;
-  const jobId = friendJobId(friend);
-  if (jobId === '') {
-    note.value = '这条会话没有关联岗位，看不到岗位详情';
-    return;
-  }
+  let jobId = friendJobId(friend);
   try {
+    if (jobId === '') {
+      // 会话行带着加密岗位 id：点开就去详情页补抓一次（有 JD 才能看详情、才能写话术）。
+      note.value = '正在读取岗位详情…';
+      jobId = await ensureFriendJob(friend);
+      if (jobId === '') {
+        note.value = '这条会话没有关联岗位，看不到岗位详情';
+        return;
+      }
+      note.value = '';
+    }
     if (detailScoreMax.value === null) {
       const spec = await getScoringSpec();
       detailScoreMax.value = spec.score_max;
@@ -728,7 +769,9 @@ async function generateGreet(reply = ''): Promise<void> {
   generating.value = true;
   try {
     greet.value = await greetDraft({
-      jobId: greetJob.value?.uid === friend.uid ? greetJob.value.jobId : friendJobId(friend),
+      // 没有本地岗位时先补抓一次 JD：空 JD 写出来的话术必然不对（用户 m00833）。
+      jobId:
+        greetJob.value?.uid === friend.uid ? greetJob.value.jobId : await ensureFriendJob(friend),
       title: friend.title,
       company: friend.company,
       salary: '',
@@ -787,7 +830,9 @@ async function generateAiDraft(): Promise<void> {
   generating.value = true;
   try {
     const reply = await greetDraft({
-      jobId: greetJob.value?.uid === friend.uid ? greetJob.value.jobId : friendJobId(friend),
+      // 同上：没有本地岗位时先补抓 JD，提示词才有正文可用。
+      jobId:
+        greetJob.value?.uid === friend.uid ? greetJob.value.jobId : await ensureFriendJob(friend),
       title: friend.title,
       company: friend.company,
       salary: '',
@@ -1257,15 +1302,6 @@ defineExpose({
       @retry="loadFriends"
       @search="search = $event"
     >
-      <!-- 「已是最新消息」放 Boss 列表最上方：它说的是列表/会话这一层
-           的取数结果，放在会话列表头顶比塞在消息流里更有归属感。 -->
-      <template #rail-head>
-        <span
-          v-if="freshNote !== ''"
-          class="rail-fresh"
-          data-testid="chat-rail-fresh"
-        >{{ freshNote }}</span>
-      </template>
     </FriendList>
     <!-- 右栏 aria-live 汇报区：与对话框里的 chat-detach-state-announce 同源，文案都由常量给出。 -->
     <span class="sr-only" data-testid="chat-rail-state-announce" aria-live="polite">{{
@@ -1277,8 +1313,8 @@ defineExpose({
          ChatDetach 收起时用 [hidden] 改成零宽盒（motion.css）而不是 display:none，不互斥时
          两份会落在同一屏上，看起来就是同一句提示出现了两次。 -->
     <template v-if="!ui.chatOpen">
-      <!-- 同一条「已是最新消息」只在列表头顶用灰字说一次（freshNote），
-           不再落到下面这条红底瞬态条上重复一遍。 -->
+      <!-- 「已是最新消息」不再出现在列表头顶（用户要求撤掉那条灰条），
+           也不落到下面这条红底瞬态条上（`freshNote` 在这里只负责让位）。 -->
       <div
         v-if="note !== '' && freshNote === ''"
         class="cfg-hint chat-note"
@@ -1366,13 +1402,6 @@ defineExpose({
         :removable-uids="removableUids"
         @remove="removePending"
       >
-        <template #rail-head>
-          <span
-            v-if="freshNote !== ''"
-            class="rail-fresh"
-            data-testid="chat-detach-rail-fresh"
-          >{{ freshNote }}</span>
-        </template>
       </FriendList>
     </template>
 
@@ -1434,7 +1463,7 @@ defineExpose({
       <template #footer>
         <!-- 消息流末尾的说明条：不住在输入框上方，
              而是跟着内容走、紧接最后一条气泡，灰色小字居中。
-             「已是最新消息」同时也出现在 Boss 列表最上方（见 #rail-head）。 -->
+             这是「已是最新消息」唯一的落点。 -->
         <div v-if="bottomNote !== ''" class="detach-hint" data-testid="chat-detach-hint">{{ bottomNote }}</div>
       </template>
       <template #compose>

@@ -1,18 +1,5 @@
 """Boss 直聘聊天：会话列表、历史消息、发消息、发简历、撤回。
 
-## 与旧版 `backend/scrapers/boss_chat.py` 的根本差异
-
-旧版用 **CDP 连同一台 Chrome 开第二条 Playwright 车道**，让「抓取」和「聊天」
-互不阻塞。SPEC-002 已放弃 CDP，所以新版只有一条车道：**所有命令排队到同一个
-工作线程**执行。这带来两个必须接受的事实：
-
-1. 抓取进行中发起聊天，聊天要等当前这一轮抓取结束才轮得上（sidecar 是
-   同步串行的，见 `sidecar.py::main`）。
-2. patchright 的同步 API 绑定创建它的线程，**绝不允许跨线程**调用——
-   历史上 `Cannot switch to a different thread` 就是这么来的。
-
-排队是刻意的取舍：宁可让用户看到「排队中」，也不要为了并发去碰线程铁律。
-
 ## 监听器铁律（原样搬过来的踩坑记录，不要重写）
 
 `page.on("response")` 的回调运行在 playwright 自己的调度栈里，**绝不能在里面
@@ -30,6 +17,7 @@ import re
 import threading
 import time
 from typing import Any, Callable
+from urllib.parse import quote
 
 LogFn = Callable[[str, str], None]
 
@@ -46,6 +34,37 @@ SEL_SEND = ".chat-op .btn-send, button.btn-send"
 # 外面还套着 .btn-startchat-wrap / .btn-container（文本「感兴趣 立即沟通」），
 # 只有这个 a 是唯一可见可点的，用 :has-text() 会同时命中外层 div。
 SEL_START_CHAT = "a.btn-startchat"
+# 岗位详情页是**服务端直出**的 HTML（实测 150KB，JD 正文全文在里面），所以补抓
+# 走网络层 `ctx.request`，不开标签页：新标签页在非前台会被 Chrome 冻住导航，
+# 实测卡在 about:blank 直到超时（用户 m01137）。三个正则对应实测标记：
+# `<h1 title="Java开发工程师（AI方向）">`、`<span class="salary">12-24K</span>`、
+# `<div class="job-sec-text">一、岗位职责<br/>…`。
+RE_JOB_TITLE = re.compile(r"<h1[^>]*>(.*?)</h1>", re.S)
+RE_JOB_SALARY = re.compile(r'<span class="salary"[^>]*>(.*?)</span>', re.S)
+RE_JOB_SEC = re.compile(r'<div class="job-sec-text"[^>]*>', re.S)
+RE_JOB_COMPANY = re.compile(r"」_([^_<]{1,40}?)招聘-BOSS直聘")
+
+# 补抓详情的网络上限。实测 200～600ms 返回。
+JOB_DETAIL_TIMEOUT_MS = 30_000
+
+# 公司搜索走搜索接口（与抓取侧同一个接口，只是换 query）：一次 GET 一页 30 行，
+# 字段直接带 `encryptJobId` / `jobName` / `salaryDesc` / `brandName` / `cityName`，
+# 不用开页面、不用解析 DOM，也不会打断聊天页。
+# `city` 参数实测**不生效**（传 101020100 照样返回芜湖/合肥的岗位），这里索性不传
+# ——「这家公司的全部岗位」本来就是跨城市的。
+COMPANY_SEARCH_URL = (
+    "https://www.zhipin.com/wapi/zpgeek/search/joblist.json"
+    "?scene=1&query={query}&page={page}&pageSize={size}"
+)
+COMPANY_SEARCH_REFERER = "https://www.zhipin.com/web/geek/jobs?query={query}"
+COMPANY_SEARCH_PAGE_SIZE = 30
+# 一家公司在招岗位极少超过 90 条，三页足够，也顺手挡住把页数打满的输入。
+COMPANY_SEARCH_MAX_PAGES = 3
+# 页与页之间必须留间隔：实测连打 8 次后接口开始返回空壳，隔 0.6 秒就恢复。
+COMPANY_SEARCH_GAP_S = 0.6
+COMPANY_SEARCH_TIMEOUT_MS = 30_000
+# 界面一次最多展示这么多条，再多也翻不完。
+COMPANY_JOBS_CAP = 60
 
 # 接口关键字。命中即记下响应，正文留到主流程读。
 KEY_FRIENDS = "getGeekFriendList"
@@ -74,9 +93,88 @@ _NAV_TEXT_RE = re.compile(
     r"^(查看详细分析|点击预览附件简历|复制微信号|拒绝|同意|暂不考虑|可以接受|复制|发送)$"
 )
 
+def _html_text(raw: str) -> str:
+    """把详情页 HTML 片段还原成纯文本：`<br/>` 转换行、去标签、解实体。"""
+    if not raw:
+        return ""
+    text = re.sub(r"<br\s*/?>", "\n", raw, flags=re.I)
+    text = re.sub(r"</(p|div|li|h\d)>", "\n", text, flags=re.I)
+    text = _TAG_RE.sub("", text)
+    text = html.unescape(text).replace("\u00a0", " ")
+    lines = [ln.strip() for ln in text.splitlines()]
+    return "\n".join(ln for ln in lines if ln)
+
+
+def _job_sec_html(html: str) -> str:
+    """切出第一个 `div.job-sec-text` 的内部 HTML（内含 <div> 时按层数配平）。"""
+    start = RE_JOB_SEC.search(html)
+    if start is None:
+        return ""
+    depth = 1
+    pos = start.end()
+    while depth > 0:
+        nxt_open = html.find("<div", pos)
+        nxt_close = html.find("</div>", pos)
+        if nxt_close < 0:
+            return ""
+        if 0 <= nxt_open < nxt_close:
+            depth += 1
+            pos = nxt_open + 4
+            continue
+        depth -= 1
+        if depth == 0:
+            return html[start.end():nxt_close]
+        pos = nxt_close + 6
+    return ""
+
 
 class ChatError(RuntimeError):
     """聊天链路的可预期失败（未登录、找不到会话等），消息直接给用户看。"""
+
+
+def _norm_company(text: Any) -> str:
+    """公司名比对用：去掉所有空白（含全角空格）并统一小写。"""
+    return re.sub(r"\s+", "", str(text or "")).replace("\u3000", "").lower()
+
+
+def match_company_rows(
+    rows: list[dict[str, Any]], want: str
+) -> tuple[str, list[dict[str, Any]]]:
+    """按公司名挑行：严格同名优先，同名为空时退回「公司名包含关键词」。
+
+    返回 `(matched, rows)`，`matched` ∈ `exact` / `contains` / `none`。
+    搜「字节」这类词时接口会给一堆「字节跳动XX公司」——包含匹配让这种输入也有
+    结果，但界面必须显示每行自己的公司名，否则用户会以为搜到的是同名公司。
+    """
+    key = _norm_company(want)
+    if not key:
+        return "none", []
+    same = [r for r in rows if _norm_company(r.get("brandName")) == key]
+    if same:
+        return "exact", same
+    part = [r for r in rows if key in _norm_company(r.get("brandName"))]
+    if part:
+        return "contains", part
+    return "none", []
+
+
+def row_to_company_job(row: dict[str, Any]) -> dict[str, Any]:
+    """把搜索接口的一行转成界面与入库都认的形状。
+
+    只取接口确实给了的字段；地点用 `cityName`（与抓取侧 `location` 口径一致，
+    详情页的「上海·浦东新区」格式抓取侧并不存），不拼区县。
+    """
+    enc = str(row.get("encryptJobId") or "").strip()
+    return {
+        "job_id": enc,
+        "title": str(row.get("jobName") or "").strip(),
+        "salary": str(row.get("salaryDesc") or "").strip(),
+        "company": str(row.get("brandName") or "").strip(),
+        "location": str(row.get("cityName") or "").strip(),
+        "experience": str(row.get("jobExperience") or "").strip(),
+        "degree": str(row.get("jobDegree") or "").strip(),
+        "url": JOB_DETAIL_URL.format(job_id=enc) if enc else "",
+    }
 
 
 # ---------------------------------------------------------------- 归一化
@@ -897,6 +995,132 @@ class ChatClient:
         self._catch(page, KEY_ENTER, self._on_enter)
         self.log("info", f"会话已建立 uid={uid}")
         return {"uid": uid, "job_id": job, "url": cur}
+
+    def job_detail(self, ctx: Any, job_id: str) -> dict[str, Any]:
+        """按岗位加密 id 把 JD 正文读回来。
+        只读，不发任何消息，也不改岗位状态——补抓的入库与状态由 Rust 命令层决定。
+        """
+        job = str(job_id or "").strip()
+        if job.startswith("boss:"):
+            job = job[len("boss:"):]
+        if not job:
+            raise ChatError("缺少岗位 id，无法读取岗位详情")
+
+        url = JOB_DETAIL_URL.format(job_id=job)
+        # 每次补抓都留一行：用户问「为什么多点了一下才出详情」时，日志里能对上。
+        self.log("info", f"读取岗位详情：{job}")
+        try:
+            resp = ctx.request.get(url, timeout=JOB_DETAIL_TIMEOUT_MS)
+        except Exception as exc:
+            if _browser_gone(exc):
+                raise ChatError(
+                    "读取岗位详情失败：Boss 浏览器已关闭或连接断了。"
+                    "先点右上角「扫码登录」把浏览器拉起来，再点一次。"
+                ) from exc
+            raise ChatError(f"读取岗位详情失败：{exc}") from exc
+
+        if resp.status != 200:
+            raise ChatError(f"岗位详情页打不开（HTTP {resp.status}），职位可能已关闭")
+        page_html = resp.text()
+        sec = _job_sec_html(page_html)
+        jd = _html_text(sec)
+        if len(jd) < 20:
+            # 被风控时返回的是验证页/空壳：同样 HTTP 200，但拿不到 .job-sec-text。
+            raise ChatError("岗位详情页没有读到 JD（职位可能已关闭，或页面被要求验证）")
+        title_hit = RE_JOB_TITLE.search(page_html)
+        salary_hit = RE_JOB_SALARY.search(page_html)
+        company_hit = RE_JOB_COMPANY.search(page_html)
+        self.log("info", f"岗位详情已读回：{_html_text(title_hit.group(1)) if title_hit else job}")
+        return {
+            "job_id": job,
+            "title": _html_text(title_hit.group(1)) if title_hit else "",
+            "salary": _html_text(salary_hit.group(1)) if salary_hit else "",
+            "company": _html_text(company_hit.group(1)) if company_hit else "",
+            "jd_text": jd,
+            "url": url,
+        }
+
+    def company_jobs(self, ctx: Any, company: str) -> dict[str, Any]:
+        """按公司名列出这家公司的在招岗位（只读：不落库、不投递、不改任何状态）。
+
+        返回 `{company, matched, jobs}`。`matched` 是 `exact` / `contains` / `none`
+        ——包含匹配时界面必须显示每行自己的公司名，否则用户会误以为是同名公司。
+        """
+        want = str(company or "").strip()
+        if not want:
+            raise ChatError("缺少公司名，填一个再搜")
+        self.log("info", f"搜索公司：{want}")
+
+        rows: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        hits: list[dict[str, Any]] = []
+        matched = "none"
+        for page in range(1, COMPANY_SEARCH_MAX_PAGES + 1):
+            data = self._search_page(ctx, want, page)
+            batch = data.get("jobList")
+            if not isinstance(batch, list):
+                batch = []
+            for row in batch:
+                if not isinstance(row, dict):
+                    continue
+                enc = str(row.get("encryptJobId") or "").strip()
+                if not enc or enc in seen:
+                    continue
+                seen.add(enc)
+                rows.append(row)
+            matched, hits = match_company_rows(rows, want)
+            # 同名公司的岗位可能跨页，所以在 hasMore 为真时继续翻；包含匹配同理。
+            if not data.get("hasMore") or not batch:
+                break
+            if len(rows) >= COMPANY_JOBS_CAP * 3:
+                break
+            time.sleep(COMPANY_SEARCH_GAP_S)
+
+        jobs = [row_to_company_job(r) for r in hits][:COMPANY_JOBS_CAP]
+        if not jobs:
+            self.log("warn", f"公司「{want}」没搜到同名岗位（接口返回 {len(rows)} 条）")
+        else:
+            kind = "同名" if matched == "exact" else "名称包含"
+            self.log("info", f"公司「{want}」命中 {len(jobs)} 个岗位（{kind}）")
+        return {"company": want, "matched": matched, "jobs": jobs}
+
+    def _search_page(self, ctx: Any, company: str, page: int) -> dict[str, Any]:
+        """取公司搜索结果的一页；网络与风控错误都翻译成用户能懂的话。"""
+        q = quote(company)
+        url = COMPANY_SEARCH_URL.format(
+            query=q, page=page, size=COMPANY_SEARCH_PAGE_SIZE
+        )
+        try:
+            resp = ctx.request.get(
+                url,
+                headers={"referer": COMPANY_SEARCH_REFERER.format(query=q)},
+                timeout=COMPANY_SEARCH_TIMEOUT_MS,
+            )
+        except Exception as exc:
+            if _browser_gone(exc):
+                raise ChatError(
+                    "搜索失败：Boss 浏览器已关闭或连接断了。"
+                    "先点右上角「扫码登录」把浏览器拉起来，再搜一次。"
+                ) from exc
+            raise ChatError(f"搜索失败：{exc}") from exc
+        if resp.status != 200:
+            raise ChatError(f"搜索接口返回 HTTP {resp.status}，稍后再试")
+        try:
+            body = resp.json()
+        except Exception as exc:
+            raise ChatError(
+                "搜索接口返回的不是 JSON：可能被要求验证，先到浏览器里手动过一次"
+            ) from exc
+        code = body.get("code")
+        if code not in (0, None):
+            msg = str(body.get("message") or "稍后再试")
+            raise ChatError(f"搜索被拦下（code={code}）：{msg}")
+        data = body.get("zpData")
+        if not isinstance(data, dict):
+            raise ChatError(
+                "搜索接口没有返回结果：可能被要求验证，先到浏览器里手动过一次"
+            )
+        return data
 
     def messages(self, ctx: Any, uid: str) -> list[dict[str, Any]]:
         """与某个 HR 的历史消息：点开会话触发 `historyMsg`，等它回来（收到即 break）。

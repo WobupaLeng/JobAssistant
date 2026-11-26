@@ -1,12 +1,11 @@
 """Boss 直聘抓取：搜索页 DOM 卡片 + 详情页 DOM 解析。
 
-从 `backend/scrapers/boss.py`（855 行）平移。**反爬对抗逻辑一行都没有重写**，
-只做三件事：
+反爬对抗全在浏览器侧（`browser.py`）完成，本模块只做三件事：
 1. 剥掉打分类/入库类耦合（`self.arrived`、`on_job` 回调、`target_count` 早停），
    这些现在归 Rust 侧——sidecar 只负责「抓到什么就吐什么」；
 2. 日志改走回调（由 sidecar 转成 `log` 事件）；
-3. 停止信号由 `StopFlag` 换成一个 `should_stop()` 回调（sidecar 用 stdin 读到
-   stop 时置位），避免线程与 stdin 读循环互相干扰。
+3. 停止信号走 `should_stop()` 回调（sidecar 用 stdin 读到 stop 时置位），
+   避免线程与 stdin 读循环互相干扰。
 
 **数据来源只有 DOM，不再监听接口响应**（2026-11-21 用户决策「默认不在使用接口捕获数据」）。
 原来那条 `page.on("response")` 抓 `joblist.json` 的通道已整体删除，理由不止是「不要用」：
@@ -19,25 +18,22 @@
   DOM 结构反而更稳定，且岗位链接里的 `encryptJobId` 与详情页一一对应。
 
 DOM 通道拿不到、而接口拿得到的只有拿 `hr_active_status`（卡片上没有），
-该字段目前留空；规则 `exclude_hr_active_days` 因此对抓来的岗位不生效（见 DEVELOPMENT.md）。
+该字段目前留空；规则 `exclude_hr_active_days` 因此对抓来的岗位不生效。
 """
 from __future__ import annotations
 
 import re
-import time
 from datetime import datetime
 from typing import Any, Callable
 from urllib.parse import quote
 
-# 城市编码：Boss 只认自己的数字编码
-CITY_CODE = {"上海": "101020100"}
 # 2026-11-21 实测：站点已从 /web/geek/job 迁到 /web/geek/jobs（多了 s），
 # 旧地址会被 302 过去。直接写新地址，省一次跳转与一次「加载中」页风险。
 SEARCH_BASE = "https://www.zhipin.com/web/geek/jobs"
 
 # ---- Boss 官网筛选参数 ----
 # 真实筛选项全是**重复键**多选，例如：
-#   .../web/geek/job?query=Java&city=101020100&salary=406&salary=407&experience=105
+#   .../web/geek/jobs?query=Java&city=101020100&salary=406&salary=407&experience=105
 # 同一维度内多项之间是 OR，不同维度之间是 AND。
 
 # 薪资：Boss 官方下拉只有 6 档，URL 编码也只认这几个（来源：
@@ -732,7 +728,7 @@ class BossScraper:
             item["hr_position"] = hr_title.strip().lstrip("·").strip() or hr_title
 
         # ---------- 公司名 ----------
-        # 现行版曾完全没解析公司名：搜索接口的 brandName 只在有 company 对象时才有，
+        # 早先完全没解析公司名：搜索接口的 brandName 只在有 company 对象时才有，
         # DOM 兜底的卡片里也没有，导致大量记录公司名为空。
         # 这里按「侧栏公司卡 → 公司信息区 → 招聘者信息区」的顺序兜底。
         if not (item.get("company") or "").strip():

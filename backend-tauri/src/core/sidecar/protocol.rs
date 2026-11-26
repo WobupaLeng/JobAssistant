@@ -127,8 +127,19 @@ pub enum Command {
     ///
     /// 旧语义是「按公司名/HR 名在已有会话里找」，对**没打过招呼**的岗位永远找不到，
     /// 所以整个换成按 `job_id` 建会话（见 scraper/HANDOFF §2.4.4）。
-    #[serde(rename = "chat.open")]
-    ChatOpen { job_id: String },
+#[serde(rename = "chat.open")]
+ChatOpen { job_id: String },
+/// 读某个岗位的 JD 正文：会话行只带 `encryptJobId` 与标题/薪资，正文在详情页。
+///
+/// 只给「会话来了但岗位从没抓过」的那种行用；已经在库里的岗位走本地读，不调这里。
+    #[serde(rename = "chat.job_detail")]
+    ChatJobDetail { job_id: String },
+    /// 按公司名列这家公司在招的岗位（只读，不落库）。
+    ///
+    /// 搜索结果只是一份候选清单：用户点了「加入待投递」才走命令层的 `job_import`
+    /// 入库，点「查看 JD」只读正文。所以这里不带任何状态，也不改任何岗位。
+    #[serde(rename = "chat.company_jobs")]
+    CompanyJobs { company: String },
     /// 撤回最近一条自己发的消息。
     #[serde(rename = "chat.recall")]
     ChatRecall { uid: String },

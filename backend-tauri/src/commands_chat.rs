@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::commands_scrape::ScrapeState;
 use crate::commands_db::{store_err, with_store, CmdResult};
+use crate::core::domain::job::{Job, JobStore};
 use crate::core::domain::store_ports::JobAdminStore;
 
 /// 聊天回执的等待上限。
@@ -497,6 +498,73 @@ pub async fn chat_recall(
     })
 }
 
+/// 把一条会话对应的 JD **补抓**回库（会话行只带岗位标题/薪资，正文在详情页）。
+///
+/// 只服务一种情况：会话行拿到了 `encryptJobId`，但该岗位从没进过抓取队列，于是
+/// 既没有岗位详情也没有 JD，话术只能空写（用户 m00824 的「吴美婷 · 中安瑞智」）。
+///
+/// **对已有岗位零影响**：库里已经有这一条就直接返回它，不重抓、不覆盖、不改状态
+/// （`insert_job` 本身也是 `INSERT OR IGNORE`）。新补的岗位以 `pending` 入库，
+/// 不打分、不投递、不标已读——它就是一条普通岗位，接下来走正常流程。
+///
+/// `job_id` 接受 `boss:<enc>` 与裸加密 id 两种写法（会话行给的是后者）。
+#[tauri::command]
+pub async fn job_fetch_detail(
+    state: tauri::State<'_, ScrapeState>,
+    store: tauri::State<'_, crate::commands_db::StoreState>,
+    job_id: String,
+) -> CmdResult<Job> {
+    let raw = job_id.trim();
+    let raw = raw.strip_prefix("boss:").unwrap_or(raw).trim();
+    if raw.is_empty() {
+        return Err("缺少岗位 id：无法读取岗位详情".to_string());
+    }
+    let jid = format!("boss:{raw}");
+    // 已在库：原样返回。补抓是幂等的，重复点不会打第二次页面、也不会改已有数据。
+    if let Some(hit) = with_store(&store, |s| s.get_job(&jid).map_err(store_err))? {
+        return Ok(hit);
+    }
+    let handle = handle_of(&state)?;
+    let data = request_chat(
+        &handle,
+        &Command::ChatJobDetail {
+            job_id: jid.clone(),
+        },
+    )?;
+    let job = job_from_detail(&jid, &data)?;
+    with_store(&store, |s| s.insert_job(&job).map_err(store_err))?;
+    with_store(&store, |s| s.get_job(&jid).map_err(store_err))?
+        .ok_or_else(|| "岗位写入后读不到，请刷新后再点一次".to_string())
+}
+
+/// 把 sidecar 读到的详情页字段拼成一条 `pending` 岗位。
+///
+/// 只填确定拿到的字段：标题/薪资/JD/URL/公司（公司取自页面 `<title>` 的
+/// 「_<公司>招聘-BOSS直聘」）。地点、经验留空——详情页里这两项的标记随版本变，
+/// 猜错会把错误信息写进库（比空着更糟）。缺 JD 正文视为失败：没有正文的岗位与
+/// 「没有关联岗位」等价，写进去只会让用户以为补成功了。
+pub(crate) fn job_from_detail(job_id: &str, data: &serde_json::Value) -> CmdResult<Job> {
+    let text = |key: &str| {
+        data.get(key)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let jd = text("jd_text").ok_or_else(|| "详情页没有读到 JD 正文".to_string())?;
+    Ok(Job {
+        job_id: job_id.to_string(),
+        platform: "boss".to_string(),
+        title: text("title"),
+        salary: text("salary"),
+        company: text("company"),
+        jd_text: Some(jd),
+        job_url: text("url"),
+        status: "pending".to_string(),
+        ..Default::default()
+    })
+}
+
 /// 读取账号里配置的「求职期望」职位。
 ///
 /// 现行版从 Chrome profile 里解 cookie 再发 HTTP（`backend/app/main.py:1241`），
@@ -542,6 +610,36 @@ mod tests {
     fn items_of_handles_missing_items_key() {
         let items: Vec<Friend> = items_of(&serde_json::json!({})).unwrap();
         assert!(items.is_empty());
+    }
+
+    /// 补抓只填详情页确实读到的字段：缺 JD 正文必须失败，不能写成一条空岗位。
+    #[test]
+    fn job_from_detail_needs_jd() {
+        let ok = serde_json::json!({
+            "job_id": "abc",
+            "title": "Java开发工程师（AI方向）",
+            "salary": "12-24K",
+            "company": "中安瑞智",
+            "jd_text": "岗位职责：负责后端架构设计与开发迭代，保障高可用。",
+            "url": "https://www.zhipin.com/job_detail/abc.html"
+        });
+        let job = job_from_detail("boss:abc", &ok).unwrap();
+        assert_eq!(job.job_id, "boss:abc");
+        assert_eq!(job.platform, "boss");
+        assert_eq!(job.status, "pending", "补抓的岗位必须从 pending 进库");
+        assert_eq!(job.title.as_deref(), Some("Java开发工程师（AI方向）"));
+        assert_eq!(job.salary.as_deref(), Some("12-24K"));
+        assert_eq!(job.company.as_deref(), Some("中安瑞智"), "公司取自页面 <title>");
+        assert!(job.jd_text.unwrap_or_default().contains("岗位职责"));
+
+        let no_company = serde_json::json!({ "jd_text": "岗位职责：一段够长的正文，用来跨过二十字的下限。" });
+        assert!(
+            job_from_detail("boss:abc", &no_company).unwrap().company.is_none(),
+            "读不到公司就留空，不猜"
+        );
+
+        let empty = serde_json::json!({ "title": "只有标题" });
+        assert!(job_from_detail("boss:abc", &empty).is_err(), "缺 JD 必须报错");
     }
 
     /// 消息的 sender 只允许三个值：前端按它决定气泡靠左还是靠右。

@@ -15,6 +15,7 @@ pub mod core;
 mod commands_db;
 mod commands_chat;
 mod commands_greet;
+mod commands_company;
 mod commands_scrape;
 mod commands_auto;
 mod commands_config;
@@ -1028,7 +1029,11 @@ pub fn run() {
             commands_chat::chat_send,
             commands_chat::chat_resumes,
             commands_chat::chat_send_resume,
-            commands_chat::chat_recall,
+    commands_chat::chat_recall,
+        commands_chat::job_fetch_detail,
+        commands_company::company_jobs,
+        commands_company::company_job_preview,
+        commands_company::job_import,
             commands_greet::greet_draft,
             commands_greet::greet_one,
             commands_chat::list_expectations,

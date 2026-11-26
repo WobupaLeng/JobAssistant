@@ -1,5 +1,5 @@
 /**
- * 载荷形状契约（C2）：59 条命令「包 args / 平铺 / 无参」逐条钉死。
+ * 载荷形状契约（C2）：63 条命令「包 args / 平铺 / 无参」逐条钉死。
  *
  * 用一个只记录调用的假 `window.__TAURI_INTERNALS__`（**只在测试里存在**，
  * `src/` 里没有任何假桩），断言真正发出去的 `(cmd, payload)`。
@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 import * as auto from '../src/api/commands/auto';
 import * as chat from '../src/api/commands/chat';
+import * as company from '../src/api/commands/company';
 import * as config from '../src/api/commands/config';
 import * as db from '../src/api/commands/db';
 import * as greet from '../src/api/commands/greet';
@@ -82,6 +83,10 @@ const EXPECTED_COMMANDS = [
   'chat_resumes',
   'chat_send_resume',
   'chat_recall',
+  'job_fetch_detail',
+  'company_jobs',
+  'company_job_preview',
+  'job_import',
   'greet_draft',
   'greet_one',
   'list_expectations',
@@ -123,10 +128,10 @@ afterEach(() => {
  *
  * 这是 C1 的静态守卫。`invokeArgs('...')` 的第一个实参如果拼错，类型检查、
  * 单测、构建**全绿**，只有真机点下去才报 `command not found`。
- * 直接读源文件做文本扫描，不做 AST：48 条命令名都在同一行。
+ * 直接读源文件做文本扫描，不做 AST：63 条命令名都在同一行。
  */
 describe('命令名覆盖：与 generate_handler! 逐条对齐（C1）', () => {
-  it('59 条命令恰好覆盖一次，不多不少', () => {
+  it('63 条命令恰好覆盖一次，不多不少', () => {
     const dir = fileURLToPath(new URL('../src/api/commands/', import.meta.url));
     const used = new Set<string>();
     for (const name of readdirSync(dir).filter((f: string) => f.endsWith('.ts'))) {
@@ -140,7 +145,7 @@ describe('命令名覆盖：与 generate_handler! 逐条对齐（C1）', () => {
         used.add(m[1]!);
       }
     }
-    expect(used.size).toBe(59);
+    expect(used.size).toBe(63);
     expect(EXPECTED_COMMANDS.filter((c) => !used.has(c))).toEqual([]);
     const known: readonly string[] = EXPECTED_COMMANDS;
     expect([...used].filter((c) => !known.includes(c))).toEqual([]);
@@ -351,6 +356,47 @@ describe('commands_chat', () => {
   it('chat_open：驼峰 jobId', async () => {
     await chat.chatOpen('boss:abc');
     expect(last()).toEqual({ cmd: 'chat_open', payload: { jobId: 'boss:abc' } });
+  });
+
+  it('job_fetch_detail：驼峰 jobId（发蛇形会被判缺 key）', async () => {
+    await chat.jobFetchDetail('enc1');
+    expect(last()).toEqual({ cmd: 'job_fetch_detail', payload: { jobId: 'enc1' } });
+  });
+
+  it('company_jobs / company_job_preview：平铺 { company } / { jobId }', async () => {
+    await company.companyJobs('中安瑞智');
+    expect(last()).toEqual({ cmd: 'company_jobs', payload: { company: '中安瑞智' } });
+    calls = [];
+    await company.companyJobPreview('enc1');
+    expect(last()).toEqual({ cmd: 'company_job_preview', payload: { jobId: 'enc1' } });
+  });
+
+  it('job_import：结构体入参按字段名发，空字段照样带上（后端 Option）', async () => {
+    await company.jobImport({
+      job_id: 'enc1',
+      title: 'Java开发工程师',
+      company: '中安瑞智',
+      salary: '12-24K',
+      location: '深圳',
+      experience: '3-5年',
+      degree: '本科',
+      job_url: 'https://www.zhipin.com/job_detail/enc1.html',
+      jd: '负责后端',
+    });
+    expect(last()).toEqual({
+      cmd: 'job_import',
+      payload: {
+        jobId: 'enc1',
+        title: 'Java开发工程师',
+        company: '中安瑞智',
+        salary: '12-24K',
+        location: '深圳',
+        experience: '3-5年',
+        degree: '本科',
+        jobUrl: 'https://www.zhipin.com/job_detail/enc1.html',
+        jd: '负责后端',
+      },
+    });
   });
 
   it('chat_messages / chat_recall：平铺 { uid }', async () => {

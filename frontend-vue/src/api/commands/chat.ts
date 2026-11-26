@@ -7,6 +7,7 @@ import { invokeFlat, invokeNone } from '../invoke';
 import type {
   Expectation,
   FriendsReply,
+  Job,
   MessagesReply,
   OkReply,
   OpenReply,
@@ -42,6 +43,19 @@ export function chatOpen(jobId: string): Promise<OpenReply> {
 /** 与某个 HR 的消息记录。平铺 `{ uid }`。 */
 export function chatMessages(uid: string): Promise<MessagesReply> {
   return invokeFlat<MessagesReply>('chat_messages', { uid });
+}
+
+/**
+ * 按岗位加密 id 把 JD **补抓**进库，返回这条岗位。
+ *
+ * 只给「会话行带着 `encryptJobId`、但岗位从没进过抓取队列」的行用（用户 m00824）：
+ * 那种行没有岗位详情也没有 JD，话术只能空写。已在库的岗位后端直接返回，不重抓、
+ * 不覆盖、不改状态，所以对已经关联正确的会话零影响。
+ *
+ * 属于「点开才发生」的浏览器动作，**不得在挂载/轮询里自动调用**。
+ */
+export function jobFetchDetail(jobId: string): Promise<Job> {
+  return invokeFlat<Job>('job_fetch_detail', { jobId });
 }
 
 /**

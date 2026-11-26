@@ -91,7 +91,18 @@ const emit = defineEmits<{
   /** 空态里的两个入口：展开筛选 / 直接开始抓取（原型 `job-empty-*-btn`）。 */
   (e: 'empty-filter'): void;
   (e: 'empty-start'): void;
+  /** 按公司名搜 Boss 岗位：只把关键词交给页面，搜与展示在浮层里。 */
+  (e: 'search', company: string): void;
 }>();
+
+/** 搜索框里的原始输入。回车或点「搜索」才发出去，输入过程中不打接口。 */
+const searchText = ref('');
+
+function onSearch(): void {
+  const q = searchText.value.trim();
+  if (q === '') return;
+  emit('search', q);
+}
 
 const visible = computed(() => visibleJobs(props.jobs, props.tab, props.showAll));
 const views = computed(() => visible.value.map((j) => cardView(j, props.scoreMax)));
@@ -192,6 +203,21 @@ function onSort(field: SortField): void {
         <!-- 列表状态播报，mode 用四态词（loading/error/empty/default）与右栏 rail-state 同源。 -->
         <span class="sr-only" data-testid="job-state-announce" aria-live="polite">{{ announceText }}</span>
         <span class="spacer"></span>
+        <!-- 按公司搜岗位：搜的是 Boss 全站，不是本地这份列表。
+             结果先给浮层看（不落库），用户挑中哪条才「加入待投递」（用户 m01529）。 -->
+        <form class="job-search" role="search" @submit.prevent="onSearch">
+          <input
+            v-model="searchText"
+            class="job-search-input"
+            type="search"
+            placeholder="搜公司，看它的岗位"
+            aria-label="按公司名搜索 Boss 岗位"
+            data-testid="job-search-input"
+          />
+          <button class="btn btn-sm btn-ghost job-search-btn" type="submit" data-testid="job-search-btn">
+            搜索
+          </button>
+        </form>
         <button class="btn btn-sm btn-ghost" type="button" data-testid="job-refresh-btn" @click="emit('refresh')">
           刷新
         </button>

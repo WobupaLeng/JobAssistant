@@ -110,7 +110,7 @@ def interruptible_sleep(seconds: float) -> bool:
 def data_dir() -> Path:
     """浏览器持久化目录。
 
-    必须与现行版 Python 应用**共用**同一个 profile——否则用户要重新扫码登录，
+    profile 必须**跨版本共用**同一个目录——否则用户升级后要重新扫码登录，
     而且新 profile 更容易被 Boss 判定为陌生设备。
     """
     env = os.environ.get("AJA_DATA_DIR")
@@ -127,10 +127,10 @@ def profile_dir() -> Path:
     里面还有 `data/job_assistant.db`。把根目录当 `--user-data-dir` 传给
     Chrome 会有两个后果——Chrome 把 `Default/`、`Local State` 等洒在应用数据
     根下，且一旦该目录被别的 Chrome 会话认可（实测报「正在现有的浏览器会话中
-    打开」），`launch_persistent_context` 会立刻 `Target page, context or
-    browser has been closed`，表现为聊天与求职期望全部失败。
+    打开」），新进程只会把启动请求移交给那个会话、自己立刻退出，调试端口
+    永远不监听，表现为聊天与求职期望全部失败。
 
-    路径必须与现行版 `backend/app/browser.py` 一致：`data/browser-profile`。
+    路径固定为 `data/browser-profile`（Edge 见下）。
 
     按系统默认浏览器分目录：Chrome 沿用原路径（已有登录态不受影响）；Edge 用
     `browser-profile-edge`。cookie 由各浏览器自己的密钥加密，互不可读，混用会让
@@ -377,11 +377,11 @@ def _run_scrape(payload: dict[str, Any]) -> None:
 def _run_login(payload: dict[str, Any]) -> None:
     """打开登录页并轮询登录态，直到成功 / 超时 / 被停止。
 
-    为什么不复用现行版那套「generator + 投递到采集线程」的写法：
-    那套复杂度是为了跨线程调用 patchright，而 sidecar 里浏览器本来就只
-    在这一个工作线程上碰，不需要跨线程投递。
+    不把浏览器操作投递到别的线程：sidecar 里碰浏览器的命令全部排队到同一个
+    常驻单车道线程（见 `_run_chat`），不存在跨线程复用 Playwright 对象的问题，
+    也就不需要那层投递。
     """
-    global _ctx
+    global _occupant
     try:
         import browser as browser_mod
 
@@ -696,6 +696,20 @@ def _run_chat(cmd: dict[str, Any]) -> None:
             if not job_id:
                 raise ValueError("缺少 job_id")
             data = _with_chat(lambda ctx: client.ensure(ctx, job_id))
+        elif name == "chat.job_detail":
+            # 会话行只给标题/薪资，JD 正文要开详情页读。这条路补的是「岗位从没
+            # 抓过、会话却先来了」的那种会话（用户 m00824）。
+            job_id = str(cmd.get("job_id") or "")
+            if not job_id:
+                raise ValueError("缺少 job_id")
+            data = _with_chat(lambda ctx: client.job_detail(ctx, job_id))
+        elif name == "chat.company_jobs":
+            # 按公司名列这家公司的在招岗位（只读，给「搜公司 → 挑岗位」用）。
+            # 结果不落库：入库由用户在界面上点「加入待投递」时走 `job_import`。
+            company = str(cmd.get("company") or "").strip()
+            if not company:
+                raise ValueError("缺少 company")
+            data = _with_chat(lambda ctx: client.company_jobs(ctx, company))
         else:
             raise ValueError(f"未知聊天命令：{name}")
         emit({"id": cid, "ok": True, "data": data})

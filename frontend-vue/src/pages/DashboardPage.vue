@@ -6,6 +6,7 @@
  * 抓取走 `scrape_start` / `scrape_stop`。 */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import AppErrorBar from '../components/AppErrorBar.vue';
+import CompanySearchPanel from '../components/CompanySearchPanel.vue';
 import FilterPanel from '../components/FilterPanel.vue';
 import JobDetailDrawer from '../components/JobDetailDrawer.vue';
 import JobListView from '../components/JobListView.vue';
@@ -31,6 +32,7 @@ import { loginStart, loginStatus } from '../api/commands/scrape';
 import { loginAck, logout } from '../api/commands/scrape';
 import { listenLoginState, type UnlistenFn } from '../api/events';
 import { listExpectations } from '../api/commands/chat';
+import { companyJobs } from '../api/commands/company';
 import { setWindowTheme } from '../api/commands/window';
 import type {
   AppConfigReply,
@@ -42,6 +44,7 @@ import type {
 } from '../api/types';
 import { setGreetDraft } from '../features/chat/greet-draft';
 import { tokenSpentTick } from '../lib_ui/token-ledger';
+import { idleSearch, searchFromReply, type SearchState } from '../lib_ui/company-search';
 import {
   LIST_TAB_DEFAULT,
   SORT_DEFAULT,
@@ -781,6 +784,36 @@ function onShowAll(next: boolean): void {
   void refreshList();
 }
 
+/* ---------- 按公司搜岗位（用户 m01529） ----------
+ * 搜索只是一份候选清单：不落库、不动当前列表。只有浮层里点「加入待投递」才写库，
+ * 写成功后切回「未投递」并重拉一页——不做局部插入，免得两处口径打架。 */
+const searchOpen = ref(false);
+const searchState = ref<SearchState>(idleSearch());
+
+async function onSearchCompany(company: string): Promise<void> {
+  const want = company.trim();
+  if (want === '') return;
+  searchOpen.value = true;
+  searchState.value = { phase: 'loading', company: want, matched: 'none', jobs: [], error: '' };
+  try {
+    searchState.value = searchFromReply(await companyJobs(want));
+  } catch (e) {
+    searchState.value = {
+      phase: 'error',
+      company: want,
+      matched: 'none',
+      jobs: [],
+      error: `搜索失败：${errText(e)}`,
+    };
+  }
+}
+
+async function onCompanyImported(): Promise<void> {
+  if (tab.value !== 'pending') tab.value = 'pending';
+  await refreshList();
+  void refreshCounts();
+}
+
 /** 三类批量动作的落地：不投递（否决）/ 已投递 / 待投递（撤销否决或撤销投递）。 */
 async function applyBatchOp(op: BatchOp, ids: readonly string[]): Promise<number> {
   if (op === 'reject') return await rejectJobs(ids);
@@ -1354,6 +1387,7 @@ watch(
         @undeliver="onUndeliverJob"
         @empty-filter="openFilter()"
         @empty-start="onStart"
+        @search="onSearchCompany"
       />
       <!-- 筛选抽屉：浮在窗口左侧、盖住岗位列表原位置，列表与日志卡不被挤动。
            面板节点常驻：开合只切 `.is-open`，由 src/app.css 补间位移与透明度；
@@ -1425,6 +1459,13 @@ watch(
       @close="sensitiveOpen = false"
       @reload="loadSensitive"
       @remove="removeSensitive"
+    />
+
+    <CompanySearchPanel
+      :open="searchOpen"
+      :state="searchState"
+      @close="searchOpen = false"
+      @imported="onCompanyImported"
     />
   </Teleport>
 </template>

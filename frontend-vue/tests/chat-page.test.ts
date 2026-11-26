@@ -52,7 +52,7 @@ function fakeInvoke(cmd: string, payload?: unknown): Promise<unknown> {
   calls.push({ cmd, payload });
   switch (cmd) {
     case 'chat_friends':
-      return Promise.resolve({ items: friendsSeed() });
+      return Promise.resolve({ items: liveOverride ?? friendsSeed() });
     case 'chat_messages':
       if (messagesError !== '') return Promise.reject(new Error(messagesError));
       return Promise.resolve({ items: messagesSeed() });
@@ -90,6 +90,12 @@ function fakeInvoke(cmd: string, payload?: unknown): Promise<unknown> {
     case 'login_status':
       if (loginError !== '') return Promise.reject(new Error(loginError));
       return Promise.resolve({ platform: 'boss', state: 'logged_in', saved: true, error: '' });
+    case 'job_fetch_detail':
+      return Promise.resolve({ job_id: 'boss:enc-u3', title: 'Java开发工程师', status: 'pending' });
+    case 'get_job':
+      return Promise.resolve({ job_id: 'boss:enc-u3', title: 'Java开发工程师', status: 'pending' });
+    case 'get_scoring_spec':
+      return Promise.resolve({ score_max: 100, score_min_default: 60 });
     default:
       return Promise.resolve(true);
   }
@@ -97,6 +103,9 @@ function fakeInvoke(cmd: string, payload?: unknown): Promise<unknown> {
 
 /** 会话列表的测试夹具：默认两位，个别用例可临时换一批（未读角标 / 空列表）。 */
 let friendsOverride: Friend[] | null = null;
+
+/** 点开时现取的那份 Boss 列表（首屏来自本地缓存，缓存里没有加密岗位 id）。 */
+let liveOverride: Friend[] | null = null;
 
 /** 会话消息的夹具：默认空（多数用例不关心消息流），个别用例临时换一批。 */
 let messagesOverride: unknown[] | null = null;
@@ -138,6 +147,7 @@ beforeEach(() => {
 afterEach(() => {
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   friendsOverride = null;
+  liveOverride = null;
   messagesOverride = null;
   messagesError = '';
   loginError = '';
@@ -178,15 +188,13 @@ describe('提示条的语气与位置（用户 m01273）', () => {
     w.unmount();
   });
 
-  it('「已是最新消息」同时出现在 Boss 列表最上方（用户 m01764）', async () => {
+  it('「已是最新消息」不在 Boss 列表上方出现（用户要求撤掉那条灰条）', async () => {
     messagesOverride = [
       { sender: 'hr', content: '在吗', time: '10:00', msg_id: 'm1', recalled: false },
     ];
     const w = await mountPage({ friends: [friend('u1', { last_ts: 1_700_000_000_000 })] });
     await w.find('[data-testid="friend-u1"]').trigger('click');
     await flushPromises();
-    // 先确认没提示：首次拉取不该出现「已是最新消息」。
-    expect(w.find('[data-testid="chat-rail-fresh"]').exists()).toBe(false);
 
     await w.find('[data-testid="chat-detach-close-btn"]').trigger('click');
     await flushPromises();
@@ -195,14 +203,13 @@ describe('提示条的语气与位置（用户 m01273）', () => {
     await w.find('[data-testid="friend-u1"]').trigger('click');
     await flushPromises();
 
-    // 两处都要有：Boss 列表最上方 + 消息流末尾。
-    const rail = w.find('[data-testid="chat-rail-fresh"]');
-    const detachRail = w.find('[data-testid="chat-detach-rail-fresh"]');
-    expect(rail.text()).toBe('已是最新消息，点「刷新」可重新拉取。');
-    expect(detachRail.text()).toBe('已是最新消息，点「刷新」可重新拉取。');
+    // 这句话仍会写进 note（消息流末尾那条要用它），但列表上方不再顶灰条。
+    expect((w.vm as { note: string }).note).toBe('已是最新消息，点「刷新」可重新拉取。');
+    expect(w.find('[data-testid="chat-rail-fresh"]').exists()).toBe(false);
+    expect(w.find('[data-testid="chat-detach-rail-fresh"]').exists()).toBe(false);
     // 同一句话不再落到红底瞬态条（chat-note）上重复一遍。
     expect(w.find('[data-testid="chat-note"]').exists()).toBe(false);
-    // 它必须在 Boss 列表（rail-body）之前 —— 也就是「最上方」，不是列表里。
+    // 列表本体照旧在。
     const railHead = w.find('[data-testid="chat-rail-body-slot"]');
     expect(railHead.exists()).toBe(true);
     w.unmount();
@@ -254,6 +261,49 @@ describe('提示条的语气与位置（用户 m01273）', () => {
       text: '您好，我想应聘后端岗',
       jobId: 'job-u1',
     });
+    w.unmount();
+  });
+
+  it('会话行只带加密岗位 id 时，点「岗位详情」先补抓 JD 再开抽屉（用户 m00824）', async () => {
+    // 从 Boss 列表刷新出来的会话常常没有本地岗位：没有 JD，详情打不开、话术也写不对。
+    const w = await mountPage({
+      friends: [friend('u3', { job_id: null, encrypt_job_id: 'enc-u3' })],
+    });
+    await w.find('[data-testid="friend-detail-u3"]').trigger('click');
+    await flushPromises();
+
+    const order = calls.map((c) => c.cmd);
+    const fetchAt = order.indexOf('job_fetch_detail');
+    const getAt = order.indexOf('get_job');
+    expect(fetchAt).toBeGreaterThanOrEqual(0);
+    expect(calls[fetchAt]?.payload).toEqual({ jobId: 'enc-u3' });
+    // 补抓拿回的 id 才拿去读库：不能拿裸加密 id 去查（库里键是 `boss:<enc>`）。
+    expect(getAt).toBeGreaterThan(fetchAt);
+    expect(calls[getAt]?.payload).toEqual({ jobId: 'boss:enc-u3' });
+    w.unmount();
+  });
+
+  it('已经关联到岗位的会话不补抓：点详情只读库（用户 m00970）', async () => {
+    const w = await mountPage({ friends: [friend('u1', { job_id: 'job-u1' })] });
+    await w.find('[data-testid="friend-detail-u1"]').trigger('click');
+    await flushPromises();
+
+    expect(calls.some((c) => c.cmd === 'job_fetch_detail')).toBe(false);
+    expect(calls.some((c) => c.cmd === 'get_job')).toBe(true);
+    w.unmount();
+  });
+
+  it('本地缓存的行没有加密岗位 id 时，点开现取一次会话列表再补抓（用户 m01137）', async () => {
+    // 首屏来自 `chat_friends` 表，那表存不下 `encryptJobId`：不现取就永远「没有关联岗位」。
+    const w = await mountPage({ friends: [friend('u4', { job_id: null, encrypt_job_id: null })] });
+    liveOverride = [friend('u4', { job_id: null, encrypt_job_id: 'enc-u4' })];
+    await w.find('[data-testid="friend-detail-u4"]').trigger('click');
+    await flushPromises();
+
+    // 挂载时已经拉过一次列表，点开时又拉一次：第三次才是「现取」。
+    expect(calls.filter((c) => c.cmd === 'chat_friends').length).toBeGreaterThanOrEqual(2);
+    const fetch = calls.filter((c) => c.cmd === 'job_fetch_detail').pop();
+    expect(fetch?.payload).toEqual({ jobId: 'enc-u4' });
     w.unmount();
   });
 });
