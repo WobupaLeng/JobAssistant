@@ -215,10 +215,23 @@ describe('会话列表', () => {
     expect(filterFriends(list, '').map((x) => x.uid)).toEqual(['a', 'b']);
   });
 
-  it('副行回退链：最近消息 → 岗位 →（暂无消息）', () => {
+  it('副行回退链：最近消息 →（暂无消息）；只有本机占位会话才显示岗位名', () => {
     expect(friendLine(friend({ last_msg: '在吗' }))).toBe('在吗');
-    expect(friendLine(friend({ last_msg: '', title: '后端工程师' }))).toBe('后端工程师');
+    // 真实会话没消息就照实说：以前退到岗位名，看着像「消息内容是这个岗位」（用户 m00720）。
+    expect(friendLine(friend({ last_msg: '', title: '后端工程师' }))).toBe('（暂无消息）');
     expect(friendLine(friend({ last_msg: '  ', title: ' ' }))).toBe('（暂无消息）');
+    expect(
+      friendLine(
+        friend({
+          uid: 'pending:job-1',
+          name: '星瀚科技',
+          company: '星瀚科技',
+          title: '后端工程师',
+          last_msg: '',
+          last_time: '',
+        }),
+      ),
+    ).toBe('后端工程师');
   });
 
   it('名字兜底到 uid', () => {

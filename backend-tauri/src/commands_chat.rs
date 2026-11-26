@@ -165,13 +165,15 @@ pub async fn chat_friends(
     Ok(FriendsReply { items })
 }
 
-/// 给会话列表补上岗位 id。
+/// 给会话列表补上岗位 id：**只认精确对上的那一条，猜不到就留空**。
 ///
-/// Boss 返回的会话行只有公司名，没有岗位 id；而这条会话的 uid 一旦失效，前端唯一
-/// 能走通的路是「按岗位重新点立即沟通」，所以必须在会话行上带上它。
+/// Boss 的会话行带 `encryptJobId`，抓取侧入库的 `job_queue.job_id` 就是
+/// `boss:<encryptJobId>`，所以能一对一命中。以前是拿公司名反查（同一家公司常有多个
+/// 岗位，取「已投递优先、否则 id 最小」的那条），于是话术用了别的岗位的 JD、详情抽屉
+/// 开了别的岗位（用户 m00720）。现在按公司名猜这条路已经拆掉：命中不了（岗位从没抓过、
+/// 或老缓存行没有加密 id）就留 `None`，界面照实说「没有关联岗位」。
 ///
-/// 按公司名翻库（`JobStore::find_job_id_by_company`）。查不到就留空——前端据此
-/// 放弃重建并照实报错，不编造岗位。
+/// 这条 id 还有第二个用途：会话 uid 失效时靠它重新点「立即沟通」。
 ///
 /// 查库失败与查不到一样处理：补岗位 id 是增强，不该让整个会话列表因为一次
 /// 读库失败而报错。
@@ -183,20 +185,27 @@ fn fill_job_ids(store: &tauri::State<'_, crate::commands_db::StoreState>, items:
         if db_down {
             break;
         }
-        let Some(company) = f.company.as_deref().map(str::trim) else {
-            continue;
-        };
-        if company.is_empty() {
+        if f.job_id.is_some() {
             continue;
         }
-        if let Some(hit) = cache.get(company) {
+        let Some(enc) = f.encrypt_job_id.as_deref().map(str::trim) else {
+            continue;
+        };
+        if enc.is_empty() {
+            continue;
+        }
+        if let Some(hit) = cache.get(enc) {
             f.job_id = hit.clone();
             continue;
         }
-        match with_store(store, |s| s.find_job_id_by_company(company).map_err(store_err)) {
-            Ok(hit) => {
-                cache.insert(company.to_string(), hit.clone());
-                f.job_id = hit;
+        let jid = format!("boss:{enc}");
+        match with_store(store, |s| s.job_exists(&jid).map_err(store_err)) {
+            Ok(true) => {
+                cache.insert(enc.to_string(), Some(jid.clone()));
+                f.job_id = Some(jid);
+            }
+            Ok(false) => {
+                cache.insert(enc.to_string(), None);
             }
             Err(e) => {
                 // 读库坏了：记一次日志就停手，别对 100 行各报一遍。
@@ -271,6 +280,9 @@ fn row_to_friend(r: &ChatFriendRow) -> Friend {
         last_ts: r.last_ts,
         last_from_me: r.last_from_me,
         last_status: r.last_status,
+        // 缓存表没有这一列：本地回读时拿不到加密 id，也就补不出岗位 id，
+        // 界面按「无关联岗位」处理，等远程刷新那次再补。
+        encrypt_job_id: None,
         // 由 `fill_job_ids` 从库里补；缓存表里没有这一列。
         job_id: None,
     }

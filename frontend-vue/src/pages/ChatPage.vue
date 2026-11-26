@@ -717,8 +717,10 @@ async function sendGreet(): Promise<void> {
 }
 
 /**
- * 生成打招呼话术。`reply` 非空时走「根据 HR 回复生成」。`Friend` 里没有 `jd_text`，所以把
- * 公司名交给后端 `findByCompany` 翻库用整段 JD 组提示词；翻不到时回执 `jd_used=false`。
+ * 生成打招呼话术。`reply` 非空时走「根据 HR 回复生成」。`Friend` 里没有 `jd_text`，
+ * JD 由后端按岗位 id 从库里取：优先概览页带过来的 `greetJob`，否则用这条会话自己
+ * 精确关联的 `job_id`（`boss:<encryptJobId>`）。两者都没有就不带 JD 组提示词，回执
+ * `jd_used=false`——**不再按公司名翻库**：同一家公司多个岗位必然挑错（用户 m00720）。
  */
 async function generateGreet(reply = ''): Promise<void> {
   const friend = talkableFriend.value;
@@ -726,13 +728,12 @@ async function generateGreet(reply = ''): Promise<void> {
   generating.value = true;
   try {
     greet.value = await greetDraft({
-      jobId: greetJob.value?.uid === friend.uid ? greetJob.value.jobId : '',
+      jobId: greetJob.value?.uid === friend.uid ? greetJob.value.jobId : friendJobId(friend),
       title: friend.title,
       company: friend.company,
       salary: '',
       experience: '',
       jd: '',
-      findByCompany: friend.company,
       reply,
     });
     // 这次生成花了 token：让概览把累计重读一遍（顶栏读数当场跳一下）。
@@ -786,13 +787,12 @@ async function generateAiDraft(): Promise<void> {
   generating.value = true;
   try {
     const reply = await greetDraft({
-      jobId: greetJob.value?.uid === friend.uid ? greetJob.value.jobId : '',
+      jobId: greetJob.value?.uid === friend.uid ? greetJob.value.jobId : friendJobId(friend),
       title: friend.title,
       company: friend.company,
       salary: '',
       experience: '',
       jd: '',
-      findByCompany: friend.company,
       reply: aiReplyContext(messages.value ?? []),
     });
     // 同「生成打招呼」：回执一到就通知概览重读累计（空串回执也可能已经花掉了 token）。

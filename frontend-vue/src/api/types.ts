@@ -140,10 +140,10 @@ export interface Friend {
    */
   last_ts?: number | null;
   /**
-   * 最后一条消息是不是我发的。缺省按 `false`（对方发的）处理——
-   * Boss 的 `lastMessageInfo.fromId` 缺省时后端也给 `false`。
+   * 最后一条消息是不是我发的。`null`/缺省 = `fromId` 没给，**不知道**谁发的：
+   * 副行不加状态词，也不判未读（见 `chat-read.ts` 的 `isUnreadRow`）。
    */
-  last_from_me?: boolean;
+  last_from_me?: boolean | null;
   /**
    * 我发的最后一条的送达态：`1` 已送达、`2` 已读。
    * 对方发的消息恒为 `0`，前端不渲染任何状态词。
@@ -154,6 +154,11 @@ export interface Friend {
    * uid 失效时靠它重新点「立即沟通」把会话接回来。
    */
   job_id?: string | null;
+  /**
+   * Boss 会话行自带的岗位加密 id。抓取侧入库的 `job_queue.job_id` 就是
+   * `boss:<encryptJobId>`，后端用它精确补 `job_id`；补不到就没有关联岗位。
+   */
+  encrypt_job_id?: string | null;
   /**
    * 前端本地标记：这条会话是**本机新建**的（`chat_open` 换来的真实 uid），远程列表还没收录，
    * Rust 不写也不读。`chat_open` 给的是地址里的**加密 uid**，好友列表给的是**数字 uid**，

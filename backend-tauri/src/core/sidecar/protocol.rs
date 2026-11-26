@@ -176,7 +176,8 @@ pub struct Friend {
     /// 最后一条是不是我发的（`lastMessageInfo.fromId` 不等于对方 uid）。
     ///
     /// 界面靠它在副行前加 `[送达]` / `[已读]`（`chat-model.ts` 的 `friendMsgTone`）。
-    /// 缺省 `None` = 不知道是谁发的，按「对方发的」渲染，不加状态词。
+    /// 缺省 `None` = `fromId` 没给，不知道是谁发的：不加状态词，也**不**判未读
+    /// （以前 sidecar 缺省时回 `false`，把「一条消息都没有」的会话判成了未读）。
     #[serde(default)]
     pub last_from_me: Option<bool>,
     /// 我发的最后一条的送达态：`1` 已送达、`2` 已读；`0`/缺省不显示。
@@ -184,10 +185,18 @@ pub struct Friend {
     /// **不是方向**：它只在对端已接收/已读时有值，方向看 `last_from_me`。
     #[serde(default)]
     pub last_status: Option<u32>,
+    /// Boss 会话列表自带的岗位加密 id（`encryptJobId`）。
+    ///
+    /// 抓取侧入库的 `job_queue.job_id` 就是 `boss:<encryptJobId>`（`scraper/boss.py`
+    /// 取岗位详情链接末段再拼前缀），所以它是会话与岗位**唯一**能精确对上的线索。
+    /// 命令层据此补 `job_id`（见 `commands_chat::fill_job_ids`），补不到就留空。
+    #[serde(default)]
+    pub encrypt_job_id: Option<String>,
     /// 这条会话对应的岗位 id（`job_queue.job_id`，形如 `boss:xxx`）。
     ///
-    /// Boss 的会话列表**不带**岗位 id。它由 Rust 命令层从库里补上（见
-    /// `commands_chat::chat_friends`），sidecar 永远给 `None`。
+    /// Boss 的会话列表只给加密 id（见 `encrypt_job_id`），数字 id 不通用。这个字段由
+    /// Rust 命令层用加密 id 精确查库补上（见 `commands_chat::chat_friends`），
+    /// sidecar 永远给 `None`；查不到（岗位没抓过）也留 `None`，**不按公司名猜**。
     /// 用途：这条会话的 uid 失效时，靠它重新点「立即沟通」把会话接回来。
     #[serde(default)]
     pub job_id: Option<String>,

@@ -20,7 +20,12 @@ function friend(uid: string, patch: Partial<Friend> = {}): Friend {
 
 describe('会话未读派生（Boss 的 unreadMsgCount 恒为 0）', () => {
   /** 真实账号实测：HR 最后发言的会话 unreadMsgCount 也是 0、last_status 也是 0。 */
-  const bossLast = friend('u1', { last_from_me: false, last_status: 0, last_ts: 1_700_000_000_000 });
+  const bossLast = friend('u1', {
+    last_msg: '方便发一份简历吗',
+    last_from_me: false,
+    last_status: 0,
+    last_ts: 1_700_000_000_000,
+  });
 
   it('HR 最后发言且没读过 → 未读', () => {
     expect(isUnreadRow(bossLast, {})).toBe(true);
@@ -48,6 +53,12 @@ describe('会话未读派生（Boss 的 unreadMsgCount 恒为 0）', () => {
     expect(isUnreadRow(friend('u4', { last_from_me: false, last_ts: null }), {})).toBe(false);
   });
 
+  it('一条消息都没有 / 方向不知道的行不点红点', () => {
+    // 只刷列表拿到的会话：fromId 没给（方向未知），lastTS 却总有值。
+    expect(isUnreadRow(friend('u7', { last_from_me: null, last_ts: 1_700_000_000_009 }), {})).toBe(false);
+    // 方向说是对方，但根本没有消息内容——同样不算未读。
+    expect(isUnreadRow(friend('u8', { last_from_me: false, last_ts: 1_700_000_000_010 }), {})).toBe(false);
+  });
   it('水位只升不降，旧时刻不覆盖新时刻', () => {
     const marks = saveReadMark({}, 'u1', 2_000);
     expect(saveReadMark(marks, 'u1', 1_000)).toBe(marks);
@@ -57,7 +68,7 @@ describe('会话未读派生（Boss 的 unreadMsgCount 恒为 0）', () => {
   it('标题计数按会话数，不按条数', () => {
     const list = [
       bossLast,
-      friend('u5', { last_from_me: false, last_ts: 1_700_000_000_001 }),
+      friend('u5', { last_msg: '明天方便电话吗', last_from_me: false, last_ts: 1_700_000_000_001 }),
       friend('u6', { last_from_me: true, last_ts: 1_700_000_000_002 }),
     ];
     expect(unreadSessions(list, {})).toBe(2);

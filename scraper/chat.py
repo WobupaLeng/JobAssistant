@@ -207,15 +207,17 @@ def _query_param(url: str, name: str) -> str:
     return ""
 
 
-def _last_from_me(raw: dict[str, Any], info: dict[str, Any]) -> bool:
-    """最后一条消息是不是我发的。
+def _last_from_me(raw: dict[str, Any], info: dict[str, Any]) -> bool | None:
+    """最后一条消息是不是我发的；**不知道时返回 `None`，不假装是对方发的**。
 
-    `lastMessageInfo.fromId` 是数字 uid，`toId` 是对方；`fromId` 缺省时（8/100 条）
-    退回 `lastMsg` 与对方名字比对——**不**拿 `status` 推方向，它是送达态不是方向。
+    `lastMessageInfo.fromId` 是数字 uid，`toId` 是对方。`fromId` 缺省时（实测 8/100 条）
+    过去一律回 `False`（= 对方发的），于是「一条消息都没有的会话」被前端判成
+    「HR 最后发言、未读」（用户 m00720 报的假未读）。不知道就说不知道——
+    **不**拿 `status` 推方向，它是送达态不是方向。
     """
     from_id = info.get("fromId")
     if from_id is None:
-        return False
+        return None
     peer = raw.get("uid")
     try:
         return int(from_id) != int(peer)
@@ -830,6 +832,10 @@ class ChatClient:
                 # 最后一条的归属与送达态：前端据此给副行上色（用户 m01427）。
                 "last_from_me": f["last_from_me"],
                 "last_status": f["last_status"],
+                # 岗位精确标识（`encryptJobId`）。抓取侧入库的 `job_queue.job_id`
+                # 就是 `boss:<encryptJobId>`，Rust 拿它一对一命中。以前这里把它丢掉、
+                # 改用公司名猜，同一家公司多个岗位必然猜错（用户 m00720）。
+                "encrypt_job_id": f["encrypt_job_id"] or None,
                 "avatar": f["avatar"] or None,
             }
             for f in items

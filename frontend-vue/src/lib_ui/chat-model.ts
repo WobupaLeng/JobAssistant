@@ -99,12 +99,19 @@ export function filterFriends(friends: readonly Friend[], query: string): Friend
   return friends.filter((f) => matchFriend(f, query));
 }
 
-/** 列表副行：最近一条消息 → 岗位名 → 「（暂无消息）」。 */
+/**
+ * 列表副行：最近一条消息 → 「（暂无消息）」；**只有本机占位会话**（还没在 Boss 上
+ * 存在，`chat_open` 之前的那一行）才退到岗位名。
+ *
+ * 真实会话没有消息却显示岗位名，看起来就像「消息内容是这个岗位」（用户 m00720）。
+ */
 export function friendLine(friend: Friend): string {
   const last = (friend.last_msg ?? '').trim();
   if (last !== '') return last;
-  const title = (friend.title ?? '').trim();
-  if (title !== '') return title;
+  if (isPendingFriend(friend)) {
+    const title = (friend.title ?? '').trim();
+    if (title !== '') return title;
+  }
   return '（暂无消息）';
 }
 

@@ -127,21 +127,6 @@ pub(crate) fn count_sensitive_query(store: &SqliteStore, query: &SensitiveQuery)
 impl JobAdminStore for SqliteStore {
     type Error = StoreError;
 
-    fn find_job_id_by_company(&self, company: &str) -> Result<Option<String>> {
-        let company = company.trim();
-        if company.is_empty() {
-            return Ok(None);
-        }
-        let conn = self.conn.lock().expect("存储锁中毒");
-        // 同一家公司可能有过多个岗位：优先取「已投递」的那条，其余按 job_id 兜底成全序，
-        // 保证每次调用拿到同一个 id（否则重开会话会在不同岗位之间跳来跳去）。
-        let sql = "SELECT job_id FROM job_queue WHERE company = ?1 \
-                   ORDER BY CASE WHEN status = 'delivered' THEN 0 ELSE 1 END, job_id LIMIT 1";
-        conn.query_row(sql, params![company], |r| r.get::<_, String>(0))
-            .optional()
-            .map_err(Into::into)
-    }
-
     fn set_rejected(&self, job_ids: &[String], rejected: bool) -> Result<usize> {
         if job_ids.is_empty() {
             return Ok(0);

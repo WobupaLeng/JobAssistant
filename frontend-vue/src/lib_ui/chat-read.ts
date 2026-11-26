@@ -62,7 +62,11 @@ export function saveReadMark(marks: ReadMarks, uid: string, ts: number): ReadMar
  */
 export function isUnreadRow(friend: Friend, marks: ReadMarks): boolean {
   if ((friend.unread ?? 0) > 0) return true;
-  if (friend.last_from_me === true) return false;
+  // 必须确认「是对方发的一条真实消息」：只刷列表拿到的会话，`fromId` 往往没给，
+  // 方向是「不知道」。以前这种情况按对方发的算，再加上 `last_ts` 必然大于水位，
+  // 于是长得好看没聊过的行全被点上未读（用户 m00720 的假未读）。
+  if (friend.last_from_me !== false) return false;
+  if ((friend.last_msg ?? '').trim() === '') return false;
   if (isPendingFriend(friend)) return false;
   const ts = friend.last_ts ?? 0;
   if (ts <= 0) return false;
