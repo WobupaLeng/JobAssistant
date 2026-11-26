@@ -105,14 +105,14 @@ pub fn filters_from_defaults(d: &serde_json::Value) -> ScrapeFilters {
 ///   时会全量否决（`rules.rs` 既有语义，scraper/AGENTS.md 已警示）。
 /// - `work_weekend`：原样透传（三档 `double`/`no_bigweek`/`single` 生效，
 ///   SPEC-004；`"any"` → 不限）。
-/// - `jd_degree`：JD 硬卡这些学历即排除。
 /// - `min_years`：公司成立年限低于此值即排除。
+/// - `short_term_title`：`"off"`/`"false"` → 不按「岗位名显示短期项目」排除；
+///   缺席/其它值 = 开（等价旧行为）。
 pub fn exclude_rules_from_defaults(d: &serde_json::Value) -> ExcludeRules {
     let mut r = match text_of(d.get("exclude_keywords")) {
         Some(raw) => ExcludeRules::from_keywords(&raw),
         None => ExcludeRules::default(),
     };
-    r.exclude_degree = list_of(d.get("jd_degree"));
     r.exclude_hr_active_days = text_of(d.get("hr_active"))
         .and_then(|s| s.parse::<u32>().ok())
         .filter(|n| *n > 0);
@@ -120,6 +120,9 @@ pub fn exclude_rules_from_defaults(d: &serde_json::Value) -> ExcludeRules {
         .and_then(|s| s.parse::<u32>().ok())
         .filter(|n| *n > 0);
     r.weekend = text_of(d.get("work_weekend")).filter(|w| w != "any");
+    r.exclude_short_term_title = text_of(d.get("short_term_title"))
+        .map(|v| v != "off" && v != "false")
+        .unwrap_or(true);
     r.salary_ranges = salary_ranges_of(d.get("salary"));
     r
 }
@@ -188,7 +191,6 @@ mod tests {
             ("scrape_defaults.exclude_keywords".into(), "外包,培训".into()),
             ("scrape_defaults.hr_active".into(), "3".into()),
             ("scrape_defaults.work_weekend".into(), "double".into()),
-            ("scrape_defaults.jd_degree".into(), r#"["硕士"]"#.into()),
             ("scrape_defaults.min_years".into(), "5".into()),
             // 非 scrape_defaults 键必须被忽略
             ("exclude_keywords".into(), "应用级旧键,不该被读".into()),
@@ -255,7 +257,6 @@ mod tests {
         let d = defaults_from_pairs();
         let r = exclude_rules_from_defaults(&d);
         assert_eq!(r.name_words, vec!["外包".to_string(), "培训".to_string()]);
-        assert_eq!(r.exclude_degree, vec!["硕士".to_string()]);
         assert_eq!(r.exclude_hr_active_days, Some(3));
         assert_eq!(r.weekend.as_deref(), Some("double"));
         assert_eq!(r.exclude_founded_below, Some(5));
@@ -315,5 +316,18 @@ mod tests {
         }
         let any = exclude_rules_from_defaults(&serde_json::json!({"work_weekend": "any"}));
         assert_eq!(any.weekend, None, "any → 不限");
+    }
+
+    /// 短期项目开关：缺席/脏值按默认开（等价旧行为），`off`/`false` 才关掉。
+    #[test]
+    fn short_term_title_switch_defaults_on() {
+        let on = exclude_rules_from_defaults(&serde_json::json!({}));
+        assert!(on.exclude_short_term_title);
+        for off in ["off", "false"] {
+            let r = exclude_rules_from_defaults(&serde_json::json!({"short_term_title": off}));
+            assert!(!r.exclude_short_term_title, "{off} 应关掉短期排除");
+        }
+        let dirty = exclude_rules_from_defaults(&serde_json::json!({"short_term_title": "oops"}));
+        assert!(dirty.exclude_short_term_title, "脏值按默认开");
     }
 }

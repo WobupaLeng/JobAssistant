@@ -45,23 +45,20 @@ impl Dimension {
 /// （如 `_skill` 返回 0-40），但最终又用 `min(10, -(-total // 10))`
 /// 压回十分制（`scorer.py:343`）。这里删除那次压缩，各维度贡献直接相加。
 pub const WEIGHTS: &[(Dimension, u8)] = &[
-    (Dimension::Skill, 40),
-    (Dimension::Salary, 20),
+    (Dimension::Skill, 50),
+    (Dimension::Salary, 10),
     (Dimension::Experience, 15),
     (Dimension::Direction, 15),
     (Dimension::Company, 10),
 ];
 
-/// 无 JD 时的**最低**保守分：`_skill`=12 + `_salary`=10 + `_experience`=10
-/// + `_direction` 最多 15 + `_company` 最多 10 = 57。
+/// 无 JD 时的**最低**保守分：`_skill`=12 + `_salary`=5 + `_experience`=10
+/// + `_direction`=15（标题命中核心方向）+ `_company`=10 = 52。
 ///
-/// 注意这只是**下界**而非恒定值：薪资和经验能解析出来时分数会更高
-/// （如「20-35K」得 20、「5-10年」得 15，合计可达 72）。
-/// 真正的硬约束是「无 JD 岗位必须低于门槛」，由 [`rule_score_all`] 的测试保证。
-pub const NO_JD_SCORE_FLOOR: u8 = 57;
-
-/// 命中外包/短期信号时的额外惩罚系数（旧实现 `total //= 2`）。
-pub const OUTSOURCE_PENALTY_DIVISOR: u8 = 2;
+/// 这只是**下界**而非恒定值；薪资与经验能解析出来时分数会更高，但取满也只有
+/// 12 + 10 + 15 + 15 + 10 = 62，仍低于默认门槛 70。所以「无 JD 不入库」由
+/// [`RuleScore::rejected_no_jd`] 显式保证，而不是靠分数碰巧偏低。
+pub const NO_JD_SCORE_FLOOR: u8 = 52;
 
 /// 正分维度权重之和，必须等于 [`SCORE_MAX`]。
 pub fn positive_weight_total() -> u32 {
@@ -82,30 +79,18 @@ pub fn sum_dimensions(dimensions: &[(Dimension, u8)]) -> u8 {
     sum.min(SCORE_MAX as u32) as u8
 }
 
-/// 规则打分的**唯一出口**：组装五维得分，套用外包惩罚，夹到 `[0, 100]`。
+/// 规则打分的**唯一出口**：组装五维得分并夹到 `[0, 100]`。
 ///
 /// 旧实现的 `max(1, ...)` 下限被取消——0 分是合法结果，
 /// 强行抬到 1 会让「零匹配」与「差匹配」无法区分。
-pub fn rule_score(
-    skill: u8,
-    salary: u8,
-    experience: u8,
-    direction: u8,
-    company: u8,
-    outsource_hit: bool,
-) -> u8 {
-    let total = sum_dimensions(&[
+pub fn rule_score(skill: u8, salary: u8, experience: u8, direction: u8, company: u8) -> u8 {
+    sum_dimensions(&[
         (Dimension::Skill, skill),
         (Dimension::Salary, salary),
         (Dimension::Experience, experience),
         (Dimension::Direction, direction),
         (Dimension::Company, company),
-    ]);
-    if outsource_hit {
-        total / OUTSOURCE_PENALTY_DIVISOR
-    } else {
-        total
-    }
+    ])
 }
 
 /// 门槛默认值，供 Rust 侧直接引用。
@@ -117,16 +102,15 @@ pub const MIN_SCORE_DEFAULT: u8 = crate::core::scoring::SCORE_MIN_DEFAULT;
 
 use crate::core::domain::parse::parse_salary;
 use crate::core::domain::profile::Profile;
-use crate::core::domain::rules::outsource_hit;
 use regex::Regex;
 use std::sync::OnceLock;
 
-/// 技能维度内部拆分：核心技能 30 分（命中 [`SKILL_CORE_FULL_HITS`] 项即满）、
+/// 技能维度内部拆分：核心技能 40 分（命中 [`SKILL_CORE_FULL_HITS`] 项即满）、
 /// 加分技能 10 分（命中 [`SKILL_BONUS_FULL_HITS`] 项即满）。
 ///
 /// 分开归一是因为旧实现按「命中条数 / 5」统一归一：5 个核心技能与 10 个通用工具
 /// 等价，`Git/Linux/Docker/Html` 这类套话就能把技能分堆满（用户 m00070 决定修掉）。
-const SKILL_CORE_POINTS: f64 = 30.0;
+const SKILL_CORE_POINTS: f64 = 40.0;
 const SKILL_CORE_FULL_HITS: f64 = 4.0;
 const SKILL_BONUS_POINTS: f64 = 10.0;
 const SKILL_BONUS_FULL_HITS: f64 = 5.0;
@@ -178,9 +162,9 @@ fn ascii_word_hit(text_lower: &str, needle_lower: &str) -> bool {
     false
 }
 
-/// 技能维度（`_skill`，满分 40）。
+/// 技能维度（`_skill`，满分 50）。
 ///
-/// 核心技能 30 分（4 项即满，每项 7.5）、加分技能 10 分（5 项即满，每项 2），
+/// 核心技能 40 分（4 项即满，每项 10）、加分技能 10 分（5 项即满，每项 2），
 /// 四舍五入后相加：**零核心技能时最多 10 分**，通用工具堆不出高分。
 ///
 /// 无 JD 返回 12：这是**刻意降权**，不是缺陷——没拿到详情页时既不该给满分，
@@ -212,33 +196,33 @@ pub fn score_skill(jd: Option<&str>, profile: &Profile) -> u8 {
     (core_part + bonus_part).round() as u8
 }
 
-/// 薪资维度（`_salary`，满分 20）。
+/// 薪资维度（`_salary`，满分 10；用户 m01018 决定从 20 降到 10，差额给技能）。
 ///
 /// 只看**岗位薪资上限**（能谈到多少），期望区间为 `[salary_low, salary_high]`：
-/// - 上限 ≥ 期望上限 → 20（开得比期望高不扣分）；
-/// - 上限落在期望区间 → `10 + 10 × (上限 − salary_low) / span`，下沿给 10；
-/// - 上限够不到期望下限 → `10 × 上限 / salary_low`，越远越低（5 分/2 分档因此可达）。
+/// - 上限 ≥ 期望上限 → 10（开得比期望高不扣分）；
+/// - 上限落在期望区间 → `5 + 5 × (上限 − salary_low) / span`，下沿给 5；
+/// - 上限够不到期望下限 → `5 × 上限 / salary_low`，越远越低。
 ///
 /// 不再按「区间宽度」给分：宽度与实得无关，且会制造非单调——旧实现
 /// 14-16K 得 1 分、30-60K 得 5 分、50-80K 得 10 分，开得更高反而更低。
-/// 解析失败仍返回 10（保守值）。
+/// 解析失败仍返回 5（保守值）。
 pub fn score_salary(salary: Option<&str>, profile: &Profile) -> u8 {
     let Some((_, high_raw)) = parse_salary(salary) else {
-        return 10;
+        return 5;
     };
     let span = profile.salary_span();
     if high_raw == 0 || profile.salary_low == 0 || span == 0 {
-        return 10;
+        return 5;
     }
     if high_raw >= profile.salary_high {
-        return 20;
+        return 10;
     }
     if high_raw >= profile.salary_low {
         let into = (high_raw - profile.salary_low) as f64 / span as f64;
-        return (10.0 + 10.0 * into.min(1.0)).round() as u8;
+        return (5.0 + 5.0 * into.min(1.0)).round() as u8;
     }
-    ((high_raw as f64 / profile.salary_low as f64) * 10.0)
-        .min(10.0)
+    ((high_raw as f64 / profile.salary_low as f64) * 5.0)
+        .min(5.0)
         .round() as u8
 }
 
@@ -299,12 +283,10 @@ pub fn score_direction(title: Option<&str>) -> u8 {
 
 /// 公司质量（`_company`，满分 10）。
 ///
-/// 外包/短期信号直接 0 分，判定与总分减半共用 [`outsource_hit`]（含否定语境剔除），
-/// 因此 JD 写「非外包、非驻场」不会被扣分；JD 含离职期/过渡岗给 4 分。
-pub fn score_company(company: Option<&str>, title: Option<&str>, jd: Option<&str>) -> u8 {
-    if outsource_hit(company, title, jd) {
-        return 0;
-    }
+/// 外包/驻场不再在这里扣分：外包判定已完全交给「排除关键字」（含否定语境剔除），
+/// 由 [`crate::core::domain::rules::reject_labeled`] 在打分前拦下。JD 含
+/// 离职期/过渡岗/短期项目给 4 分。
+pub fn score_company(_company: Option<&str>, _title: Option<&str>, jd: Option<&str>) -> u8 {
     if let Some(jd) = jd {
         const TRANSIENT: [&str; 3] = ["离职期", "过渡岗", "短期项目"];
         if TRANSIENT.iter().any(|w| jd.contains(w)) {
@@ -319,7 +301,7 @@ pub fn score_company(company: Option<&str>, title: Option<&str>, jd: Option<&str
 pub struct RuleScore {
     /// 最终分数 0-100
     pub score: u8,
-    /// 各维度明细，形如「技能 40/40 | 薪资 15/20 | …」
+    /// 各维度明细，形如「技能 40/50 | 薪资 5/10 | …」
     pub reason: String,
     /// 是否因「拿不到 JD」而被判不入库（用户 m00716 决策）。
     ///
@@ -353,8 +335,8 @@ pub fn rule_score_all(
     let s_company = score_company(company, title, jd);
 
     let parts = vec![
-        format!("技能 {s_skill}/40"),
-        format!("薪资 {s_salary}/20"),
+        format!("技能 {s_skill}/50"),
+        format!("薪资 {s_salary}/10"),
         format!("经验 {s_exp}/15"),
         format!("方向 {s_dir}/15"),
         format!("公司质量 {s_company}/10"),
@@ -365,11 +347,7 @@ pub fn rule_score_all(
         penalty.push_str("（详情页没拿到 JD，按保守值打分）");
     }
 
-    let hit = outsource_hit(company, title, jd);
-    let score = rule_score(s_skill, s_salary, s_exp, s_dir, s_company, hit);
-    if hit {
-        penalty.push_str("；外包/短期信号→总分减半");
-    }
+    let score = rule_score(s_skill, s_salary, s_exp, s_dir, s_company);
     if no_jd {
         penalty.push_str("；无 JD→判不入库");
     }
@@ -393,10 +371,11 @@ mod tests {
     }
 
     #[test]
-    fn weight_table_matches_python_implementation() {
-        // 与 scorer.py 的实测满分逐项对齐，防止再次"凭空设计维度"
-        assert_eq!(Dimension::Skill.max_score(), 40);
-        assert_eq!(Dimension::Salary.max_score(), 20);
+    fn weight_table_is_locked() {
+        // 权重唯一来源。用户 m01018 把薪资权重从 20 降到 10（差额给技能），
+        // 因此不再与 scorer.py 的旧比例逐项对齐；改这里必须同步 SPEC-002 §3.1。
+        assert_eq!(Dimension::Skill.max_score(), 50);
+        assert_eq!(Dimension::Salary.max_score(), 10);
         assert_eq!(Dimension::Experience.max_score(), 15);
         assert_eq!(Dimension::Direction.max_score(), 15);
         assert_eq!(Dimension::Company.max_score(), 10);
@@ -404,24 +383,19 @@ mod tests {
 
     #[test]
     fn full_marks_yield_100() {
-        assert_eq!(rule_score(40, 20, 15, 15, 10, false), 100);
+        assert_eq!(rule_score(50, 10, 15, 15, 10), 100);
     }
 
     #[test]
     fn zero_marks_yield_zero_not_one() {
         // 旧实现 max(1, ...) 会返回 1，这里必须是 0
-        assert_eq!(rule_score(0, 0, 0, 0, 0, false), 0);
+        assert_eq!(rule_score(0, 0, 0, 0, 0), 0);
     }
 
     #[test]
     fn dimension_overflow_is_clamped() {
-        assert_eq!(sum_dimensions(&[(Dimension::Skill, 200)]), 40);
-        assert_eq!(rule_score(200, 200, 200, 200, 200, false), 100);
-    }
-
-    #[test]
-    fn outsource_halves_the_score() {
-        assert_eq!(rule_score(40, 20, 15, 15, 0, true), 45);
+        assert_eq!(sum_dimensions(&[(Dimension::Skill, 200)]), 50);
+        assert_eq!(rule_score(200, 200, 200, 200, 200), 100);
     }
 
     #[test]
@@ -447,18 +421,18 @@ mod tests {
     fn skill_all_core_hits_fills_core_points() {
         // 用画像自身的技能拼 JD，避免本测试变成「画像内容快照」。
         let jd = DEFAULT_PROFILE.core_skills.join(" ");
-        // 核心 30 分打满，加分项一个没提 → 30
-        assert_eq!(score_skill(Some(&jd), &DEFAULT_PROFILE), 30);
+        // 核心 40 分打满，加分项一个没提 → 40
+        assert_eq!(score_skill(Some(&jd), &DEFAULT_PROFILE), 40);
     }
 
     #[test]
     fn skill_partial_hits() {
-        // 取画像里前两项 core 技能：2/4 × 30 = 15
+        // 取画像里前两项 core 技能：2/4 × 40 = 20
         let core_two = format!(
             "{} 与 {}",
             DEFAULT_PROFILE.core_skills[0], DEFAULT_PROFILE.core_skills[1]
         );
-        assert_eq!(score_skill(Some(&core_two), &DEFAULT_PROFILE), 15);
+        assert_eq!(score_skill(Some(&core_two), &DEFAULT_PROFILE), 20);
         // 取画像里前两项 bonus 技能：2/5 × 10 = 4
         let bonus_two = format!(
             "{} {}",
@@ -485,7 +459,7 @@ mod tests {
         // 零核心技能时加分项最多 10 分，通用工具堆不出技能分
         let jd = DEFAULT_PROFILE.bonus_skills.join(" ");
         assert_eq!(score_skill(Some(&jd), &DEFAULT_PROFILE), 10);
-        // 两项核心技能（15 分）已经强于满分加分项
+        // 两项核心技能（20 分）已经强于满分加分项
         let core_two = format!(
             "{} {}",
             DEFAULT_PROFILE.core_skills[0], DEFAULT_PROFILE.core_skills[1]
@@ -507,53 +481,53 @@ mod tests {
     }
 
     #[test]
-    fn skill_caps_at_40() {
+    fn skill_caps_at_50() {
         // core + bonus 全部命中远超满分，验证上限截断而非短路。
         let jd = format!(
             "{} {}",
             DEFAULT_PROFILE.core_skills.join(" "),
             DEFAULT_PROFILE.bonus_skills.join(" ")
         );
-        assert_eq!(score_skill(Some(&jd), &DEFAULT_PROFILE), 40);
+        assert_eq!(score_skill(Some(&jd), &DEFAULT_PROFILE), 50);
     }
 
     // ---- 薪资维度 ----
 
     #[test]
-    fn salary_unparsable_returns_10() {
-        assert_eq!(score_salary(Some("面议"), &DEFAULT_PROFILE), 10);
-        assert_eq!(score_salary(None, &DEFAULT_PROFILE), 10);
+    fn salary_unparsable_returns_half_marks() {
+        assert_eq!(score_salary(Some("面议"), &DEFAULT_PROFILE), 5);
+        assert_eq!(score_salary(None, &DEFAULT_PROFILE), 5);
         // 四位数上限超出 `salary_re` 的 \d{1,3}，按解析失败处理
-        assert_eq!(score_salary(Some("100-9999K"), &DEFAULT_PROFILE), 10);
+        assert_eq!(score_salary(Some("100-9999K"), &DEFAULT_PROFILE), 5);
     }
 
     #[test]
-    fn salary_full_span_is_20() {
+    fn salary_full_span_is_10() {
         // 上限覆盖到期望上限即满分
-        assert_eq!(score_salary(Some("15-35K"), &DEFAULT_PROFILE), 20);
-        assert_eq!(score_salary(Some("20-35K"), &DEFAULT_PROFILE), 20);
+        assert_eq!(score_salary(Some("15-35K"), &DEFAULT_PROFILE), 10);
+        assert_eq!(score_salary(Some("20-35K"), &DEFAULT_PROFILE), 10);
     }
 
     #[test]
     fn salary_above_expectation_is_full_marks() {
         // 开得比期望高不扣分（旧实现给 5/10 分，方向反了）
-        assert_eq!(score_salary(Some("30-60K"), &DEFAULT_PROFILE), 20);
-        assert_eq!(score_salary(Some("50-80K"), &DEFAULT_PROFILE), 20);
+        assert_eq!(score_salary(Some("30-60K"), &DEFAULT_PROFILE), 10);
+        assert_eq!(score_salary(Some("50-80K"), &DEFAULT_PROFILE), 10);
     }
 
     #[test]
     fn salary_inside_range_scales_from_floor() {
-        // 上限 15 = 期望下沿 → 10；上限 30 → 10 + 10×15/20 = 17.5 → 18
-        assert_eq!(score_salary(Some("10-15K"), &DEFAULT_PROFILE), 10);
-        assert_eq!(score_salary(Some("20-30K"), &DEFAULT_PROFILE), 18);
+        // 上限 15 = 期望下沿 → 5；上限 30 → 5 + 5×15/20 = 8.75 → 9
+        assert_eq!(score_salary(Some("10-15K"), &DEFAULT_PROFILE), 5);
+        assert_eq!(score_salary(Some("20-30K"), &DEFAULT_PROFILE), 9);
     }
 
     #[test]
     fn salary_below_range_decays() {
-        // 上限 2K：10×2/15 = 1.33 → 1（旧实现给 10，名为惩罚实则满分）
+        // 上限 2K：5×2/15 = 0.67 → 1（旧实现给 10，名为惩罚实则满分）
         assert_eq!(score_salary(Some("1-2K"), &DEFAULT_PROFILE), 1);
-        // 上限 8K：10×8/15 = 5.33 → 5
-        assert_eq!(score_salary(Some("5-8K"), &DEFAULT_PROFILE), 5);
+        // 上限 8K：5×8/15 = 2.67 → 3
+        assert_eq!(score_salary(Some("5-8K"), &DEFAULT_PROFILE), 3);
     }
 
     #[test]
@@ -567,7 +541,7 @@ mod tests {
             assert!(v >= prev, "薪资 {s} 得 {v}，低于前一档 {prev}");
             prev = v;
         }
-        assert_eq!(prev, 20);
+        assert_eq!(prev, 10);
     }
 
     // ---- 经验维度 ----
@@ -657,19 +631,10 @@ mod tests {
     }
 
     #[test]
-    fn company_outsourcing_is_zero() {
-        assert_eq!(score_company(Some("某人力外包"), Some("Java"), None), 0);
-        assert_eq!(score_company(None, Some("Java 3个月项目制"), None), 0);
-    }
-
-    #[test]
-    fn company_transient_jd_is_4() {
-        assert_eq!(score_company(Some("某科技"), Some("Java"), Some("这是离职期替岗")), 4);
-    }
-
-    #[test]
-    fn company_negated_outsourcing_keeps_full_marks() {
-        // 声明「非外包、非驻场」的岗位不该被当成外包
+    fn company_ignores_outsourcing_words() {
+        // 外包判定改由「排除关键字」负责（默认词表含外包/驻场），公司维度不再扣分
+        assert_eq!(score_company(Some("某人力外包"), Some("Java"), None), 10);
+        assert_eq!(score_company(None, Some("Java 3个月项目制"), None), 10);
         assert_eq!(
             score_company(
                 Some("某科技"),
@@ -678,6 +643,11 @@ mod tests {
             ),
             10
         );
+    }
+
+    #[test]
+    fn company_transient_jd_is_4() {
+        assert_eq!(score_company(Some("某科技"), Some("Java"), Some("这是离职期替岗")), 4);
     }
 
     // ---- 完整打分 ----
@@ -704,23 +674,8 @@ mod tests {
     }
 
     #[test]
-    fn full_scoring_of_outsourcing_job_is_halved() {
-        let r = rule_score_all(
-            Some("某科技"),
-            Some("Java 工程师"),
-            Some("20-35K"),
-            Some("5-10年"),
-            Some("外包岗位，驻场开发"),
-            &DEFAULT_PROFILE,
-        );
-        // 公司质量 0 分 + 总分减半，必然低于门槛
-        assert!(r.score < MIN_SCORE_DEFAULT, "外包岗位不该过门槛，实际 {}", r.score);
-        assert!(r.reason.contains("总分减半"));
-    }
-
-    #[test]
     fn no_jd_worst_case_is_the_floor() {
-        // 薪资、经验都解析不出来 → 12 + 10 + 10 + 15 + 10 = 57
+        // 薪资、经验都解析不出来 → 12 + 5 + 10 + 15 + 10 = 52
         let r = rule_score_all(
             Some("某某科技有限公司"),
             Some("Java 后端工程师"),
@@ -762,9 +717,9 @@ mod tests {
     }
 
     #[test]
-    fn no_jd_score_can_actually_exceed_threshold() {
-        // 记录真实数据：无 JD 但薪资经验匹配时能到 72 分，
-        // 这正是必须用 rejected_no_jd 显式否决、而不能依赖分数碰巧偏低的原因
+    fn no_jd_max_score_stays_below_threshold() {
+        // 无 JD 取满也只有 12 + 10 + 15 + 15 + 10 = 62（薪资权重降到 10 之后），
+        // 但仍保留 rejected_no_jd 显式否决：口径再调时不能靠分数碰巧偏低。
         let r = rule_score_all(
             Some("某某科技有限公司"),
             Some("Java 后端 全栈 服务端"),
@@ -774,11 +729,11 @@ mod tests {
             &DEFAULT_PROFILE,
         );
         assert!(
-            r.score > MIN_SCORE_DEFAULT,
-            "若此值降到门槛以下，说明降权逻辑变了，需重新审视该测试的意义；实际 {}",
+            r.score < MIN_SCORE_DEFAULT,
+            "无 JD 取满也应低于门槛；实际 {}",
             r.score
         );
-        assert!(!r.passes(MIN_SCORE_DEFAULT), "但依然不该入库");
+        assert!(!r.passes(MIN_SCORE_DEFAULT), "无 JD 一律不该入库");
     }
 
     #[test]
@@ -817,8 +772,8 @@ mod tests {
     }
 
     #[test]
-    fn negated_outsourcing_jd_is_not_halved() {
-        // JD 主动声明「非外包、非驻场」：公司质量不该 0 分，总分也不该减半
+    fn negated_outsourcing_jd_scores_normally() {
+        // JD 主动声明「非外包、非驻场」：公司质量 10 分，不加不减
         let jd = format!(
             "本岗位非外包、非驻场，自有产品研发。{}",
             DEFAULT_PROFILE.core_skills.join(" ")
@@ -832,7 +787,7 @@ mod tests {
             &DEFAULT_PROFILE,
         );
         assert!(!r.reason.contains("总分减半"), "{}", r.reason);
-        // 30 技能 + 20 薪资 + 15 经验 + 15 方向 + 10 公司 = 90
+        // 40 技能 + 10 薪资 + 15 经验 + 15 方向 + 10 公司 = 90
         assert_eq!(r.score, 90);
         assert!(r.passes(MIN_SCORE_DEFAULT));
     }

@@ -65,10 +65,10 @@ pub const KEY_SCRAPE_EXCLUDE_KEYWORDS: &str = "scrape_defaults.exclude_keywords"
 pub const KEY_SCRAPE_HR_ACTIVE: &str = "scrape_defaults.hr_active";
 /// 工作制（周末 / 大小周）
 pub const KEY_SCRAPE_WORK_WEEKEND: &str = "scrape_defaults.work_weekend";
-/// JD 里的岗位要求（学历）
-pub const KEY_SCRAPE_JD_DEGREE: &str = "scrape_defaults.jd_degree";
 /// 成立年限
 pub const KEY_SCRAPE_MIN_YEARS: &str = "scrape_defaults.min_years";
+/// 岗位名显示短期项目/项目制是否排除（`on`/`off`）
+pub const KEY_SCRAPE_SHORT_TERM: &str = "scrape_defaults.short_term_title";
 
 /// 用户可写的键白名单。
 ///
@@ -103,8 +103,8 @@ pub const WRITABLE_KEYS: &[&str] = &[
     KEY_SCRAPE_EXCLUDE_KEYWORDS,
     KEY_SCRAPE_HR_ACTIVE,
     KEY_SCRAPE_WORK_WEEKEND,
-    KEY_SCRAPE_JD_DEGREE,
     KEY_SCRAPE_MIN_YEARS,
+    KEY_SCRAPE_SHORT_TERM,
 ];
 
 /// 分值门槛的键名。**刻意不在 [`WRITABLE_KEYS`] 里**：它由 `set_limit` 统一写，
@@ -229,10 +229,10 @@ pub struct ScrapeDefaultsArgs {
     pub hr_active: Option<serde_json::Value>,
     #[serde(default, alias = "workWeekend")]
     pub work_weekend: Option<serde_json::Value>,
-    #[serde(default, alias = "jdDegree")]
-    pub jd_degree: Option<serde_json::Value>,
     #[serde(default, alias = "minYears")]
     pub min_years: Option<serde_json::Value>,
+    #[serde(default, alias = "shortTermTitle")]
+    pub short_term_title: Option<serde_json::Value>,
 }
 
 /// 抓取默认条件的键白名单（相对名，不含前缀）。
@@ -253,8 +253,8 @@ pub const SCRAPE_DEFAULT_KEYS: &[&str] = &[
     "exclude_keywords",
     "hr_active",
     "work_weekend",
-    "jd_degree",
     "min_years",
+    "short_term_title",
 ];
 
 impl ScrapeDefaultsArgs {
@@ -275,8 +275,8 @@ impl ScrapeDefaultsArgs {
             ("exclude_keywords", &self.exclude_keywords),
             ("hr_active", &self.hr_active),
             ("work_weekend", &self.work_weekend),
-            ("jd_degree", &self.jd_degree),
             ("min_years", &self.min_years),
+            ("short_term_title", &self.short_term_title),
         ];
         pairs
             .into_iter()

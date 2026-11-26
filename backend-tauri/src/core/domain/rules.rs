@@ -10,35 +10,18 @@ use crate::core::domain::profile::Profile;
 use regex::Regex;
 use std::sync::OnceLock;
 
-/// 命中即大幅扣分/判负信号（`scorer.py:41`）。
-pub const OUTSOURCE_WORDS: &[&str] = &[
-    "外包",
-    "驻场",
-    "外派",
-    "派遣",
-    "人力外包",
-    "劳务派遣",
-    "驻场开发",
-    "驻场工程师",
-    "外派至",
-    "派遣员工",
-    "外包编制",
-    "外包岗",
-    "驻场岗",
-];
-
 /// 公司名/岗位名里出现就排除的默认词表（`scorer.py:46`）。
 pub const VETO_NAME_WORDS: &[&str] = &[
     "外包", "驻场", "外派", "派遣", "人力", "兼职", "日薪", "跨境", "外贸", "海外仓",
     "亚马逊", "独立站", "Shopify", "电商分销", "私域结算", "金融", "证券", "基金", "银行",
-    "支付清结算", "风控", "期权", "币圈", "区块链", "Web3", "硕士", "博士", "985", "211",
+    "支付清结算", "风控", "期权", "币圈", "区块链", "Web3",
     "销售", "产品经理", "总监",
 ];
 
 /// 用户在界面上可调的排除规则。值为空 = 该项不排除（`scorer.py:61 ExcludeRules`）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExcludeRules {
-    /// 公司/岗位名命中即排除
+    /// 公司/岗位名/JD 正文命中即排除（用户填的词表整体替换内置词表）
     pub name_words: Vec<String>,
     /// 岗位薪资下限低于此值(K) → 排除
     pub exclude_salary_min: Option<u32>,
@@ -47,8 +30,6 @@ pub struct ExcludeRules {
     /// 用户勾选的薪资区间（K，闭区间）：岗位薪资与**任何一档都不相交**即排除。
     /// 空表 = 未勾选，不限制。
     pub salary_ranges: Vec<(u32, u32)>,
-    /// JD 硬卡这些学历 → 排除，如 ["硕士","博士"]
-    pub exclude_degree: Vec<String>,
     /// 公司成立年限小于此年数 → 排除
     pub exclude_founded_below: Option<u32>,
     /// JD 要求经验超过此年限 → 排除
@@ -58,6 +39,8 @@ pub struct ExcludeRules {
     /// 休息制度档位字面量（`any`/`double`/`no_bigweek`/`single`，SPEC-004）；
     /// `None`/`"any"`/未知字面量 = 不限制
     pub weekend: Option<String>,
+    /// 岗位名显示短期项目/项目制即排除（默认开，可在筛选面板关掉）
+    pub exclude_short_term_title: bool,
 }
 
 impl Default for ExcludeRules {
@@ -67,11 +50,11 @@ impl Default for ExcludeRules {
             exclude_salary_min: None,
             exclude_salary_max: None,
             salary_ranges: Vec::new(),
-            exclude_degree: Vec::new(),
             exclude_founded_below: None,
             exclude_resume_max_years: None,
             exclude_hr_active_days: None,
             weekend: None,
+            exclude_short_term_title: true,
         }
     }
 }
@@ -183,12 +166,7 @@ fn short_term_re() -> &'static Regex {
     })
 }
 
-fn degree_985_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"(985|211)\s*(院校|高校|大学)?\s*(毕业|及以上|统招|全日制)").unwrap()
-    })
-}
+
 
 fn outsource_neg_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
@@ -267,23 +245,10 @@ fn strip_treatment_clauses(text: &str) -> String {
         .collect()
 }
 
-/// 外包/短期信号判定（`score_company` 与总分减半共用）。
-///
-/// 先剔除否定语境（「非外包」「非驻场」），与 [`reject_labeled`] 的 `outsource`
-/// 分支同一口径。旧实现在这里不剔除，导致 JD 主动声明「非外包」的岗位公司质量
-/// 0 分 + 总分减半必被淘汰（用户 m00070 决定修掉）。
-pub fn outsource_hit(company: Option<&str>, title: Option<&str>, jd: Option<&str>) -> bool {
-    let text = format!(
-        "{} {} {}",
-        company.unwrap_or(""),
-        title.unwrap_or(""),
-        jd.unwrap_or("")
-    );
-    let cleaned = outsource_neg_re().replace_all(&text, "${1}__NEG__").to_string();
-    if OUTSOURCE_WORDS.iter().any(|w| cleaned.contains(w)) {
-        return true;
-    }
-    is_short_term(&format!("{} {}", title.unwrap_or(""), jd.unwrap_or("")))
+/// 否定语境剔除（「非外包」「不是驻场」）：关键词扫 JD 前先抹掉这些短语，
+/// 免得 JD 主动声明「非外包」反而被自己的排除词命中。
+fn strip_negated_words(text: &str) -> String {
+    outsource_neg_re().replace_all(text, "${1}__NEG__").to_string()
 }
 
 /// 硬性排除：返回排除原因，`None` 表示通过。
@@ -316,58 +281,33 @@ pub fn reject_labeled(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<(&'sta
         }
     }
 
-    // 2. 公司/岗位名命中排除词
-    let name_text = format!("{} {}", job.company.unwrap_or(""), job.title.unwrap_or(""));
+    // 2. 公司名/岗位名/JD 命中排除词（关键词是用户唯一可控的否决口径）
+    let name_text = strip_negated_words(&format!(
+        "{} {} {}",
+        job.company.unwrap_or(""),
+        job.title.unwrap_or(""),
+        job.jd.unwrap_or("")
+    ));
     for w in &rules.name_words {
         if !w.is_empty() && name_text.contains(w.as_str()) {
             return Some((
                 "name_word",
-                format!("公司/岗位名命中排除词「{w}」"),
+                format!("公司/岗位名/JD 命中排除词「{w}」"),
             ));
         }
     }
 
-    // 3. 岗位名显示短期
-    if let Some(title) = job.title {
-        if is_short_term(title) {
-            return Some(("short_term", "岗位名显示短期项目/项目制".into()));
+    // 3. 岗位名显示短期（可关，默认开）
+    if rules.exclude_short_term_title {
+        if let Some(title) = job.title {
+            if is_short_term(title) {
+                return Some(("short_term", "岗位名显示短期项目/项目制".into()));
+            }
         }
     }
 
     if let Some(jd) = job.jd {
-        // 4. 外包类（先剔除否定语境）
-        let cleaned = outsource_neg_re().replace_all(jd, "${1}__NEG__").to_string();
-        for w in OUTSOURCE_WORDS {
-            if cleaned.contains(w) {
-                return Some((
-                    "outsource",
-                    format!("JD 命中外包/驻场类表述「{w}」"),
-                ));
-            }
-        }
-
-        // 5. 学历硬卡（只有勾选了才判断）
-        for lv in &rules.exclude_degree {
-            if lv.is_empty() {
-                continue;
-            }
-            let pattern = format!(
-                r"{}\s*(研究生)?\s*(及以上|以上|学历)",
-                regex::escape(lv)
-            );
-            if let Ok(re) = Regex::new(&pattern) {
-                if re.is_match(jd) {
-                    return Some(("degree", format!("JD 要求{lv}学历")));
-                }
-            }
-        }
-
-        // 6. 985/211
-        if degree_985_re().is_match(jd) {
-            return Some(("degree_985", "JD 硬卡 985/211".into()));
-        }
-
-        // 7. 经验门槛（默认不限制）
+        // 4. 经验门槛（默认不限制）
         if let Some(max_years) = rules.exclude_resume_max_years {
             if let Some(c) = exp_required_re().captures(jd) {
                 if let Some(need) = c.get(1).and_then(|m| m.as_str().parse::<u32>().ok()) {
@@ -382,7 +322,7 @@ pub fn reject_labeled(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<(&'sta
         }
     }
 
-    // 8. HR 活跃度：无法判断的按"不活跃"处理
+    // 5. HR 活跃度：无法判断的按"不活跃"处理
     if let Some(limit) = rules.exclude_hr_active_days {
         match hr_active_days(job.hr_active_status) {
             None => {
@@ -405,7 +345,7 @@ pub fn reject_labeled(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<(&'sta
         }
     }
 
-    // 9. 公司成立年限
+    // 6. 公司成立年限
     if let Some(floor) = rules.exclude_founded_below {
         if let Some(years) = job.founded_years {
             if years < floor {
@@ -417,7 +357,7 @@ pub fn reject_labeled(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<(&'sta
         }
     }
 
-    // 10. 薪资上下限
+    // 7. 薪资上下限
     if rules.exclude_salary_min.is_some() || rules.exclude_salary_max.is_some() {
         if let Some((low, high)) = parse_salary(job.salary) {
             if let Some(min) = rules.exclude_salary_min {
@@ -439,7 +379,7 @@ pub fn reject_labeled(job: &JobInput<'_>, rules: &ExcludeRules) -> Option<(&'sta
         }
     }
 
-    // 11. 勾选薪资区间：Boss 服务端只按官方粗档过滤（20-30K 会落到 20-50K 档），
+    // 8. 勾选薪资区间：Boss 服务端只按官方粗档过滤（20-30K 会落到 20-50K 档），
     //     这里按岗位卡片上的真实薪资做精确求交，不相交即排除（同旧版口径）。
     if !rules.salary_ranges.is_empty() {
         if let Some((low, high)) = parse_salary(job.salary) {
@@ -495,7 +435,6 @@ mod tests {
     fn default_rules_have_veto_words() {
         let r = ExcludeRules::default();
         assert_eq!(r.name_words.len(), VETO_NAME_WORDS.len());
-        assert!(r.exclude_degree.is_empty());
         assert_eq!(r.exclude_hr_active_days, None);
     }
 
@@ -522,25 +461,42 @@ mod tests {
     }
 
     #[test]
-    fn rejects_outsourcing_in_jd() {
+    fn rejects_outsourcing_by_keyword_in_jd() {
+        // 外包不再有内置规则：完全由「排除关键字」控制，且关键词现在也扫 JD
         let r = ExcludeRules::default();
         let j = job("某科技", "Java 工程师", "本岗位为外包岗位，需驻场");
-        assert!(reject(&j, &r).unwrap().contains("外包/驻场类表述"));
+        let (rule, reason) = reject_labeled(&j, &r).expect("JD 里的外包必须被排除");
+        assert_eq!(rule, "name_word");
+        assert!(reason.contains("外包"), "实际：{reason}");
+    }
+
+    #[test]
+    fn keywords_scan_jd_too() {
+        let r = ExcludeRules::from_keywords("军工, 涉密");
+        let j = job("某科技", "Java 工程师", "本岗位涉密，需政审");
+        let (rule, reason) = reject_labeled(&j, &r).expect("自定义关键词应扫 JD");
+        assert_eq!(rule, "name_word");
+        assert!(reason.contains("涉密"), "实际：{reason}");
     }
 
     #[test]
     fn negation_context_is_not_outsourcing() {
-        // 「非外包」不应被误判
+        // 「非外包」不应被自己的排除词误杀
         let r = ExcludeRules::default();
         let j = job("某科技", "Java 工程师", "本岗位不是外包，无需驻场");
         assert_eq!(reject(&j, &r), None);
     }
 
     #[test]
-    fn rejects_985_requirement() {
-        let r = ExcludeRules::default();
-        let j = job("某科技", "Java 工程师", "要求 985 院校毕业");
-        assert!(reject(&j, &r).unwrap().contains("985"));
+    fn short_term_title_can_be_switched_off() {
+        let j = job("某科技", "Java 3个月项目制", "写代码");
+        let on = ExcludeRules::default();
+        assert!(reject(&j, &on).unwrap().contains("短期项目"));
+        let off = ExcludeRules {
+            exclude_short_term_title: false,
+            ..Default::default()
+        };
+        assert_eq!(reject(&j, &off), None);
     }
 
     #[test]
@@ -566,16 +522,6 @@ mod tests {
         r.salary_ranges = Vec::new();
         j.salary = Some("1-2K");
         assert_eq!(reject_labeled(&j, &r), None, "未勾选区间不限制");
-    }
-
-    #[test]
-    fn degree_check_only_when_configured() {
-        let mut r = ExcludeRules::default();
-        let j = job("某科技", "Java 工程师", "要求硕士及以上学历");
-        // 未配置 exclude_degree 时不因学历排除
-        assert_eq!(reject(&j, &r), None);
-        r.exclude_degree = vec!["硕士".into()];
-        assert!(reject(&j, &r).unwrap().contains("硕士"));
     }
 
     #[test]
@@ -844,19 +790,6 @@ mod tests {
         for jd in ["非单休，双休", "非无休，双休", "无大小周，双休"] {
             assert_weekend_tiers(jd, true, true, true);
         }
-    }
-
-    #[test]
-    fn outsource_hit_detects_and_ignores_negation() {
-        assert!(outsource_hit(Some("某科技"), Some("Java"), Some("外包岗位")));
-        assert!(outsource_hit(None, Some("3个月短期项目制"), None));
-        // 否定语境与 `reject_labeled` 的 outsource 分支同口径
-        assert!(!outsource_hit(None, None, Some("非外包")));
-        assert!(!outsource_hit(
-            None,
-            None,
-            Some("本岗位非外包、非驻场，自有产品")
-        ));
     }
 
     #[test]

@@ -23,7 +23,7 @@ pub enum IngestVerdict {
     Accepted(IngestDetail),
     /// 被硬规则否决。
     ///
-    /// `rule` 是**稳定的规则标识**（`weekend` / `outsource` / `prescan:salary_floor`
+    /// `rule` 是**稳定的规则标识**（`weekend` / `name_word` / `prescan:salary_floor`
     /// / `sensitive:stored` …），不是给用户看的文案：决策日志靠它回答「到底被
     /// 哪条规则否掉」，文案改了也不该让统计分档漂移。
     Rejected { rule: String, reason: String },
@@ -131,7 +131,7 @@ pub fn to_job(s: &ScrapedJob) -> Job {
 /// 顺序不可调换（对齐 `backend/app/scorer.py:612 Scorer.reject` 的调用口径）：
 /// 1. 文本字段清洗（全空白视为没抓到）
 /// 2. 必要字段校验（`job_id` 为空则根本无法去重）
-/// 3. 硬规则否决（[`reject`]，十条规则顺序固定，否决优先于分数）
+/// 3. 硬规则否决（[`reject`]，八条规则顺序固定，否决优先于分数）
 /// 4. 规则打分 → 门槛判定
 pub fn prepare(s: &ScrapedJob, profile: &Profile, cfg: &IngestConfig) -> IngestVerdict {
     let mut job = to_job(s);
@@ -260,7 +260,7 @@ pub struct DecisionNote {
     pub company_job: String,
     /// `accept` / `reject` / `skip`
     pub decision: &'static str,
-    /// 稳定的规则标识（`weekend` / `outsource` / `sensitive` / …），用于回答
+    /// 稳定的规则标识（`weekend` / `name_word` / `sensitive` / …），用于回答
     /// 「到底被哪条规则否掉」。**不是**从 `reason` 文本反推的——那会在改一次
     /// 文案时静默失配。不入库（`DecisionRecord` 字段零变化），只进 `reason`。
     pub rule: &'static str,
@@ -348,9 +348,6 @@ fn rule_ident(rule: &str) -> &'static str {
         "weekend",
         "name_word",
         "short_term",
-        "outsource",
-        "degree",
-        "degree_985",
         "experience",
         "hr_active_unknown",
         "hr_inactive",

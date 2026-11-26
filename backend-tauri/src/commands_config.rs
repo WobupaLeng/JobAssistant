@@ -451,7 +451,6 @@ mod tests {
             "financeStage": ["C轮"],
             "hrActive": "今日活跃",
             "workWeekend": "双休",
-            "jdDegree": ["本科"],
             "minYears": 3,
             "excludeKeywords": "外包,培训"
         }));
@@ -461,7 +460,6 @@ mod tests {
         assert_eq!(camel.finance_stage, Some(serde_json::json!(["C轮"])));
         assert_eq!(camel.hr_active, Some(serde_json::json!("今日活跃")));
         assert_eq!(camel.work_weekend, Some(serde_json::json!("双休")));
-        assert_eq!(camel.jd_degree, Some(serde_json::json!(["本科"])));
         assert_eq!(camel.min_years, Some(serde_json::json!(3)));
         assert_eq!(camel.exclude_keywords, Some(serde_json::json!("外包,培训")));
 
@@ -473,7 +471,6 @@ mod tests {
             "finance_stage": ["A轮"],
             "hr_active": "3日内活跃",
             "work_weekend": "大小周",
-            "jd_degree": ["硕士"],
             "min_years": 1
         }));
         assert_eq!(snake.max_pages, Some(serde_json::json!(5)));
@@ -573,7 +570,6 @@ mod tests {
                 "excludeKeywords": "外包",
                 "hrActive": "今日活跃",
                 "workWeekend": "双休",
-                "jdDegree": ["本科"],
                 "minYears": 2
             })),
         )
@@ -595,7 +591,6 @@ mod tests {
                 "exclude_keywords": "外包",
                 "hr_active": "今日活跃",
                 "work_weekend": "双休",
-                "jd_degree": ["本科"],
                 "min_years": 2
             })
         );

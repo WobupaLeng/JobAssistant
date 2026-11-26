@@ -178,7 +178,6 @@ fn spec_replays_user_filters_after_crash_and_keeps_rules_in_core() {
         "exclude_keywords": "外包,培训",
         "hr_active": "3",
         "work_weekend": "double",
-        "jd_degree": ["硕士"],
         "min_years": "5"
     });
     let mut s = spec();
@@ -196,7 +195,7 @@ fn spec_replays_user_filters_after_crash_and_keeps_rules_in_core() {
     assert_eq!(v["job_type"], "1901");
     assert_eq!(v["max_pages"], 3);
     // 排除规则不下放 sidecar：协议里不得出现任何规则键
-    for key in ["exclude_keywords", "hr_active", "work_weekend", "jd_degree", "min_years", "rules"] {
+    for key in ["exclude_keywords", "hr_active", "work_weekend", "min_years", "rules"] {
         assert!(v.get(key).is_none(), "规则键 {key} 不得进协议");
     }
     assert_eq!(s.rules.name_words, vec!["外包".to_string(), "培训".to_string()]);
@@ -270,13 +269,16 @@ fn sink_writes_decisions_into_the_store() {
         platform: "boss".into(),
         company_job: "某公司/Java 后端".into(),
         decision: "reject",
-        rule: "outsource",
-        reason: "exclude：外包".into(),
+        rule: "name_word",
+        reason: "name_word：公司/岗位名/JD 命中排除词「外包」".into(),
         new_score: None,
     });
     let rows = store.list_decisions(0, 0).expect("读决策日志");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].decision.as_deref(), Some("reject"));
     assert_eq!(rows[0].company_job.as_deref(), Some("某公司/Java 后端"));
-    assert_eq!(rows[0].reason.as_deref(), Some("exclude：外包"));
+    assert_eq!(
+        rows[0].reason.as_deref(),
+        Some("name_word：公司/岗位名/JD 命中排除词「外包」")
+    );
 }

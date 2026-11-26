@@ -1185,9 +1185,9 @@ mod tests {
         let n = &notes[0];
         assert_eq!(n.decision, "reject");
         assert_eq!(n.company_job, "某某信息科技有限公司/Java 后端开发");
-        // 规则名必须是**具体那条**（JD 命中外包），不是笼统的 "exclude"
-        assert_eq!(n.rule, "outsource", "reason 必须带具体规则名：{}", n.reason);
-        assert!(n.reason.starts_with("outsource："), "{}", n.reason);
+        // 规则名必须是**具体那条**（JD 命中外包关键词），不是笼统的 "exclude"
+        assert_eq!(n.rule, "name_word", "reason 必须带具体规则名：{}", n.reason);
+        assert!(n.reason.starts_with("name_word："), "{}", n.reason);
         assert_eq!(notes[0].new_score, None, "被否决的岗位没有入库分");
     }
 

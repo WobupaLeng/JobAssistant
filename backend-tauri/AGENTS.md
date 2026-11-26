@@ -102,7 +102,7 @@ app/src-tauri/
 | `sidecar/process/codec.rs` | `protocol_line` / `parse_line` / `route_reply` / stderr 尾 |
 | `sidecar/process/tests.rs` | 协议线形状、行解析、回执路由 |
 | `sidecar/session.rs` | `SidecarSession`：消费线程、`ScrapeProgress`、`request()` |
-| `sidecar/ingest.rs` | `ScrapedJob → Job → 十条规则 → 打分 → 门槛` 纯函数 |
+| `sidecar/ingest.rs` | `ScrapedJob → Job → 八条规则 → 打分 → 门槛` 纯函数 |
 
 ---
 
@@ -151,7 +151,7 @@ app/src-tauri/
   - 只查类型、不跑用例用 `cargo check --tests`：`cargo check` 不展开 `#[cfg(test)]` 模块，测试代码里的编译错误它一条都看不见。
   - ⚠️ **新建独占 `CARGO_TARGET_DIR` 后，`cargo check` 与 `cargo test` 必须用同一个目录**。两个目录并行跑会抢同一套 build-dir/proc-macro 编译，冒出来的 `error: cannot determine resolution for the macro ::core::concat` / `could not compile windows-sys (lib)` 是竞态，不是代码问题（实测踩过）。遇到这类报错先看是不是两个 cargo 进程同时活着，再换一个**全新的单线程**目录重跑。
 - **锚点**（改这些必须看对应测试）：
-  - `domain/scoring.rs` 五维权重与初筛线；`domain/rules.rs` 十条排除规则的**顺序**；`domain/parse.rs` 薪资 PUA 解码；`domain/migration.rs` 幂等迁移；
+  - `domain/scoring.rs` 五维权重与初筛线；`domain/rules.rs` 八条排除规则的**顺序**；`domain/parse.rs` 薪资 PUA 解码；`domain/migration.rs` 幂等迁移；
   - `domain/rescore.rs` **排序键必须是 `job_id` 升序**——按 `match_score` 排序会被自己的写回推翻分页边界，同一岗位算两次、别的被跳过，**且没有任何报错**；
   - `domain/schema.rs` 列数锚点，与 `infra/sqlite/row.rs` 的 `SELECT_COLUMNS` 一一对应；
   - `sidecar/protocol.rs` `ScrapedJob` 字段数与各帧形状；`infra/sqlite/tests.rs` 读写与 NULL 排序。
